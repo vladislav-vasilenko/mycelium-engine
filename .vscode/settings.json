@@ -1,0 +1,63 @@
+{
+    // Rust
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.check.allTargets": true,
+    "rust-analyzer.cargo.targetDir": "target/rust-analyzer",
+    "rust-analyzer.runnables.extraEnv": {
+        "RUST_BACKTRACE": "1"
+    },
+    // Кнопка ▶ Debug над main и тестами запускает CodeLLDB (встроенная поддержка Rust).
+    // Чтобы вернуть LLDB DAP из Xcode, поставь "llvm-vs-code-extensions.lldb-dap":
+    // его настройки ниже уже заданы.
+    "rust-analyzer.debug.engine": "vadimcn.vscode-lldb",
+    "rust-analyzer.debug.engineSettings": {
+        "lldb": {
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": ["rust"]
+        },
+        "lldb-dap": {
+            "initCommands": [
+                "command script import \"/Users/vladmac/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"/Users/vladmac/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "RUST_BACKTRACE": "1"
+            }
+        }
+    },
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    },
+
+    // Отладчик LLDB DAP из Xcode
+    "lldb-dap.executable-path": "/Applications/Xcode.app/Contents/Developer/usr/bin/lldb-dap",
+
+    // CodeLLDB: явный путь к cargo для конфигураций с ключом "cargo"
+    // (VS Code, запущенный из Dock, может не видеть ~/.cargo/bin в PATH)
+    "lldb.cargo": "/Users/vladmac/.cargo/bin/cargo",
+
+    // MSL: common.h подключается в .metal, подсвечиваем его как Metal
+    "files.associations": {
+        "*.metal": "metal",
+        "shaders/metal/*.h": "metal"
+    },
+
+    // Не индексировать сборку и GPU capture
+    "files.watcherExclude": {
+        "**/target/**": true,
+        "**/captures/**": true
+    },
+    "search.exclude": {
+        "**/target": true,
+        "**/captures": true,
+        "Cargo.lock": true
+    },
+    "files.exclude": {
+        "**/.DS_Store": true
+    }
+}

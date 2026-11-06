@@ -316,6 +316,11 @@ impl App {
         proj: Mat4,
     ) {
         let mut t = self.selftest.take().unwrap();
+        if t.step == TestStep::Done {
+            // winit может доставить ещё кадр после exit(): итог уже напечатан.
+            self.selftest = Some(t);
+            return;
+        }
         let r = self.renderer.as_mut().unwrap();
         t.frames_in_step += 1;
         let total_frames = r.frame_index();

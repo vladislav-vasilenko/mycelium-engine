@@ -1,0 +1,103 @@
+{
+    // Задачи сборки и проверки. Запуск: Terminal → Run Task, сборка по умолчанию — ⇧⌘B.
+    "version": "2.0.0",
+    "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+            "PATH": "${userHome}/.cargo/bin:${env:PATH}"
+        }
+    },
+    "tasks": [
+        {
+            "label": "cargo build",
+            "type": "shell",
+            "command": "cargo build",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$rustc"],
+            "presentation": { "reveal": "silent", "clear": true }
+        },
+        {
+            "label": "cargo build --release",
+            "type": "shell",
+            "command": "cargo build --release",
+            "group": "build",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "cargo test",
+            "type": "shell",
+            "command": "cargo test",
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "build tests (debug link)",
+            "detail": "Собирает тесты и создаёт ссылку target/debug/echo-tests для отладчика",
+            "type": "shell",
+            "command": "${workspaceFolder}/.vscode/link-test-binary.sh",
+            "problemMatcher": ["$rustc"],
+            "presentation": { "reveal": "silent", "clear": true }
+        },
+        {
+            "label": "cargo clippy",
+            "type": "shell",
+            "command": "cargo clippy --all-targets",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "cargo fmt",
+            "type": "shell",
+            "command": "cargo fmt",
+            "problemMatcher": []
+        },
+        {
+            "label": "run",
+            "detail": "Окно с камерой: клик — мышь, WASD/E/Q, F5 — MSL, F9 — readback, F12 — capture",
+            "type": "shell",
+            "command": "cargo run",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "selftest (Metal validation)",
+            "detail": "Самопроверка этапа 01 под API и Shader Validation, код выхода 0 — успех",
+            "type": "shell",
+            "command": "cargo build && ./target/debug/echo --selftest",
+            "options": {
+                "env": {
+                    "PATH": "${userHome}/.cargo/bin:${env:PATH}",
+                    "MTL_DEBUG_LAYER": "1",
+                    "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+                    "MTL_SHADER_VALIDATION": "1"
+                }
+            },
+            "group": "test",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "GPU capture frame 6",
+            "detail": "Пишет captures/frame-6.gputrace, открыть в Xcode",
+            "type": "shell",
+            "command": "cargo build && rm -rf captures/frame-6.gputrace && ./target/debug/echo --selftest --capture-frame 6 && open -R captures/frame-6.gputrace",
+            "options": {
+                "env": {
+                    "PATH": "${userHome}/.cargo/bin:${env:PATH}",
+                    "MTL_CAPTURE_ENABLED": "1"
+                }
+            },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "check all",
+            "detail": "fmt --check, clippy, test, selftest",
+            "dependsOrder": "sequence",
+            "dependsOn": ["cargo fmt --check", "cargo clippy", "cargo test", "selftest (Metal validation)"],
+            "problemMatcher": []
+        },
+        {
+            "label": "cargo fmt --check",
+            "type": "shell",
+            "command": "cargo fmt --check",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "rust-lang.rust-analyzer",
+        "llvm-vs-code-extensions.lldb-dap",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "jakubjirak.metal-language-support"
+    ]
+}

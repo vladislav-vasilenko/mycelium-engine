@@ -1,0 +1,187 @@
+{
+    // Отладка через LLDB DAP (расширение llvm-vs-code-extensions.lldb-dap,
+    // адаптер из Xcode). Rust-форматтеры подключаются из lldb_lookup.py
+    // закреплённого toolchain 1.99.1, поэтому Vec, String, Option и т. п.
+    // показываются как значения, а не как сырые структуры. Исходники std
+    // открываются через target.source-map на rust-src. При смене toolchain
+    // обнови путь и хеш: `rustc -vV | grep commit-hash`.
+    //
+    // Точки останова ставь кликом по номеру строки. По имени функции LLDB
+    // ищет в формате v0: `<echo::sim::Sim>::step`.
+    //
+    // Конфигурации с типом "lldb" требуют расширения CodeLLDB (vadimcn.vscode-lldb)
+    // и собирают проект сами через ключ "cargo".
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: echo",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/echo",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+                "RUST_BACKTRACE": "1"
+            },
+            "initCommands": [
+                "command script import \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "preLaunchTask": "cargo build",
+            "console": "internalConsole"
+        },
+        {
+            "name": "Debug: echo --selftest (validation)",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/echo",
+            "args": ["--selftest"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+                "MTL_SHADER_VALIDATION": "1",
+                "RUST_BACKTRACE": "1"
+            },
+            "initCommands": [
+                "command script import \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "preLaunchTask": "cargo build",
+            "console": "internalConsole"
+        },
+        {
+            "name": "Debug: echo --capture-frame 6",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/echo",
+            "args": ["--selftest", "--capture-frame", "6"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MTL_CAPTURE_ENABLED": "1",
+                "RUST_BACKTRACE": "1"
+            },
+            "initCommands": [
+                "command script import \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "preLaunchTask": "cargo build",
+            "console": "internalConsole"
+        },
+        {
+            "name": "Debug: unit tests",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/echo-tests",
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" },
+            "initCommands": [
+                "command script import \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "preLaunchTask": "build tests (debug link)",
+            "console": "internalConsole"
+        },
+        {
+            "name": "Debug: one unit test…",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/echo-tests",
+            "args": ["${input:testFilter}", "--exact", "--nocapture", "--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" },
+            "initCommands": [
+                "command script import \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/etc/lldb_lookup.py\"",
+                "settings set target.source-map /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67 \"${userHome}/.rustup/toolchains/1.99.1-aarch64-apple-darwin/lib/rustlib/src/rust\""
+            ],
+            "preLaunchTask": "build tests (debug link)",
+            "console": "internalConsole"
+        },
+        {
+            "name": "CodeLLDB: echo",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--bin=echo"],
+                "filter": { "name": "echo", "kind": "bin" }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "name": "CodeLLDB: echo --selftest (validation)",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["build", "--bin=echo"],
+                "filter": { "name": "echo", "kind": "bin" }
+            },
+            "args": ["--selftest"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MTL_DEBUG_LAYER": "1",
+                "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
+                "MTL_SHADER_VALIDATION": "1",
+                "RUST_BACKTRACE": "1"
+            },
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "name": "CodeLLDB: unit tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--bin=echo"],
+                "filter": { "name": "echo", "kind": "bin" }
+            },
+            "args": ["--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" },
+            "sourceLanguages": ["rust"]
+        },
+        {
+            "name": "CodeLLDB: one unit test…",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--no-run", "--bin=echo"],
+                "filter": { "name": "echo", "kind": "bin" }
+            },
+            "args": ["${input:testFilter}", "--exact", "--nocapture", "--test-threads=1"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "1" },
+            "sourceLanguages": ["rust"]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testFilter",
+            "type": "pickString",
+            "description": "Тест для отладки",
+            "options": [
+                "frame_graph::tests::compute_write_then_fragment_read_is_raw",
+                "frame_graph::tests::next_frame_write_waits_for_previous_reads",
+                "frame_graph::tests::write_after_write_without_reads_is_waw",
+                "frame_graph::tests::read_before_write_is_rejected_unless_imported",
+                "frame_graph::tests::wrong_stage_for_pass_kind_is_rejected",
+                "layout::tests::cpu_layout_matches_msl_rules",
+                "reference::tests::closer_box_wins_in_reversed_z",
+                "reference::tests::pattern_reference_is_in_range",
+                "scene::tests::cube_triangles_face_outward",
+                "sim::tests::same_ticks_same_state_at_30_60_120_fps",
+                "sim::tests::catchup_is_limited_after_pause",
+                "sim::tests::yaw_zero_looks_down_negative_z",
+                "sim::tests::reversed_z_maps_near_to_one_and_far_to_zero"
+            ]
+        }
+    ]
+}

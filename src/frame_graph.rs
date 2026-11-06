@@ -3,8 +3,10 @@
 //! Каждый проход объявляет чтения и записи с указанием стадии. Планировщик
 //! идёт по проходам в порядке добавления и учитывает зависимости на весь ресурс:
 //! RAW (чтение после записи), WAR (запись после чтения) и WAW (запись после записи).
-//! Кадры идут друг за другом в одной очереди, поэтому список анализируется
-//! циклически: первая запись кадра N+1 ждёт чтений кадра N.
+//! Кадры идут друг за другом в одной очереди, поэтому учитываются и доступы
+//! предыдущего кадра: первая запись кадра N+1 ждёт чтений кадра N. Если состав
+//! проходов меняется между кадрами (например, readback только по запросу),
+//! план строится по фактическому списку предыдущего кадра (`plan_after`).
 //! Бэкенд превращает результат в барьеры своего API.
 
 use std::collections::HashMap;
@@ -124,8 +126,21 @@ struct Track {
     reads_since_write: Stages,
 }
 
-/// Строит план. `imported` — ресурсы с содержимым из-за пределов кадра.
+/// Строит план для кадра, который повторяет тот же список проходов.
+/// `imported` — ресурсы с содержимым из-за пределов кадра.
+#[cfg(test)]
 pub fn plan(passes: Vec<PassDecl>, imported: &[ResourceId]) -> Result<FramePlan, GraphError> {
+    let previous = passes.clone();
+    plan_after(&previous, passes, imported)
+}
+
+/// Строит план кадра, перед которым в той же очереди выполнен кадр
+/// со списком `previous`. Барьеры учитывают доступы обоих кадров.
+pub fn plan_after(
+    previous: &[PassDecl],
+    passes: Vec<PassDecl>,
+    imported: &[ResourceId],
+) -> Result<FramePlan, GraphError> {
     // Валидация: стадии и чтение до записи.
     let mut written: Vec<ResourceId> = imported.to_vec();
     for p in &passes {
@@ -151,12 +166,13 @@ pub fn plan(passes: Vec<PassDecl>, imported: &[ResourceId]) -> Result<FramePlan,
         }
     }
 
-    // Два прохода по списку: первый собирает состояние предыдущего кадра,
-    // второй выдаёт барьеры для текущего.
+    // Первый круг — проходы предыдущего кадра, только состояние ресурсов.
+    // Второй — проходы текущего кадра, барьеры.
     let mut tracks: HashMap<ResourceId, Track> = HashMap::new();
     let mut barriers = vec![Barrier::default(); passes.len()];
     for round in 0..2 {
-        for (i, p) in passes.iter().enumerate() {
+        let list: &[PassDecl] = if round == 0 { previous } else { &passes };
+        for (i, p) in list.iter().enumerate() {
             let mut b = Barrier::default();
             for (r, stage) in &p.reads {
                 let t = tracks.entry(*r).or_default();
@@ -244,6 +260,41 @@ mod tests {
         assert_eq!(b.hazards, vec![(PATTERN, Hazard::War)]);
         assert_eq!(b.after, Stages::FRAGMENT);
         assert_eq!(b.before, Stages::DISPATCH);
+    }
+
+    /// Кадр с readback (копия pattern и depth в стадии blit), затем обычный кадр.
+    /// Запись pattern и depth следующего кадра должна ждать blit предыдущего.
+    #[test]
+    fn plan_change_waits_for_previous_frame_stages() {
+        const DEPTH: ResourceId = ResourceId(5);
+        let mut with_readback = frame();
+        with_readback[1].writes.push((DEPTH, Stages::FRAGMENT));
+        with_readback.insert(
+            2,
+            PassDecl {
+                name: "readback",
+                kind: PassKind::Compute,
+                reads: vec![(PATTERN, Stages::BLIT), (DEPTH, Stages::BLIT)],
+                writes: vec![(ARGS, Stages::BLIT)],
+            },
+        );
+        let mut normal = frame();
+        normal[1].writes.push((DEPTH, Stages::FRAGMENT));
+
+        let after_readback = plan_after(&with_readback, normal.clone(), &[]).unwrap();
+        assert!(
+            after_readback.barriers[0].after.contains(Stages::BLIT),
+            "pattern ждёт blit"
+        );
+        assert!(
+            after_readback.barriers[1].after.contains(Stages::BLIT),
+            "scene (depth) ждёт blit"
+        );
+
+        // Повтор обычного кадра blit не ждёт.
+        let steady = plan_after(&normal, normal.clone(), &[]).unwrap();
+        assert!(!steady.barriers[0].after.contains(Stages::BLIT));
+        assert!(!steady.barriers[1].after.contains(Stages::BLIT));
     }
 
     #[test]

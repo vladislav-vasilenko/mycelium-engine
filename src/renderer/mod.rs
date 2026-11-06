@@ -204,8 +204,11 @@ pub struct Renderer {
     index_buf: Obj<dyn MTLBuffer>,
     index_count: usize,
     readback_buf: Obj<dyn MTLBuffer>,
-    plan: FramePlan,
-    plan_readback: FramePlan,
+    /// Планы по составу предыдущего и текущего кадра: `plans[prev][cur]`,
+    /// индекс 1 — кадр с readback.
+    plans: [[FramePlan; 2]; 2],
+    /// Был ли readback в последнем отправленном кадре.
+    prev_readback: bool,
     frame_index: u64,
     retired: Vec<Retired>,
     pending_readback: Option<PendingReadback>,
@@ -435,9 +438,16 @@ impl Renderer {
         queue.addResidencySet(&residency);
         queue.addResidencySet(&layer.residencySet());
 
-        let plan = frame_graph::plan(frame_passes(false), &[]).map_err(|e| e.to_string())?;
-        let plan_readback =
-            frame_graph::plan(frame_passes(true), &[]).map_err(|e| e.to_string())?;
+        // Барьеры зависят и от состава предыдущего кадра: после кадра с readback
+        // запись pattern и depth должна дождаться его копий в стадии blit.
+        let build = |prev: bool, cur: bool| {
+            frame_graph::plan_after(&frame_passes(prev), frame_passes(cur), &[])
+                .map_err(|e| e.to_string())
+        };
+        let plans = [
+            [build(false, false)?, build(false, true)?],
+            [build(true, false)?, build(true, true)?],
+        ];
 
         Ok(Renderer {
             info,
@@ -456,8 +466,8 @@ impl Renderer {
             index_buf,
             index_count: indices.len(),
             readback_buf,
-            plan,
-            plan_readback,
+            plans,
+            prev_readback: false,
             frame_index: 0,
             retired: Vec::new(),
             pending_readback: None,
@@ -485,16 +495,18 @@ impl Renderer {
 
     pub fn plan_summary(&self) -> String {
         let mut s = String::new();
-        for (p, b) in self
-            .plan_readback
-            .passes
-            .iter()
-            .zip(&self.plan_readback.barriers)
-        {
-            s += &format!(
-                "  {:<9} after {:?} before {:?} {:?}\n",
-                p.name, b.after, b.before, b.hazards
-            );
+        for (title, prev, cur) in [
+            ("кадр с readback после такого же", 1, 1),
+            ("обычный кадр после кадра с readback", 1, 0),
+        ] {
+            s += &format!("  [{title}]\n");
+            let plan = &self.plans[prev][cur];
+            for (p, b) in plan.passes.iter().zip(&plan.barriers) {
+                s += &format!(
+                    "  {:<9} after {:?} before {:?} {:?}\n",
+                    p.name, b.after, b.before, b.hazards
+                );
+            }
         }
         s
     }
@@ -695,11 +707,7 @@ impl Renderer {
         );
         let upload_addr = slot.upload.gpuAddress();
 
-        let plan = if readback {
-            &self.plan_readback
-        } else {
-            &self.plan
-        };
+        let plan = &self.plans[usize::from(self.prev_readback)][usize::from(readback)];
         let mut pixels = Vec::new();
         for (pass, barrier) in plan.passes.iter().zip(&plan.barriers) {
             let after = to_mtl_stages(barrier.after);
@@ -920,6 +928,7 @@ impl Renderer {
         let event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*self.event);
         self.queue.signalEvent_value(event, self.frame_index);
         self.slots[slot_index].signal_value = self.frame_index;
+        self.prev_readback = readback;
         self.stats.cpu_encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
         self.stats.presented += 1;
 

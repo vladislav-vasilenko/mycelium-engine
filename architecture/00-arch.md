@@ -233,7 +233,8 @@ sequenceDiagram
 | `FramePlan` | `passes` и `barriers` с совпадающими индексами |
 | `GraphError` | `ReadBeforeWrite { pass, resource }`, `StageNotAllowed { pass, stages }`, реализует `Display` |
 | `Track` (приватный) | `last_write`, `reads_since_write` для одного ресурса |
-| `plan(passes, imported) -> Result<FramePlan, GraphError>` | Валидация и вычисление барьеров |
+| `plan_after(previous, passes, imported) -> Result<FramePlan, GraphError>` | Валидация и барьеры кадра `passes`, перед которым в очереди выполнен кадр `previous` |
+| `plan(passes, imported)` (только тесты) | `plan_after` для кадра, повторяющего тот же список |
 
 ### 4.6. `src/renderer/mod.rs` — бэкенд Metal 4
 
@@ -287,7 +288,8 @@ sequenceDiagram
 | `vertex_buf`, `index_buf` | `MTLBuffer` | Куб в `StorageModeShared` |
 | `index_count` | `usize` | 36 |
 | `readback_buf` | `MTLBuffer` | Общий буфер readback |
-| `plan`, `plan_readback` | `FramePlan` | Планы без readback и с ним |
+| `plans` | `[[FramePlan; 2]; 2]` | Планы `plans[prev][cur]` по наличию readback в предыдущем и текущем кадре |
+| `prev_readback` | `bool` | Был ли readback в последнем отправленном кадре |
 | `frame_index` | `u64` | Число отправленных кадров |
 | `retired` | `Vec<Retired>` | Ожидают завершения GPU |
 | `pending_readback` | `Option<PendingReadback>` | Не больше одного readback в полёте |
@@ -299,12 +301,12 @@ sequenceDiagram
 
 | Метод | Описание |
 | --- | --- |
-| `new(device, info, layer, vertices, indices) -> Result<Renderer, String>` | Проверяет Metal 4, настраивает слой, создаёт очередь, компилятор, событие, residency set, depth state, pipeline, буферы, текстуру узора, два слота с таблицами, строит оба плана |
+| `new(device, info, layer, vertices, indices) -> Result<Renderer, String>` | Проверяет Metal 4, настраивает слой, создаёт очередь, компилятор, событие, residency set, depth state, pipeline, буферы, текстуру узора, два слота с таблицами, строит четыре плана переходов |
 | `size() -> Option<(u32, u32)>` | Размер целей |
 | `pipeline_generation() -> u32` | Поколение pipeline |
 | `frame_index() -> u64` | Отправлено кадров |
 | `shader_dir() -> &Path` | Каталог MSL |
-| `plan_summary() -> String` | Текстовый план с барьерами |
+| `plan_summary() -> String` | Текстовые планы «readback после readback» и «обычный кадр после readback» |
 | `resize(width, height, scale)` | Нулевой размер → цели уходят в `retired`, вывод пропускается. Иначе новые цели по пиксельному размеру, добавление в residency set, старые — в `retired` |
 | `reload_shaders(over) -> Result<u32, ShaderError>` | Собирает новый набор; при успехе подменяет, старый уходит в `retired`; при ошибке текущий не трогается |
 | `collect_completed()` | Освобождает `retired` по значению события, забирает готовый readback |
@@ -428,14 +430,16 @@ sequenceDiagram
 `frame_graph::plan`:
 
 1. Проверяет, что стадии прохода разрешены его типом, и что каждый прочитанный ресурс записан раньше в кадре или помечен импортированным. Иначе `GraphError`.
-2. Дважды проходит список. Первый круг собирает состояние ресурсов предыдущего кадра, второй выдаёт барьеры. Так учитываются зависимости через границу кадров в одной очереди.
+2. Первый круг проходит список предыдущего кадра и только собирает состояние ресурсов, второй проходит текущий кадр и выдаёт барьеры. Так учитываются зависимости через границу кадров в одной очереди, в том числе когда состав проходов меняется между кадрами.
 3. Для чтения: если есть предыдущая запись — RAW, `after |= стадия записи`.
 4. Для записи: если были чтения после последней записи — WAR по стадиям чтений; иначе, если была запись — WAW.
 5. Все зависимости прохода сливаются в один барьер `after → before`.
 
-Бэкенд Metal 4 кодирует барьер в начале кодировщика прохода: `barrierAfterQueueStages:beforeStages:visibilityOptions:` с `MTL4VisibilityOptions::Device`.
+Бэкенд Metal 4 кодирует барьер в начале кодировщика прохода: `barrierAfterQueueStages:beforeStages:visibilityOptions:` с `MTL4VisibilityOptions::Device`. Это consumer queue barrier в терминах Apple: он задерживает стадии `before` в этом и всех следующих проходах очереди, пока стадии `after` не завершатся во всех предыдущих проходах, включая прошлые кадры.
 
-План с readback, как его печатает самопроверка:
+Renderer хранит четыре плана `plans[prev][cur]` и выбирает план по тому, был ли readback в предыдущем отправленном кадре. План «обычный кадр после кадра с readback» отличается от повторяющегося обычного кадра: `pattern` и `scene` ждут ещё и `BLIT`, иначе запись следующего кадра может пересечься с копией readback.
+
+План «кадр с readback после такого же», как его печатает самопроверка:
 
 | Проход | after | before | Зависимости |
 | --- | --- | --- | --- |
@@ -443,6 +447,8 @@ sequenceDiagram
 | `scene` | `FRAGMENT \| DISPATCH \| BLIT` | `FRAGMENT` | RAW `pattern`, WAR `hdr`, WAR `depth` |
 | `readback` | `FRAGMENT \| DISPATCH \| BLIT` | `DISPATCH \| BLIT` | RAW `pattern`, RAW `depth`, WAW `readback` |
 | `tonemap` | `FRAGMENT` | `FRAGMENT` | RAW `hdr`, WAW `drawable` |
+
+План «обычный кадр после кадра с readback»: `pattern` — after `FRAGMENT | BLIT`, `scene` — after `FRAGMENT | DISPATCH | BLIT`, `tonemap` без изменений.
 
 Слияние зависимостей в один барьер иногда синхронизирует больше необходимого. Это принятое упрощение этапа 01.
 
@@ -460,7 +466,7 @@ sequenceDiagram
 | `ReadbackB` | Готов readback | Те же проверки при новом размере |
 | `Done` | — | Статистика, `SELFTEST PASSED` и код 0 или `SELFTEST FAILED` и код 1. Предохранитель — 1000 кадров. Кадры, пришедшие после `exit()`, игнорируются, итог печатается один раз |
 
-Модульные тесты (`cargo test`, 13): планировщик (5), раскладка (1), симуляция (4), эталон глубины и узора (2), обход граней куба (1).
+Модульные тесты (`cargo test`, 14): планировщик (6), раскладка (1), симуляция (4), эталон глубины и узора (2), обход граней куба (1).
 
 ## 9. Соответствие спецификациям
 
@@ -479,7 +485,7 @@ sequenceDiagram
 | 01.5 · Ввод, фиксированный шаг, интерполяция | `App`, `sim.rs` | Выполнено; ввод вручную не проверен |
 | 01.6 · Compute → fragment, сверка с эталоном | `pattern_main`, барьер, `verify_readback` | Выполнено |
 | 01.7 · Перезагрузка MSL | `reload_shaders`, `ShaderError` | Выполнено; схема аргументов проверяется только по точкам входа |
-| 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs` | Выполнено; стадия indirect — в 02 |
+| 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs`, `plan_after` | Выполнено, включая смену состава проходов между кадрами; стадия indirect — в 02 |
 
 ## 10. Архитектурные решения и причины
 
@@ -533,6 +539,7 @@ sequenceDiagram
 - **Решение.** Проходы объявляют чтения, записи и стадии. `frame_graph::plan` вычисляет RAW, WAR и WAW, бэкенд кодирует барьер своего API.
 - **Почему.** Metal 4 не отслеживает зависимости сам, и ручная расстановка барьеров легко ломается при добавлении прохода. Описание в данных проверяется тестами без GPU и переиспользуется для D3D12. Циклический анализ ловит WAR через границу кадров: следующий `pattern` не должен писать, пока прошлый `scene` читает текстуру.
 - **Упрощение.** Все зависимости прохода сливаются в один барьер `after → before`. Иногда это синхронизирует больше нужного, зато один вызов на кодировщик. Уточним, если профиль покажет простои.
+- **Исправление.** Первая версия анализировала список циклически, предполагая, что предыдущий кадр выполнил тот же список. После кадра с readback следующий обычный кадр не ждал `BLIT` и мог перезаписать `pattern` и `depth` во время копии. Теперь план строится по фактическому составу предыдущего кадра (`plan_after`), тест `plan_change_waits_for_previous_frame_stages`.
 
 ### AD-09. Reversed-Z с бесконечной дальней плоскостью и `Depth32Float`
 
@@ -610,11 +617,21 @@ sequenceDiagram
 - **Почему.** При `opt-level = 1` LLDB видел встроенные функции и терял локальные переменные. Без оптимизаций свой код пошагово отлаживается в VS Code, а glam, objc2 и winit остаются быстрыми, поэтому кадр и самопроверка не замедляются заметно (CPU-кодирование кадра 0,1–0,5 мс).
 - **Цена.** Чуть медленнее собственный код в Debug. Замеры производительности делать в Release.
 
+### AD-23. Consumer queue barriers вместо producer barriers и fence
+
+- **Решение.** Межпроходная синхронизация — consumer barrier в начале прохода-потребителя (`barrierAfterQueueStages:beforeStages:`). Внутри прохода — `barrierAfterEncoderStages:beforeEncoderStages:` при необходимости. Producer barriers и `MTLFence` не используются. Синхронизация CPU и GPU — слоты кадра и `MTLSharedEvent`.
+- **Почему.** Планировщик вычисляет зависимости со стороны потребителя: какие стадии каких предыдущих проходов нужно дождаться. Consumer barrier выражает это одним вызовом и охватывает прошлые кадры той же очереди. Producer barrier удобнее, когда один производитель кормит много потребителей; fence точнее, потому что ждёт конкретный проход, а не все предыдущие проходы со стадией, но требует пары `updateFence`/`waitForFence` и объекта на каждую зависимость. Для четырёх проходов в одной очереди выигрыш не окупает сложности.
+- **Ограничение TBDR.** На Apple GPU intrapass barrier не может ждать стадии `fragment` или `tile`. Поэтому readback глубины и тонмаппинг вынесены в отдельные проходы, а не сделаны барьером внутри render pass. Это совпадает с рекомендацией Apple: закончить render pass и поставить consumer barrier в следующем.
+- **CPU и GPU.** Пример Apple держит число копий изменяемых буферов равным числу кадров в полёте и ждёт освобождения семафором из completion handler. У нас та же схема на `MTLSharedEvent`: два слота с upload-буферами, ожидание значения события перед повторным использованием слота. CPU пишет upload до commit и не трогает его до конца кадра.
+- **Пересмотреть,** когда появится async compute на второй очереди (тогда `MTLSharedEvent` между очередями, fence в Metal 4 работают только внутри очереди) или когда профиль покажет, что широкие барьеры задерживают независимые проходы (тогда точечные fence).
+- **Источники.** [Consumer barriers](https://developer.apple.com/documentation/metal/synchronizing-passes-with-consumer-barriers), [Producer barriers](https://developer.apple.com/documentation/metal/synchronizing-passes-with-producer-barriers), [Fence](https://developer.apple.com/documentation/metal/synchronizing-passes-with-a-fence), [Intrapass barriers](https://developer.apple.com/documentation/metal/synchronizing-stages-within-a-pass), [CPU и GPU](https://developer.apple.com/documentation/metal/synchronizing-cpu-and-gpu-work).
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
 - `vertex_buf` и `index_buf` в `StorageModeShared` без копирования в private-память. Явный upload появится вместе с тайлами 02 и портом 06.
 - Барьер прохода сливает все зависимости в одну пару стадий.
+- Самопроверка не ловит гонки между кадрами: узор и камера одинаковы в каждом кадре, поэтому перезапись не меняет результат. Нужен вариант с разным содержимым по кадрам.
 - Перезагрузка MSL проверяет наличие точек входа, но не индексы привязок.
 - Время GPU не измеряется: нужны `MTL4CounterHeap` и временные метки по проходам.
 - Диагностика выводится в заголовок окна и stderr, текстового оверлея нет.
@@ -627,3 +644,4 @@ sequenceDiagram
 | 2026-11-07 | 00, 01 | `22c3804` | Первая версия: модули `main`, `platform`, `sim`, `layout`, `frame_graph`, `renderer`, `renderer::shaders`, `scene`, `reference`; MSL `common.h`, `pattern`, `scene`, `tonemap`; самопроверка |
 | 2026-11-07 | 00, 01 | `f5dc091` | Создан этот документ, раздел решений с причинами и правило ведения в `AGENTS.md`. Код не менялся |
 | 2026-11-07 | 01 | после `f5dc091` | AD-22: Debug-профиль `opt-level = 0` для своего кода. `App::selftest_step` игнорирует кадры после завершения. Добавлена конфигурация VS Code (`.vscode/`): задачи сборки, тестов и самопроверки, отладка через LLDB DAP (Xcode) и CodeLLDB с Rust-форматтерами; кнопка ▶ Debug rust-analyzer использует CodeLLDB |
+| 2026-11-07 | 01 | после `215fb06` | Сверка с документацией Apple по синхронизации. Исправлен пропуск `BLIT` в барьерах кадра после readback: `frame_graph::plan_after`, `Renderer::plans[prev][cur]`, `prev_readback`. AD-23 о выборе consumer barriers |

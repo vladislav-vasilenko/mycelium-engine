@@ -37,7 +37,7 @@ flowchart LR
 | Брод | у оси тропы (до 4 м, спад к 12 м) внешний край склона русла отодвигается на 40 м: берег вместо обрыва до 70° становится пологим и проходимым пешком до появления моста (версия 2, [AD-33](00-arch.md#ad-33-брод-у-тропы-вместо-крутого-берега-до-появления-моста)) | `terrain_without_trail`, `FORD_INNER_M`, `FORD_OUTER_M`, `FORD_WIDENING_M` |
 | Маркеры | начало тропы, склон над лесом (t = 0,18), край торфяника (t = 0,45), место моста (ближайшая к реке точка тропы), устье (точка реки на береговой линии), каменистый берег | `World::place_markers` |
 
-Снимок карты сверху: `cargo test dump_map -- --ignored`, затем `scripts/rgb-to-png.py` → `target/world-map.png`.
+Снимок карты сверху — `preview.png` из `echo --export-world target/world-layers`.
 
 ## 3. Модули
 
@@ -63,7 +63,7 @@ flowchart LR
 | `Path::catmull_rom(control, per_segment)` | fn | уплотнение опорных точек, построение сетки |
 | `Path::nearest(p) -> (d, t, q)` | fn | расстояние, параметр 0..1 по длине, точка на оси; дальше радиуса — `(∞, 0, p)` |
 | `Path::point_at(t)`, `Path::length()` | fn | точка по параметру, длина |
-| `Fields` | struct | `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
+| `Fields` | struct (`Default`) | `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
 | `Generator` | struct | `seed`, `size_m`, `river`, `trail`, `basin_center`, `basin_radius`, `shore_z` |
 | `Generator::first_map(seed, size_m)` | fn | авторская раскладка первой карты |
 | `Generator::shoreline_z(x)` | fn | z кромки моря |
@@ -78,7 +78,7 @@ flowchart LR
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
-| `TILE_SIZE_M` = 64, `TILE_SAMPLES` = 65, `SAMPLE_STEP_M` = 1, `GENERATOR_VERSION` = 1 | const | параметры LOD 0 |
+| `TILE_SIZE_M` = 64, `TILE_SAMPLES` = 65, `SAMPLE_STEP_M` = 1, `GENERATOR_VERSION` = 2 | const | параметры LOD 0 |
 | `TileId { x, z }` | struct | целые координаты тайла; `origin()` — угол в метрах |
 | `Substrate` | enum `u8` | `Soil` 0, `Peat` 1, `Sand` 2, `Rock` 3, `Gravel` 4 — те же числа в `TerrainVertex.material[0]` |
 | `BiomeWeights { forest, peat, shore }` | struct | нормированные веса |
@@ -86,16 +86,47 @@ flowchart LR
 | `Tile` | struct | `id`, `world_seed`, `generator_version`, `samples` (65 × 65, строки по z); `at(i, j)` |
 | `GroundSample` | struct | `height`, `normal` (треугольника LOD 0), `substrate`, `on_trail`, `wet` (русло или ниже моря), `tile` |
 | `Ground` | trait | `sample_ground(x, z) -> Option<GroundSample>`; `None` за картой. Реализуют `World` и тестовые поверхности |
-| `MarkerKind`, `Marker { name, kind, position }` | enum, struct | авторские точки маршрута |
-| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers` |
-| `World::generate(seed, tiles_x, tiles_z)` | fn | 1) поля на мировой сетке параллельно по строкам; 2) нормали центральными разностями по той же сетке; 3) нарезка на тайлы с общими граничными точками; 4) маркеры |
+| `MarkerKind` (serde), `Marker { name: String, kind, position }` | enum, struct | авторские точки маршрута |
+| `FieldGrid { nx, nz, fields }` | struct | поля `Fields` на мировой сетке `nx × nz` (769 × 769), строки по z; `FieldGrid::generate(&Generator, tiles_x, tiles_z)` — параллельно по строкам |
+| `DerivedOverrides { weights, substrate }` | struct | `Option<Vec<…>>` по точкам мировой сетки: ручные слои вместо вычисленных |
+| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers`, `fields` (сетка, из которой собран мир; нужна экспорту масок торфяника и берега) |
+| `World::generate(seed, tiles_x, tiles_z)` | fn | `FieldGrid::generate`, затем `from_grid` без замен |
+| `World::from_grid(seed, Generator, FieldGrid, &DerivedOverrides, Option<Vec<Marker>>)` | fn | 1) нормали центральными разностями по сетке; 2) веса и субстрат из полей или из `overrides`; 3) нарезка на тайлы с общими граничными точками; 4) маркеры: переданные получают высоту грунта, иначе расставляются по сплайнам генератора |
 | `World::tile(id)`, `size_m()`, `marker(kind)` | fn | доступ |
 | `World::checksum()` | fn | хеш всех тайлов и их метаданных |
 | `impl Ground for World` | — | точка → тайл → ячейка → треугольник (a, c, b) при fx ≥ fz, иначе (a, d, c); высота — барицентрическая, нормаль — грани; свойства — от ближайшего узла |
 
 Треугольники ячейки (i, j): a = (i, j), b = (i+1, j), c = (i+1, j+1), d = (i, j+1), диагональ a–c, обход CCW сверху. Этот же разбор использует `terrain_mesh::tile_indices`, поэтому столкновения совпадают с отрисовкой LOD 0.
 
-### 3.4. `src/terrain_mesh.rs`
+### 3.4. `src/world/layers.rs` — слои карты
+
+Каталог слоёв: `world.json` и PNG размером `nx × nz` (769 × 769), пиксель (i, j) — точка мировой сетки x = i, z = j ([AD-34](00-arch.md#ad-34-слои-карты-в-png-источники-и-ручные-замены)).
+
+| Файл | Формат | Роль | Каналы |
+| --- | --- | --- | --- |
+| `height.png` | серый 16 бит | источник | высота в `height_range_m` (−10…70 м, шаг ≈ 1,2 мм) |
+| `masks.png` | RGB 8 бит | источник | тропа, русло, чаша торфяника |
+| `climate.png` | RGB 8 бит | источник | влажность, температура в `temperature_range_c` (−10…40 °C), близость берега моря |
+| `biome.png` | RGB 8 бит | замена, если указан в `overrides` | лес, торф, берег; сумма каналов ровно 255 |
+| `substrate.png` | серый 8 бит | замена, если указан в `overrides` | индекс `Substrate` × 60 |
+| `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
+
+| Элемент | Вид | Описание |
+| --- | --- | --- |
+| `FORMAT_VERSION` = 1, `HEIGHT_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json` | const | параметры формата |
+| `Manifest` | struct (serde) | `format`, `seed`, `generator_version`, `tiles_x`, `tiles_z`, `sample_step_m`, `size_samples`, `height_range_m`, `temperature_range_c`, `substrate_codes`, `overrides` (`biome`, `substrate`), `exported_checksum`, `markers` |
+| `MarkerEntry { name, kind, x, z }` | struct (serde) | маркер в `world.json`; высота при импорте берётся с грунта |
+| `export(&World, dir) -> Result<Manifest, String>` | fn | пишет все слои и `world.json` (`overrides` пустой) |
+| `import(dir) -> Result<World, String>` | fn | читает `world.json`, проверяет формат, размер, число каналов и 16 бит у высоты; поля из источников, замены из `overrides`; сплайны `Generator` — из seed; затем `World::from_grid` |
+| `preview(&World, (nx, nz)) -> Vec<u8>` | fn | RGB-карта сверху (бывший тест `dump_map`) |
+| приватные `encode_weights`, `decode_weights` | fn | веса ↔ три байта с суммой 255 (метод наибольших остатков), чтобы повторный экспорт давал те же байты |
+| приватные `read_png`, `write_png`, `Image` | fn, struct | PNG 8/16 бит, палитра разворачивается, лишние каналы допускаются |
+
+Квантование источников идемпотентно: экспорт → импорт → экспорт даёт побайтно те же `height.png`, `masks.png`, `climate.png`. Мир после импорта отличается от сгенерированного на половину шага квантования (контрольная сумма другая: `854552db182b9e22` против `48eaa00cc4466aba`).
+
+Запуск: `echo --export-world DIR` записывает слои и выходит; `echo --world DIR` собирает мир из слоёв. Ошибки слоёв выводятся с именем файла и завершают программу с кодом 2.
+
+### 3.5. `src/terrain_mesh.rs`
 
 | Элемент | Описание |
 | --- | --- |
@@ -152,3 +183,4 @@ flowchart LR
 | 2026-11-07 | 02.1 | после `4e7f17e` | Этап 02 разбит на подэтапы: документ описывает 02.1, ссылки на спецификацию и отчёты обновлены. Код не менялся |
 | 2026-11-07 | 02.1 | после `4e7f17e` | Ходьба с разгоном, замедлением на подъёме, прыжком и сдвигом глаз только для вида ([AD-32](00-arch.md#ad-32-поворот-мыши-в-каждом-кадре-разгон-и-сдвиг-глаз-только-для-вида)) |
 | 2026-11-08 | 02.1 | после `4e7f17e` | Генератор v2: брод у тропы (AD-33). Тест `bot_walks_whole_trail_from_start_to_shore` |
+| 2026-11-08 | 02.1 | после `d2608c5` | Модуль `layers`: экспорт и импорт слоёв PNG, `FieldGrid`, `DerivedOverrides`, `World::from_grid`, `World.fields`, `Marker.name: String`; `dump_map` и `rgb-to-png.py` заменены на `preview.png` ([AD-34](00-arch.md#ad-34-слои-карты-в-png-источники-и-ручные-замены)) |

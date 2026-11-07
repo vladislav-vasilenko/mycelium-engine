@@ -147,7 +147,7 @@ impl Path {
 }
 
 /// Поля в одной точке мира.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Fields {
     pub height: f32,
     /// Влажность почвы, 0..1.

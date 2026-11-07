@@ -9,6 +9,8 @@
 //!
 //! Режимы: `--selftest` — автоматическая проверка с кодом выхода,
 //! `--overview` — старт в полёте над маршрутом,
+//! `--world DIR` — собрать мир из слоёв PNG в каталоге (`world.json`),
+//! `--export-world DIR` — записать слои сгенерированного мира и выйти,
 //! `--capture-frame N` — записать кадр N в `captures/`.
 
 mod frame_graph;
@@ -61,6 +63,10 @@ struct Args {
     /// Старт в полёте с контрольной камеры ландшафта.
     overview: bool,
     capture_frame: Option<u64>,
+    /// Каталог слоёв карты вместо генератора.
+    world: Option<std::path::PathBuf>,
+    /// Записать слои мира в каталог и выйти.
+    export_world: Option<std::path::PathBuf>,
 }
 
 impl Args {
@@ -72,10 +78,24 @@ impl Args {
                 "--selftest" => args.selftest = true,
                 "--overview" => args.overview = true,
                 "--capture-frame" => args.capture_frame = it.next().and_then(|v| v.parse().ok()),
+                "--world" => args.world = it.next().map(Into::into),
+                "--export-world" => args.export_world = it.next().map(Into::into),
                 other => eprintln!("неизвестный аргумент {other}"),
             }
         }
         args
+    }
+}
+
+/// Мир из каталога слоёв (`--world`) или из генератора. Ошибка слоёв
+/// завершает программу с кодом 2 и понятным сообщением.
+fn load_world(args: &Args) -> World {
+    match &args.world {
+        Some(dir) => world::layers::import(dir).unwrap_or_else(|e| {
+            eprintln!("слои карты: {e}");
+            std::process::exit(2);
+        }),
+        None => World::generate(WORLD_SEED, WORLD_TILES, WORLD_TILES),
     }
 }
 
@@ -221,9 +241,15 @@ impl App {
             size_before: None,
         });
         let started = Instant::now();
-        let world = World::generate(WORLD_SEED, WORLD_TILES, WORLD_TILES);
+        let world = load_world(&args);
         eprintln!(
-            "мир: seed {:#x}, {}×{} тайлов, генератор v{}, запечён за {:.0} мс, контрольная сумма {:016x}",
+            "мир: {}, seed {:#x}, {}×{} тайлов, генератор v{}, собран за {:.0} мс, контрольная сумма {:016x}",
+            args.world
+                .as_ref()
+                .map_or("генератор".to_string(), |d| format!(
+                    "слои {}",
+                    d.display()
+                )),
             world.seed,
             world.tiles_x,
             world.tiles_z,
@@ -1026,6 +1052,25 @@ impl ApplicationHandler for App {
 
 fn main() {
     let args = Args::parse();
+    if let Some(dir) = &args.export_world {
+        let world = load_world(&args);
+        match world::layers::export(&world, dir) {
+            Ok(m) => {
+                eprintln!(
+                    "слои записаны в {}: {}×{} точек, контрольная сумма мира {}",
+                    dir.display(),
+                    m.size_samples[0],
+                    m.size_samples[1],
+                    m.exported_checksum
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("экспорт слоёв: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
     if args.capture_frame.is_some() && std::env::var_os("MTL_CAPTURE_ENABLED").is_none() {
         eprintln!("[capture] для записи .gputrace запусти с MTL_CAPTURE_ENABLED=1");
     }

@@ -1,0 +1,39 @@
+мир: слои target/world-layers, seed 0xec40, 12×12 тайлов, генератор v2, собран за 185 мс, контрольная сумма 854552db182b9e22
+2026-11-08 00:19:42.921 echo[39887:28829868] Metal API Validation Enabled
+2026-11-08 00:19:42.921 echo[39887:28829868] Metal GPU Validation Enabled
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: да | raytracing from render: да
+ландшафт: 608400 вершин, 1179648 треугольников, загружен за 401 мс
+кадр 2560×1440 px, шейдеры из /Users/vladmac/Code/GameDev/GameEngine/shaders/metal
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: да | raytracing from render: да
+план проходов (с readback):
+  [кадр с readback после такого же]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  scene     after Stages(14) before Stages(2) [(ResourceId(1), Raw), (ResourceId(2), War), (ResourceId(3), War)]
+  readback  after Stages(14) before Stages(12) [(ResourceId(1), Raw), (ResourceId(3), Raw), (ResourceId(5), Waw)]
+  tonemap   after Stages(2) before Stages(2) [(ResourceId(2), Raw), (ResourceId(4), Waw)]
+  [обычный кадр после кадра с readback]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  scene     after Stages(14) before Stages(2) [(ResourceId(1), Raw), (ResourceId(2), War), (ResourceId(3), War)]
+  tonemap   after Stages(2) before Stages(2) [(ResourceId(2), Raw), (ResourceId(4), Waw)]
+
+[pass] захват и освобождение курсора
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 5)
+[pass] reversed-Z глубина в 9 точках 2560×1440 (попаданий в кубы 5, видны оба куба true): макс. ошибка 5.40e-8
+[pass] раскладка структур CPU/GPU (17 полей) 
+[pass] перезагрузка MSL без изменений: Ok(2)
+[pass] поколение pipeline 1 → 2
+       диагностика: pattern.metal [compile MSL]: program_source:48:1: error: 'kernel' attribute only applies to functions
+[pass] ошибочная правка отклонена: файл pattern.metal, стадия compile MSL
+[pass] после ошибки остаётся предыдущее поколение pipeline
+[pass] кадры рисуются после ошибочной правки (3 кадра)
+[pass] исправленная правка подхватывается в том же запуске
+[pass] в свёрнутом окне вывод пропускается: выведено 0 кадров
+[pass] после разворота вывод возобновился: 5 кадров, пропусков без drawable 0
+[pass] resize: новые цели (960, 600)
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 23)
+[pass] reversed-Z глубина в 9 точках 960×600 (попаданий в кубы 6, видны оба куба true): макс. ошибка 8.38e-8
+[pass] раскладка структур CPU/GPU (17 полей) 
+[pass] ландшафт: глубина GPU совпадает с лучом по SampleGround в 7 точках (небо 2), макс. отн. ошибка 7.3e-4
+[pass] раскладка TerrainVertex и общих структур (17 полей)
+кадров 32, пропуски: занят слот 0, нет drawable 0; отложенно освобождено 3; CPU кодирование последнего кадра 0.531 мс
+SELFTEST PASSED (18 проверок)

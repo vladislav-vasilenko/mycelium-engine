@@ -58,6 +58,20 @@
             "problemMatcher": ["$rustc"]
         },
         {
+            "label": "export world layers",
+            "detail": "Слои карты PNG и world.json в assets/world/first-map",
+            "type": "shell",
+            "command": "cargo run -- --export-world assets/world/first-map",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "run with world layers",
+            "detail": "Мир из слоёв assets/world/first-map вместо генератора",
+            "type": "shell",
+            "command": "cargo run -- --world assets/world/first-map",
+            "problemMatcher": ["$rustc"]
+        },
+        {
             "label": "selftest (Metal validation)",
             "detail": "Самопроверка этапа 01 под API и Shader Validation, код выхода 0 — успех",
             "type": "shell",

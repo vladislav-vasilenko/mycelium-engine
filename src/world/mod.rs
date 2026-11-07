@@ -9,6 +9,7 @@
 //! треугольники (a, c, b) и (a, d, c) с обходом CCW сверху.
 
 pub mod generator;
+pub mod layers;
 pub mod noise;
 
 use glam::{Vec2, Vec3};
@@ -100,7 +101,7 @@ pub trait Ground {
     fn sample_ground(&self, x: f32, z: f32) -> Option<GroundSample>;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MarkerKind {
     TrailStart,
     Viewpoint,
@@ -110,11 +111,51 @@ pub enum MarkerKind {
 }
 
 /// Авторская точка маршрута.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Marker {
-    pub name: &'static str,
+    pub name: String,
     pub kind: MarkerKind,
     pub position: Vec3,
+}
+
+/// Поля среды на общей мировой сетке `nx × nz` с шагом `SAMPLE_STEP_M`,
+/// строка за строкой по z. `nx = tiles_x · 64 + 1`.
+#[derive(Clone, Debug)]
+pub struct FieldGrid {
+    pub nx: usize,
+    pub nz: usize,
+    pub fields: Vec<Fields>,
+}
+
+impl FieldGrid {
+    /// Поля генератора. Строки считаются параллельно, результат от числа
+    /// потоков не зависит.
+    pub fn generate(generator: &Generator, tiles_x: i32, tiles_z: i32) -> FieldGrid {
+        let nx = tiles_x as usize * (TILE_SAMPLES - 1) + 1;
+        let nz = tiles_z as usize * (TILE_SAMPLES - 1) + 1;
+        let mut fields = vec![Fields::default(); nx * nz];
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let rows_per = nz.div_ceil(threads);
+        std::thread::scope(|s| {
+            for (chunk_i, chunk) in fields.chunks_mut(rows_per * nx).enumerate() {
+                s.spawn(move || {
+                    for (k, f) in chunk.iter_mut().enumerate() {
+                        let j = chunk_i * rows_per + k / nx;
+                        let i = k % nx;
+                        *f = generator.sample(i as f32 * SAMPLE_STEP_M, j as f32 * SAMPLE_STEP_M);
+                    }
+                });
+            }
+        });
+        FieldGrid { nx, nz, fields }
+    }
+}
+
+/// Ручные слои, заменяющие вычисленные значения. Индекс — точка мировой сетки.
+#[derive(Clone, Debug, Default)]
+pub struct DerivedOverrides {
+    pub weights: Option<Vec<BiomeWeights>>,
+    pub substrate: Option<Vec<Substrate>>,
 }
 
 pub struct World {
@@ -125,6 +166,9 @@ pub struct World {
     /// Тайлы по строкам: индекс `z * tiles_x + x`.
     pub tiles: Vec<Tile>,
     pub markers: Vec<Marker>,
+    /// Поля мировой сетки, из которых собраны тайлы. Нужны экспорту слоёв:
+    /// маски торфяника и берега есть только здесь, а не в `Sample`.
+    pub fields: Vec<Fields>,
 }
 
 impl World {
@@ -139,42 +183,30 @@ impl World {
         self.tiles.get((id.z * self.tiles_x + id.x) as usize)
     }
 
-    /// Генерирует и запекает карту. Строки мировой сетки считаются параллельно,
-    /// результат от числа потоков не зависит.
+    /// Генерирует и запекает карту: поля генератора, затем сборка тайлов.
     pub fn generate(seed: u64, tiles_x: i32, tiles_z: i32) -> World {
-        let nx = tiles_x as usize * (TILE_SAMPLES - 1) + 1;
-        let nz = tiles_z as usize * (TILE_SAMPLES - 1) + 1;
         let generator = Generator::first_map(seed, tiles_z as f32 * TILE_SIZE_M);
+        let grid = FieldGrid::generate(&generator, tiles_x, tiles_z);
+        World::from_grid(seed, generator, grid, &DerivedOverrides::default(), None)
+    }
 
-        // 1. Поля на общей мировой сетке.
-        let mut fields = vec![
-            Fields {
-                height: 0.0,
-                moisture: 0.0,
-                temperature: 0.0,
-                trail: 0.0,
-                river: 0.0,
-                coast: 0.0,
-                basin: 0.0,
-            };
-            nx * nz
-        ];
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let rows_per = nz.div_ceil(threads);
-        std::thread::scope(|s| {
-            for (chunk_i, chunk) in fields.chunks_mut(rows_per * nx).enumerate() {
-                let generator = &generator;
-                s.spawn(move || {
-                    for (k, f) in chunk.iter_mut().enumerate() {
-                        let j = chunk_i * rows_per + k / nx;
-                        let i = k % nx;
-                        *f = generator.sample(i as f32 * SAMPLE_STEP_M, j as f32 * SAMPLE_STEP_M);
-                    }
-                });
-            }
-        });
+    /// Собирает мир из полей на мировой сетке: нормали, веса биомов, субстрат,
+    /// нарезка на тайлы с общими граничными точками. `overrides` заменяет
+    /// вычисленные веса и субстрат ручными слоями. Без `markers` маркеры
+    /// расставляются по сплайнам генератора, с ними — получают высоту грунта.
+    pub fn from_grid(
+        seed: u64,
+        generator: Generator,
+        grid: FieldGrid,
+        overrides: &DerivedOverrides,
+        markers: Option<Vec<Marker>>,
+    ) -> World {
+        let (nx, nz) = (grid.nx, grid.nz);
+        let tiles_x = ((nx - 1) / (TILE_SAMPLES - 1)) as i32;
+        let tiles_z = ((nz - 1) / (TILE_SAMPLES - 1)) as i32;
+        let fields = &grid.fields;
 
-        // 2. Нормали центральными разностями по той же сетке (у края карты — односторонние).
+        // Нормали центральными разностями по той же сетке (у края карты — односторонние).
         let h = |i: isize, j: isize| {
             let i = i.clamp(0, nx as isize - 1) as usize;
             let j = j.clamp(0, nz as isize - 1) as usize;
@@ -187,7 +219,6 @@ impl World {
             Vec3::new(-dx, 1.0, -dz).normalize()
         };
 
-        // 3. Нарезка на тайлы с общими граничными точками.
         let mut tiles = Vec::with_capacity((tiles_x * tiles_z) as usize);
         for tz in 0..tiles_z {
             for tx in 0..tiles_x {
@@ -196,16 +227,24 @@ impl World {
                     for i in 0..TILE_SAMPLES {
                         let gi = tx as usize * (TILE_SAMPLES - 1) + i;
                         let gj = tz as usize * (TILE_SAMPLES - 1) + j;
-                        let f = fields[gj * nx + gi];
+                        let k = gj * nx + gi;
+                        let f = fields[k];
                         let n = normal_at(gi, gj);
                         let slope = 1.0 - n.y;
-                        let weights = generator::biome_weights(&f, slope);
+                        let weights = overrides
+                            .weights
+                            .as_ref()
+                            .map_or_else(|| generator::biome_weights(&f, slope), |w| w[k]);
+                        let substrate = overrides.substrate.as_ref().map_or_else(
+                            || generator::substrate(&f, slope, &weights, gi as f32),
+                            |s| s[k],
+                        );
                         samples.push(Sample {
                             height: f.height,
                             normal: n,
                             moisture: f.moisture,
                             temperature: f.temperature,
-                            substrate: generator::substrate(&f, slope, &weights, gi as f32),
+                            substrate,
                             weights,
                             trail: f.trail,
                             river: f.river,
@@ -228,8 +267,18 @@ impl World {
             generator,
             tiles,
             markers: Vec::new(),
+            fields: grid.fields,
         };
-        world.markers = world.place_markers();
+        world.markers = match markers {
+            Some(mut m) => {
+                for marker in &mut m {
+                    let p = marker.position;
+                    marker.position.y = world.sample_ground(p.x, p.z).map_or(0.0, |g| g.height);
+                }
+                m
+            }
+            None => world.place_markers(),
+        };
         world
     }
 
@@ -251,32 +300,32 @@ impl World {
             .unwrap_or(g.river.point_at(1.0));
         vec![
             Marker {
-                name: "начало тропы",
+                name: "начало тропы".into(),
                 kind: MarkerKind::TrailStart,
                 position: on_ground(g.trail.point_at(0.0)),
             },
             Marker {
-                name: "склон над лесом",
+                name: "склон над лесом".into(),
                 kind: MarkerKind::Viewpoint,
                 position: on_ground(g.trail.point_at(0.18)),
             },
             Marker {
-                name: "край торфяника",
+                name: "край торфяника".into(),
                 kind: MarkerKind::Viewpoint,
                 position: on_ground(g.trail.point_at(0.45)),
             },
             Marker {
-                name: "место моста",
+                name: "место моста".into(),
                 kind: MarkerKind::BridgeSite,
                 position: on_ground(bridge),
             },
             Marker {
-                name: "устье",
+                name: "устье".into(),
                 kind: MarkerKind::RiverMouth,
                 position: on_ground(mouth),
             },
             Marker {
-                name: "каменистый берег",
+                name: "каменистый берег".into(),
                 kind: MarkerKind::ShoreEnd,
                 position: on_ground(g.trail.point_at(1.0)),
             },
@@ -471,66 +520,5 @@ mod tests {
         let peat = w.sample_ground(g.basin_center.x, g.basin_center.y).unwrap();
         assert_eq!(peat.substrate, Substrate::Peat);
         assert_eq!(w.markers.len(), 6);
-    }
-}
-
-#[cfg(test)]
-mod dump {
-    use super::*;
-
-    /// Карта для глаз: `cargo test dump_map -- --ignored`, затем
-    /// `python3 scripts/rgb-to-png.py`. Пишет target/world-map.rgb (768 × 768 × RGB).
-    #[test]
-    #[ignore]
-    fn dump_map() {
-        let w = World::generate(0xEC40, 12, 12);
-        let n = 768;
-        let mut rgb = Vec::with_capacity(n * n * 3);
-        for z in 0..n {
-            for x in 0..n {
-                let s = w.sample_ground(x as f32 + 0.5, z as f32 + 0.5).unwrap();
-                let shade = (0.55 + 0.45 * s.normal.dot(Vec3::new(-0.5, 0.8, -0.3).normalize()))
-                    .clamp(0.2, 1.0);
-                let base: [f32; 3] = if s.height < 0.0 {
-                    let d = (-s.height / 7.0).clamp(0.0, 1.0);
-                    [0.1, 0.35 - 0.2 * d, 0.6 - 0.25 * d]
-                } else if s.wet {
-                    [0.2, 0.45, 0.75]
-                } else if s.on_trail {
-                    [0.85, 0.7, 0.45]
-                } else {
-                    match s.substrate {
-                        Substrate::Soil => [0.25, 0.42, 0.18],
-                        Substrate::Peat => [0.38, 0.3, 0.18],
-                        Substrate::Sand => [0.85, 0.8, 0.6],
-                        Substrate::Rock => [0.55, 0.55, 0.55],
-                        Substrate::Gravel => [0.6, 0.55, 0.45],
-                    }
-                };
-                let hl = (s.height / 40.0).clamp(0.0, 1.0) * 0.25;
-                for c in base {
-                    rgb.push(((c + hl) * shade * 255.0).clamp(0.0, 255.0) as u8);
-                }
-            }
-        }
-        for m in &w.markers {
-            for dz in -4i32..=4 {
-                for dx in -4i32..=4 {
-                    let (x, z) = (m.position.x as i32 + dx, m.position.z as i32 + dz);
-                    if (0..n as i32).contains(&x) && (0..n as i32).contains(&z) {
-                        let i = (z as usize * n + x as usize) * 3;
-                        rgb[i..i + 3].copy_from_slice(&[230, 40, 40]);
-                    }
-                }
-            }
-        }
-        std::fs::write(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/target/world-map.rgb"),
-            rgb,
-        )
-        .unwrap();
-        for m in &w.markers {
-            println!("{:<18} {:?} {:.1?}", m.name, m.kind, m.position);
-        }
     }
 }

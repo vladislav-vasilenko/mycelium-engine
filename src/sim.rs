@@ -722,7 +722,20 @@ mod tests {
     /// на оси тропы. Замена ручного прохода из критериев 02.1.
     #[test]
     fn bot_walks_whole_trail_from_start_to_shore() {
-        let world = crate::world::World::generate(0xEC40, 12, 12);
+        walk_trail(&crate::world::World::generate(0xEC40, 12, 12));
+    }
+
+    /// Тот же проход по миру, собранному из экспортированных слоёв PNG.
+    #[test]
+    fn bot_walks_whole_trail_on_world_from_layers() {
+        let dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/test-layers/bot");
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::world::layers::export(&crate::world::World::generate(0xEC40, 12, 12), &dir).unwrap();
+        walk_trail(&crate::world::layers::import(&dir).unwrap());
+    }
+
+    fn walk_trail(world: &crate::world::World) {
         let trail = &world.generator.trail;
         let len = trail.length();
         let start = trail.point_at(0.0);
@@ -732,7 +745,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
         });
-        sim.set_mode(MoveMode::Walk, &world);
+        sim.set_mode(MoveMode::Walk, world);
         let input = TickInput {
             forward: 1.0,
             fast: true,
@@ -749,7 +762,7 @@ mod tests {
             let yaw = (-d.x).atan2(-d.y);
             sim.curr.yaw = yaw;
             sim.prev.yaw = yaw;
-            sim.step(&input, Some(&world));
+            sim.step(&input, Some(world));
             let g = world
                 .sample_ground(sim.curr.position.x, sim.curr.position.z)
                 .expect("бот ушёл за карту");

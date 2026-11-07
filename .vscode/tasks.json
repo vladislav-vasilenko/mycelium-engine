@@ -72,6 +72,13 @@
             "problemMatcher": ["$rustc"]
         },
         {
+            "label": "export arms (Blender)",
+            "detail": "assets/source/fps-arms → assets/models/fps-arms.glb, затем проверка повторным импортом",
+            "type": "shell",
+            "command": "/Applications/Blender.app/Contents/MacOS/Blender -b --disable-autoexec assets/source/fps-arms/fps-arms-rig.blend --python tools/blender/export_arms.py -- tools/blender/arms_poses.json assets/models/fps-arms.glb && /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup --python tools/blender/check_arms.py -- assets/models/fps-arms.glb logs/screens/hands",
+            "problemMatcher": []
+        },
+        {
             "label": "selftest (Metal validation)",
             "detail": "Самопроверка этапа 01 под API и Shader Validation, код выхода 0 — успех",
             "type": "shell",

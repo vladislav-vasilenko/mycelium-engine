@@ -1,0 +1,31 @@
+{
+  "comment": "Позы рук от первого лица. Координаты кистей — метры относительно глаза: x вправо, y вперёд, z вверх (оси Blender). fwd — направление кисти, roll — поворот ладони вокруг fwd, градусы. curl — сгиб первой фаланги, градусы; вторая и третья копируют его ограничением рига.",
+  "eye_source_dm": [0.0, 0.8, 2.5],
+  "source_scale_m": 0.1,
+  "poses": {
+    "relaxed": {
+      "R": {"target": [0.17, 0.32, -0.15], "fwd": [-0.3, 1.0, 0.2], "roll": -35,
+            "curl": {"index": 10, "middle": 18, "ring": 25, "pinky": 32, "thumb": 5}},
+      "L": {"target": [-0.17, 0.32, -0.15], "fwd": [0.3, 1.0, 0.2], "roll": 35,
+            "curl": {"index": 10, "middle": 18, "ring": 25, "pinky": 32, "thumb": 5}}
+    },
+    "grip": {
+      "R": {"target": [0.16, 0.34, -0.14], "fwd": [-0.3, 1.0, 0.25], "roll": -55,
+            "curl": {"index": 70, "middle": 75, "ring": 80, "pinky": 85, "thumb": 35}},
+      "L": {"target": [-0.16, 0.34, -0.14], "fwd": [0.3, 1.0, 0.25], "roll": 55,
+            "curl": {"index": 70, "middle": 75, "ring": 80, "pinky": 85, "thumb": 35}}
+    },
+    "point": {
+      "R": {"target": [0.15, 0.40, -0.10], "fwd": [-0.2, 1.0, 0.25], "roll": -40,
+            "curl": {"index": 0, "middle": 80, "ring": 85, "pinky": 90, "thumb": 35}},
+      "L": {"target": [-0.19, 0.28, -0.20], "fwd": [0.3, 1.0, 0.1], "roll": 35,
+            "curl": {"index": 15, "middle": 22, "ring": 30, "pinky": 36, "thumb": 8}}
+    },
+    "reach": {
+      "R": {"target": [0.12, 0.46, -0.09], "fwd": [-0.15, 1.0, 0.05], "roll": -20,
+            "curl": {"index": 5, "middle": 5, "ring": 8, "pinky": 10, "thumb": 0}},
+      "L": {"target": [-0.19, 0.28, -0.20], "fwd": [0.3, 1.0, 0.1], "roll": 35,
+            "curl": {"index": 15, "middle": 22, "ring": 30, "pinky": 36, "thumb": 8}}
+    }
+  }
+}

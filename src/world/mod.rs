@@ -20,7 +20,7 @@ pub const TILE_SIZE_M: f32 = 64.0;
 pub const TILE_SAMPLES: usize = 65;
 pub const SAMPLE_STEP_M: f32 = 1.0;
 /// Версия алгоритма генерации. Меняется вместе с результатом генератора.
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 
 /// Стабильный идентификатор тайла: целые координаты в сетке тайлов.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

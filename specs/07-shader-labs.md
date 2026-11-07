@@ -4,7 +4,7 @@
 
 **Зависит от** — [05. Мицелий и игровой срез](05-mycelium-gameplay.md) для итогового сравнения на маршруте. Для D3D12 нужен [06. Перенос на Direct3D 12](06-d3d12-port.md).
 
-**Ранний вход на Mac** — опыт с wgpu после [01](01-metal-foundation.md), mesh после [02](02-terrain-biomes.md), FFT и SSR после [03](03-water.md), tile lighting, рассеивание и туман после [04](04-atmosphere.md).
+**Ранний вход на Mac** — опыт с wgpu после [01](01-metal-foundation.md), mesh после [02.5](02-5-terrain-gpu-culling.md), FFT и SSR после [03](03-water.md), tile lighting, рассеивание и туман после [04](04-atmosphere.md).
 
 **По книге** — [программируемые стадии и отладочная отрисовка](reading-guide.md#07-шейдеры).
 
@@ -26,7 +26,7 @@
 
 ## Геометрия и детализация
 
-1. **Object/amplification + mesh.** Использовать входные данные [этапа 02](02-terrain-biomes.md). Собрать мешлеты для одного вида и подобрать лимиты вершин, примитивов и потоков по устройству. Сначала повторить indexed результат через mesh. Затем в object/amplification добавить отсечение и выбор LOD, в mesh — генерацию треугольников. Для гриба сгенерировать ножку и шляпку по виду и seed, сохраняя силуэт между LOD. Сравнить видимые экземпляры, число треугольников и p95 GPU с compute + indexed indirect. На D3D12 проверить `MeshShaderTier` и SM 6.5 или выше. [Пример Metal Mesh LOD](https://developer.apple.com/documentation/metal/adjusting-the-level-of-detail-using-metal-mesh-shaders) · [Спецификация Mesh Shader D3D12](https://microsoft.github.io/DirectX-Specs/d3d/MeshShader.html)
+1. **Object/amplification + mesh.** Использовать входные данные [этапа 02](02-terrain-biomes.md): `TileBounds` и `TileDraw` из [02.3](02-3-terrain-lod.md), группы `Placement` из [02.4](02-4-vegetation.md). Собрать мешлеты для одного вида и подобрать лимиты вершин, примитивов и потоков по устройству. Сначала повторить indexed результат через mesh. Затем в object/amplification добавить отсечение и выбор LOD, в mesh — генерацию треугольников. Для гриба сгенерировать ножку и шляпку по виду и seed, сохраняя силуэт между LOD. Сравнить видимые экземпляры, число треугольников и p95 GPU с compute + indexed indirect. На D3D12 проверить `MeshShaderTier` и SM 6.5 или выше. [Пример Metal Mesh LOD](https://developer.apple.com/documentation/metal/adjusting-the-level-of-detail-using-metal-mesh-shaders) · [Спецификация Mesh Shader D3D12](https://microsoft.github.io/DirectX-Specs/d3d/MeshShader.html)
 2. **Geometry, hull и domain на D3D12.** В geometry shader развернуть несколько точек в билборды, сравнить с инстансами. Hull shader выдаёт коэффициенты разбиения для патча, domain shader вычисляет вершины с displacement. У общих рёбер подобрать одинаковые коэффициенты и проверить зазоры при приближении камеры.
 
 ## Вода, свет и трассировка

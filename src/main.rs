@@ -2,7 +2,8 @@
 //! compute → raster, HDR и тонмаппинг, перезагрузка MSL по F5.
 //!
 //! Управление: клик — захват мыши, WASD — движение, Shift — бег/быстрее,
-//! G — ходьба/полёт, E/Q — вверх/вниз в полёте, T — ландшафт/тестовые кубы,
+//! Space — прыжок (в полёте вверх), G — ходьба/полёт, E/Q — вверх/вниз в полёте,
+//! B — покачивание головы, T — ландшафт/тестовые кубы,
 //! Esc — отпустить мышь, ⌘M — свернуть, F5 — перезагрузить MSL,
 //! F9 — readback и сверка с эталоном, F12 — GPU capture одного кадра.
 //!
@@ -298,7 +299,9 @@ impl App {
         TickInput {
             forward: axis(KeyCode::KeyW, KeyCode::KeyS),
             right: axis(KeyCode::KeyD, KeyCode::KeyA),
-            up: axis(KeyCode::KeyE, KeyCode::KeyQ),
+            up: (axis(KeyCode::KeyE, KeyCode::KeyQ)
+                + self.keys.contains(&KeyCode::Space) as i32 as f32)
+                .clamp(-1.0, 1.0),
             look_dx: 0.0,
             look_dy: 0.0,
             fast: self.keys.contains(&KeyCode::ShiftLeft)
@@ -371,21 +374,13 @@ impl App {
         let dt = (now - self.last_frame).as_secs_f64();
         self.last_frame = now;
 
+        // Поворот мыши применяется в каждом кадре, без ожидания тика (AD-32).
+        self.sim.look(self.look.0, self.look.1);
+        self.look = (0.0, 0.0);
         let (ticks, alpha) = self.clock.advance(dt);
-        let mut input = self.tick_input();
-        for i in 0..ticks {
-            if i == 0 {
-                // Поворот мыши за кадр уходит в первый тик кадра.
-                input.look_dx = self.look.0;
-                input.look_dy = self.look.1;
-            } else {
-                input.look_dx = 0.0;
-                input.look_dy = 0.0;
-            }
+        let input = self.tick_input();
+        for _ in 0..ticks {
             self.sim.step(&input, Some(&self.world));
-        }
-        if ticks > 0 {
-            self.look = (0.0, 0.0);
         }
 
         let selftest = self.selftest.is_some();
@@ -931,6 +926,9 @@ impl ApplicationHandler for App {
                             };
                             self.sim.set_mode(mode, &self.world);
                             self.update_title(true);
+                        }
+                        KeyCode::KeyB => {
+                            self.sim.head_bob = !self.sim.head_bob;
                         }
                         KeyCode::KeyT => {
                             self.scene = match self.scene {

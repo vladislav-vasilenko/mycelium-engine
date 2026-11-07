@@ -176,6 +176,12 @@ pub struct Generator {
     pub shore_z: f32,
 }
 
+/// Брод: расстояние от оси тропы, где берега русла полностью и совсем не
+/// расширены, м, и расширение склона берега у оси тропы, м.
+pub const FORD_INNER_M: f32 = 4.0;
+pub const FORD_OUTER_M: f32 = 12.0;
+pub const FORD_WIDENING_M: f32 = 40.0;
+
 /// Половина ширины русла по параметру t от истока (0) к устью (1).
 pub fn river_half_width(t: f32) -> f32 {
     lerp(3.0, 9.0, t)
@@ -272,7 +278,10 @@ impl Generator {
         let profile = lerp(17.0, -2.5, t);
         let banks = h;
         let bed = profile.min(banks - 1.8);
-        let channel = 1.0 - smoothstep(half * 0.6, half * 1.9, d);
+        // Брод на месте будущего моста: у тропы берега русла пологие,
+        // иначе крутой берег (до 70°) делает маршрут непроходимым.
+        let ford = 1.0 - smoothstep(FORD_INNER_M, FORD_OUTER_M, self.trail.nearest(p).0);
+        let channel = 1.0 - smoothstep(half * 0.6, half * 1.9 + FORD_WIDENING_M * ford, d);
         h = lerp(h, bed, channel);
         let river = 1.0 - smoothstep(half * 0.9, half * 1.2, d);
 

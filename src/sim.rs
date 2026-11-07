@@ -1,9 +1,13 @@
 //! Фиксированный шаг симуляции: свободный полёт и ходьба по грунту.
 //!
-//! Симуляция обновляется тиками 1/60 с. Рендер интерполирует между двумя
-//! последними состояниями. В режиме ходьбы игрок стоит на поверхности
-//! `Ground`, поднимается на ступеньки до `MAX_STEP_M`, не идёт вверх по склону
-//! круче `MAX_SLOPE_DEG` и падает с уступов под действием тяжести.
+//! Симуляция обновляется тиками 1/60 с. Рендер интерполирует положение между
+//! двумя последними состояниями, а поворот мыши применяется сразу в каждом
+//! кадре (`Sim::look`). Скорость набирается и гасится с ускорением. В режиме
+//! ходьбы игрок стоит на поверхности `Ground`, поднимается на ступеньки до
+//! `MAX_STEP_M`, не идёт вверх по склону круче `MAX_SLOPE_DEG`, замедляется
+//! на подъёме, прыгает и падает с уступов под действием тяжести. Подъём на
+//! ступеньку, приземление и шаги сглаживаются только в положении глаз
+//! (`view_dy`), физическое положение остаётся точным.
 //! Соглашения: метры, правая система, Y вверх, при yaw = 0 камера смотрит в −Z.
 
 use glam::{Mat4, Vec2, Vec3};
@@ -16,8 +20,11 @@ pub const MAX_CATCHUP_TICKS: u32 = 5;
 /// Кадр длиннее этого считается паузой (отладчик, сворачивание).
 pub const MAX_FRAME_DT: f64 = 0.25;
 
-const MOVE_SPEED: f32 = 4.0;
-const FAST_MULTIPLIER: f32 = 3.0;
+/// Скорость полёта, м/с, и множитель с Shift.
+const MOVE_SPEED: f32 = 8.0;
+const FAST_MULTIPLIER: f32 = 4.0;
+/// Разгон и торможение в полёте, м/с².
+const FLY_ACCEL: f32 = 40.0;
 pub const MOUSE_SENSITIVITY: f32 = 0.0025;
 const PITCH_LIMIT: f32 = 1.55;
 
@@ -27,9 +34,34 @@ pub const EYE_HEIGHT_M: f32 = 1.7;
 pub const MAX_STEP_M: f32 = 0.35;
 /// Наибольший уклон, по которому можно идти вверх, градусы.
 pub const MAX_SLOPE_DEG: f32 = 40.0;
-pub const WALK_SPEED: f32 = 1.6;
-pub const RUN_SPEED: f32 = 4.0;
+/// Скорость шага и бега, м/с. Быстрее реальной ходьбы (1,4 м/с), чтобы
+/// маршрут 768 м проходился за минуты, а не за десятки минут.
+pub const WALK_SPEED: f32 = 4.0;
+pub const RUN_SPEED: f32 = 7.0;
+/// Разгон к нужной скорости на грунте, м/с²: 0 → шаг за ~0,1 с.
+pub const GROUND_ACCEL: f32 = 40.0;
+/// Торможение без ввода на грунте, м/с²: остановка с бега за ~0,25 с.
+pub const GROUND_FRICTION: f32 = 28.0;
+/// Управление в воздухе, м/с².
+pub const AIR_ACCEL: f32 = 6.0;
+/// Замедление на подъёме: скорость × 1 / (1 + k · tg уклона по направлению).
+pub const UPHILL_SLOWDOWN: f32 = 0.8;
+/// Начальная скорость прыжка, м/с: высота ≈ v² / 2g ≈ 0,9 м.
+pub const JUMP_SPEED: f32 = 4.2;
 pub const GRAVITY: f32 = 9.81;
+
+/// Сглаживание подъёма глаз после ступеньки, постоянная времени, с.
+const STEP_SMOOTH_TAU: f32 = 0.07;
+/// Подъём короче этого за тик не сглаживается, м. Даже бег вверх по склону
+/// у предела (с замедлением на подъёме) поднимает меньше 0,06 м за тик.
+const STEP_SMOOTH_MIN: f32 = 0.08;
+/// Приседание при приземлении: м на 1 м/с скорости падения и предел, м.
+const LAND_DIP_PER_SPEED: f32 = 0.025;
+const LAND_DIP_MAX: f32 = 0.25;
+/// Покачивание головы: длина шага, м, и амплитуда при шаге и беге, м.
+const BOB_STRIDE_M: f32 = 0.8;
+const BOB_WALK_M: f32 = 0.03;
+const BOB_RUN_M: f32 = 0.05;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveMode {
@@ -94,6 +126,18 @@ pub struct Sim {
     pub on_ground: bool,
     /// Тиков, в которые горизонтальное движение было полностью заблокировано.
     pub blocked_ticks: u64,
+    /// Горизонтальная скорость (x, z) при ходьбе или полная скорость в полёте, м/с.
+    pub velocity: Vec3,
+    /// Сдвиг глаз по вертикали только для вида: ступенька, приземление, шаги.
+    pub view_dy_prev: f32,
+    pub view_dy: f32,
+    /// Сглаживание ступенек и приземления, м (≤ 0).
+    eye_lag: f32,
+    /// Фаза шага, радианы, и доля амплитуды покачивания (0..1).
+    bob_phase: f32,
+    bob_weight: f32,
+    /// Покачивание головы при ходьбе (клавиша B).
+    pub head_bob: bool,
 }
 
 impl Sim {
@@ -106,6 +150,22 @@ impl Sim {
             vertical_speed: 0.0,
             on_ground: false,
             blocked_ticks: 0,
+            velocity: Vec3::ZERO,
+            view_dy_prev: 0.0,
+            view_dy: 0.0,
+            eye_lag: 0.0,
+            bob_phase: 0.0,
+            bob_weight: 0.0,
+            head_bob: true,
+        }
+    }
+
+    /// Поворот мыши в пикселях, применяется сразу к обоим состояниям, чтобы
+    /// интерполяция не добавляла задержку в один тик.
+    pub fn look(&mut self, dx: f32, dy: f32) {
+        for c in [&mut self.prev, &mut self.curr] {
+            c.yaw -= dx * MOUSE_SENSITIVITY;
+            c.pitch = (c.pitch - dy * MOUSE_SENSITIVITY).clamp(-PITCH_LIMIT, PITCH_LIMIT);
         }
     }
 
@@ -113,6 +173,8 @@ impl Sim {
     pub fn set_mode(&mut self, mode: MoveMode, ground: &dyn Ground) {
         self.mode = mode;
         self.vertical_speed = 0.0;
+        self.velocity = Vec3::ZERO;
+        self.eye_lag = 0.0;
         if mode == MoveMode::Walk
             && let Some(g) = ground.sample_ground(self.curr.position.x, self.curr.position.z)
         {
@@ -125,6 +187,7 @@ impl Sim {
     /// Один тик. В режиме ходьбы нужен `ground`; без него ходьба ведёт себя как полёт.
     pub fn step(&mut self, input: &TickInput, ground: Option<&dyn Ground>) {
         self.prev = self.curr;
+        self.view_dy_prev = self.view_dy;
         let c = &mut self.curr;
         c.yaw -= input.look_dx * MOUSE_SENSITIVITY;
         c.pitch = (c.pitch - input.look_dy * MOUSE_SENSITIVITY).clamp(-PITCH_LIMIT, PITCH_LIMIT);
@@ -134,6 +197,9 @@ impl Sim {
             self.tick += 1;
             return;
         }
+        self.view_dy = 0.0;
+        self.eye_lag = 0.0;
+        self.bob_weight = 0.0;
         let c = &mut self.curr;
 
         let forward = c.forward();
@@ -147,7 +213,9 @@ impl Sim {
         } else {
             MOVE_SPEED
         };
-        c.position += wish * speed * TICK_DT as f32;
+        let dt = TICK_DT as f32;
+        self.velocity = approach(self.velocity, wish * speed, FLY_ACCEL * dt);
+        c.position += self.velocity * dt;
         self.tick += 1;
     }
 
@@ -176,11 +244,29 @@ impl Sim {
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
-        let speed = if input.fast { RUN_SPEED } else { WALK_SPEED };
-        let delta = wish * speed * dt;
-
         let pos = Vec2::new(c.position.x, c.position.z);
         let mut feet = c.position.y - EYE_HEIGHT_M;
+
+        // Нужная скорость: шаг или бег, медленнее на подъёме.
+        let mut target_speed = if input.fast { RUN_SPEED } else { WALK_SPEED };
+        if let (Some(dir), Some(g)) = (wish.try_normalize(), ground.sample_ground(pos.x, pos.y))
+            && g.normal.y > 1e-3
+        {
+            // Нормаль по горизонтали смотрит вниз по склону.
+            let rise = -(dir.x * g.normal.x + dir.y * g.normal.z) / g.normal.y;
+            target_speed /= 1.0 + UPHILL_SLOWDOWN * rise.max(0.0);
+        }
+        let target = wish * target_speed;
+        let mut vel = Vec2::new(self.velocity.x, self.velocity.z);
+        let rate = if !self.on_ground {
+            AIR_ACCEL
+        } else if wish == Vec2::ZERO {
+            GROUND_FRICTION
+        } else {
+            GROUND_ACCEL
+        };
+        vel = approach2(vel, target, rate * dt);
+        let delta = vel * dt;
 
         // Полный шаг, иначе скольжение вдоль одной оси.
         let mut new_pos = pos;
@@ -189,10 +275,10 @@ impl Sim {
             // Скольжение только по составляющей заметной длины: sin/cos от
             // yaw дают ~1e-8 вместо нуля, и такой «шаг» не должен считаться движением.
             const MIN_SLIDE_M: f32 = 1e-4;
-            for candidate in [
-                pos + delta,
-                pos + Vec2::new(delta.x, 0.0),
-                pos + Vec2::new(0.0, delta.y),
+            for (candidate, keep) in [
+                (pos + delta, Vec2::ONE),
+                (pos + Vec2::new(delta.x, 0.0), Vec2::X),
+                (pos + Vec2::new(0.0, delta.y), Vec2::Y),
             ] {
                 if (candidate - pos).length() < MIN_SLIDE_M {
                     continue;
@@ -200,12 +286,22 @@ impl Sim {
                 if let Some(h) = Self::can_step(ground, candidate, feet) {
                     new_pos = candidate;
                     stepped_to = Some(h);
+                    // Упёрлись по одной оси — гасим скорость по ней.
+                    vel *= keep;
                     break;
                 }
             }
             if stepped_to.is_none() {
                 self.blocked_ticks += 1;
+                vel = Vec2::ZERO;
             }
+        }
+        self.velocity = Vec3::new(vel.x, 0.0, vel.y);
+
+        // Прыжок с грунта.
+        if self.on_ground && input.up > 0.0 {
+            self.vertical_speed = JUMP_SPEED;
+            self.on_ground = false;
         }
 
         // Вертикаль: подъём на ступеньку сразу, спуск — по земле или падением.
@@ -215,30 +311,87 @@ impl Sim {
                 .sample_ground(new_pos.x, new_pos.y)
                 .map_or(feet, |g| g.height),
         };
-        if ground_h >= feet {
+        let old_feet = feet;
+        let was_airborne = !self.on_ground;
+        if self.vertical_speed <= 0.0 && ground_h >= feet {
             feet = ground_h;
             self.vertical_speed = 0.0;
             self.on_ground = true;
-        } else if self.on_ground && feet - ground_h <= MAX_STEP_M {
+        } else if self.on_ground && self.vertical_speed <= 0.0 && feet - ground_h <= MAX_STEP_M {
             // Шаг вниз по склону или со ступеньки без отрыва от земли.
             feet = ground_h;
             self.vertical_speed = 0.0;
         } else {
+            let fall_speed = -self.vertical_speed;
             self.vertical_speed -= GRAVITY * dt;
             feet += self.vertical_speed * dt;
             if feet <= ground_h {
                 feet = ground_h;
                 self.vertical_speed = 0.0;
                 self.on_ground = true;
+                // Приседание при приземлении.
+                self.eye_lag -= (fall_speed.max(0.0) * LAND_DIP_PER_SPEED).min(LAND_DIP_MAX);
             } else {
                 self.on_ground = false;
             }
         }
         c.position = Vec3::new(new_pos.x, feet + EYE_HEIGHT_M, new_pos.y);
+
+        // Вид: ступенька поднимает глаза плавно, а не рывком.
+        let rise = feet - old_feet;
+        if !was_airborne && self.on_ground && rise > STEP_SMOOTH_MIN {
+            self.eye_lag -= rise;
+        }
+        self.eye_lag =
+            (self.eye_lag * (-dt / STEP_SMOOTH_TAU).exp()).max(-MAX_STEP_M - LAND_DIP_MAX);
+
+        // Покачивание головы по пройденному пути.
+        let moved = (new_pos - pos).length();
+        self.bob_phase =
+            (self.bob_phase + moved / BOB_STRIDE_M * std::f32::consts::PI) % std::f32::consts::TAU;
+        let speed_now = moved / dt;
+        let weight_target = if self.on_ground && self.head_bob {
+            (speed_now / WALK_SPEED).min(1.0)
+        } else {
+            0.0
+        };
+        self.bob_weight += (weight_target - self.bob_weight) * (1.0 - (-dt / 0.15).exp());
+        let amplitude = if speed_now > 0.5 * (WALK_SPEED + RUN_SPEED) {
+            BOB_RUN_M
+        } else {
+            BOB_WALK_M
+        };
+        // |sin|: глаза ниже всего в момент постановки ноги, дважды за цикл шага.
+        let bob = -amplitude * self.bob_weight * (1.0 - self.bob_phase.sin().abs());
+        self.view_dy = self.eye_lag + bob;
     }
 
+    /// Камера для вида: интерполированное положение плюс сдвиг глаз `view_dy`.
     pub fn interpolated(&self, alpha: f32) -> CameraState {
-        self.prev.lerp(&self.curr, alpha)
+        let mut c = self.prev.lerp(&self.curr, alpha);
+        c.position.y += self.view_dy_prev + (self.view_dy - self.view_dy_prev) * alpha;
+        c
+    }
+}
+
+/// Сдвигает `v` к `target` не больше чем на `max_delta`.
+fn approach(v: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
+    let d = target - v;
+    let len = d.length();
+    if len <= max_delta {
+        target
+    } else {
+        v + d * (max_delta / len)
+    }
+}
+
+fn approach2(v: Vec2, target: Vec2, max_delta: f32) -> Vec2 {
+    let d = target - v;
+    let len = d.length();
+    if len <= max_delta {
+        target
+    } else {
+        v + d * (max_delta / len)
     }
 }
 
@@ -480,5 +633,169 @@ mod tests {
             }
         }
         assert!(crossed.len() >= 2, "пройдено тайлов: {}", crossed.len());
+    }
+
+    fn flat() -> Synthetic<impl Fn(f32, f32) -> f32> {
+        Synthetic(|_x: f32, _z: f32| 0.0)
+    }
+
+    #[test]
+    fn accelerates_to_walk_speed_and_stops_quickly() {
+        let ground = flat();
+        let mut sim = walk_east(&ground, 12); // 0,2 с
+        let speed = sim.velocity.length();
+        assert!((speed - WALK_SPEED).abs() < 1e-4, "скорость {speed}");
+        let x = sim.curr.position.x;
+        for _ in 0..15 {
+            sim.step(&TickInput::default(), Some(&ground));
+        }
+        assert_eq!(sim.velocity, Vec3::ZERO, "остановка за 0,25 с");
+        let slide = sim.curr.position.x - x;
+        assert!(slide > 0.0 && slide < 0.5, "выбег {slide} м");
+    }
+
+    #[test]
+    fn uphill_is_slower_than_flat() {
+        let slope = Synthetic(|x: f32, _z: f32| x * 25f32.to_radians().tan());
+        let up = walk_east(&slope, 120).curr.position.x;
+        let level = walk_east(&flat(), 120).curr.position.x;
+        assert!(up < level * 0.8, "вверх {up}, ровно {level}");
+    }
+
+    #[test]
+    fn jump_lifts_and_lands_on_ground() {
+        let ground = flat();
+        let mut sim = walk_east(&ground, 10);
+        let jump = TickInput {
+            up: 1.0,
+            ..Default::default()
+        };
+        sim.step(&jump, Some(&ground));
+        assert!(!sim.on_ground);
+        let mut apex: f32 = 0.0;
+        for _ in 0..120 {
+            sim.step(&TickInput::default(), Some(&ground));
+            apex = apex.max(feet(&sim));
+        }
+        assert!(apex > 0.7 && apex < 1.1, "высота прыжка {apex}");
+        assert!(sim.on_ground && feet(&sim).abs() < 1e-5);
+    }
+
+    #[test]
+    fn step_up_is_smoothed_only_in_view() {
+        let ground = Synthetic(|x: f32, _z: f32| if x > 0.0 { 0.3 } else { 0.0 });
+        let mut sim = Sim::new(CameraState {
+            position: Vec3::new(-0.2, 10.0, 0.0),
+            yaw: -std::f32::consts::FRAC_PI_2,
+            pitch: 0.0,
+        });
+        sim.set_mode(MoveMode::Walk, &ground);
+        sim.head_bob = false;
+        let input = TickInput {
+            forward: 1.0,
+            ..Default::default()
+        };
+        let mut seen_lag = false;
+        for _ in 0..30 {
+            sim.step(&input, Some(&ground));
+            if sim.curr.position.x > 0.0 && !seen_lag {
+                // Физически уже на ступеньке, глаза поднимаются плавно.
+                assert!((feet(&sim) - 0.3).abs() < 1e-5);
+                assert!(sim.view_dy < -0.1, "view_dy = {}", sim.view_dy);
+                seen_lag = true;
+            }
+        }
+        assert!(seen_lag);
+        assert!(sim.view_dy.abs() < 0.01, "сглаживание затухает");
+    }
+
+    #[test]
+    fn look_applies_without_interpolation_lag() {
+        let mut sim = Sim::new(start());
+        sim.look(100.0, 0.0);
+        let expected = -100.0 * MOUSE_SENSITIVITY;
+        assert!((sim.interpolated(0.0).yaw - expected).abs() < 1e-6);
+        assert!((sim.interpolated(1.0).yaw - expected).abs() < 1e-6);
+    }
+
+    /// Бот проходит всю тропу первой карты бегом, держа точку в 3 м впереди
+    /// на оси тропы. Замена ручного прохода из критериев 02.1.
+    #[test]
+    fn bot_walks_whole_trail_from_start_to_shore() {
+        let world = crate::world::World::generate(0xEC40, 12, 12);
+        let trail = &world.generator.trail;
+        let len = trail.length();
+        let start = trail.point_at(0.0);
+        let end = trail.point_at(1.0);
+        let mut sim = Sim::new(CameraState {
+            position: Vec3::new(start.x, 100.0, start.y),
+            yaw: 0.0,
+            pitch: 0.0,
+        });
+        sim.set_mode(MoveMode::Walk, &world);
+        let input = TickInput {
+            forward: 1.0,
+            fast: true,
+            ..Default::default()
+        };
+        let max_ticks = (len / 2.0 * 60.0) as u64; // не медленнее 2 м/с в среднем
+        let mut airborne = 0u64;
+        let mut reached = false;
+        for _ in 0..max_ticks {
+            let p = Vec2::new(sim.curr.position.x, sim.curr.position.z);
+            let (_, t, _) = trail.nearest(p);
+            let target = trail.point_at(t + 3.0 / len);
+            let d = target - p;
+            let yaw = (-d.x).atan2(-d.y);
+            sim.curr.yaw = yaw;
+            sim.prev.yaw = yaw;
+            sim.step(&input, Some(&world));
+            let g = world
+                .sample_ground(sim.curr.position.x, sim.curr.position.z)
+                .expect("бот ушёл за карту");
+            assert!(feet(&sim) >= g.height - 1e-3, "провал под грунт в {p}");
+            if sim.on_ground {
+                assert!((feet(&sim) - g.height).abs() < 1e-3, "не на грунте в {p}");
+            } else {
+                airborne += 1;
+            }
+            if (Vec2::new(sim.curr.position.x, sim.curr.position.z) - end).length() < 3.0 {
+                reached = true;
+                break;
+            }
+        }
+        let p = sim.curr.position;
+        if !reached {
+            let (dr, _, _) = world.generator.river.nearest(Vec2::new(p.x, p.z));
+            let (dt, t, _) = trail.nearest(Vec2::new(p.x, p.z));
+            eprintln!(
+                "до реки {dr:.1} м, до тропы {dt:.1} м, t {t:.3}, ticks {} blocked {}",
+                sim.tick, sim.blocked_ticks
+            );
+            for k in -4..=4 {
+                let q = trail.point_at(t + k as f32 * 1.0 / len);
+                let g = world.sample_ground(q.x, q.y).unwrap();
+                eprintln!(
+                    "  {k:+} м: h {:.2} n.y {:.3} wet {}",
+                    g.height, g.normal.y, g.wet
+                );
+            }
+        }
+        assert!(
+            reached,
+            "не дошёл: остановился в ({:.1}, {:.1}) из {len:.0} м",
+            p.x, p.z
+        );
+        assert!(
+            sim.blocked_ticks * 100 < sim.tick,
+            "заблокирован {} тиков из {}",
+            sim.blocked_ticks,
+            sim.tick
+        );
+        eprintln!(
+            "тропа {len:.0} м за {:.1} с, тиков упора {}, в воздухе {airborne}",
+            sim.tick as f32 / 60.0,
+            sim.blocked_ticks
+        );
     }
 }

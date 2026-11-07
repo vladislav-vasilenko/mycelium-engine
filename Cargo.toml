@@ -19,6 +19,7 @@ raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 winit = "0.30"
+zune-jpeg = "0.5.15"
 
 # Свой код без оптимизаций: переменные и шаги видны в отладчике.
 # Зависимости (glam, objc2, winit) оптимизированы, чтобы кадр не тормозил.

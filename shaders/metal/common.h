@@ -11,6 +11,9 @@ struct FrameUniforms {
     float exposure;
     float pattern_time;
     uint frame_index;
+    uint view_mode;        // TerrainView, 0 — с освещением
+    float map_size_m;      // сторона карты: XZ → координаты маски влажности
+    float2 _pad;
 };
 
 struct InstanceData {

@@ -35,13 +35,15 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[5] = uint((thread char*)&f.exposure - fb);
     out[6] = uint((thread char*)&f.pattern_time - fb);
     out[7] = uint((thread char*)&f.frame_index - fb);
-    out[8] = sizeof(InstanceData);
-    out[9] = uint((thread char*)&i.tint - ib);
-    out[10] = sizeof(Vertex);
-    out[11] = uint((thread char*)&v.normal - vb);
-    out[12] = uint((thread char*)&v.uv - vb);
-    out[13] = sizeof(TerrainVertex);
-    out[14] = uint((thread char*)&tv.normal - tb);
-    out[15] = uint((thread char*)&tv.weights - tb);
-    out[16] = uint((thread char*)&tv.material - tb);
+    out[8] = uint((thread char*)&f.view_mode - fb);
+    out[9] = uint((thread char*)&f.map_size_m - fb);
+    out[10] = sizeof(InstanceData);
+    out[11] = uint((thread char*)&i.tint - ib);
+    out[12] = sizeof(Vertex);
+    out[13] = uint((thread char*)&v.normal - vb);
+    out[14] = uint((thread char*)&v.uv - vb);
+    out[15] = sizeof(TerrainVertex);
+    out[16] = uint((thread char*)&tv.normal - tb);
+    out[17] = uint((thread char*)&tv.weights - tb);
+    out[18] = uint((thread char*)&tv.material - tb);
 }

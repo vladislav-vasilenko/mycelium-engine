@@ -136,7 +136,7 @@ sequenceDiagram
 
 ### 4.1. `src/main.rs` — приложение и цикл кадра
 
-Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти).
+Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы, V/Shift+V — отладочные виды ландшафта, K — тестовая маска мокрого песка, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`, `--wet-test`.
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
@@ -144,7 +144,7 @@ sequenceDiagram
 | `WORLD_SEED` = `0xEC40`, `WORLD_TILES` = 12, `DETAIL_TEXTURE_SIZE` = 512 | const | Первая карта и её текстура |
 | `SKY_COLOR`, `TEST_SCENE_CLEAR` | const | Цвет очистки для ландшафта и для тестовой сцены |
 | `SceneMode` | enum | `Cubes` — тестовая сцена этапа 01, `Terrain` — ландшафт и маркеры |
-| `Args { selftest, overview, capture_frame, world, export_world }` | struct | Аргументы командной строки. `Args::parse()` разбирает `std::env::args` |
+| `Args { selftest, overview, capture_frame, world, export_world, camera, view, wet_test }` | struct | Аргументы командной строки. `Args::parse()` разбирает `std::env::args` |
 | `load_world(&Args) -> World` | fn | `layers::import(dir)` при `--world`, иначе `World::generate`; ошибка слоёв — сообщение и выход с кодом 2 |
 | `trail_start_camera(&World)` | fn | Поза на начале тропы, взгляд вдоль тропы |
 | `island_overview_camera(&World)` | fn | Камера `--overview`: 330 м над юго-западным морем, взгляд на центр острова |
@@ -158,6 +158,9 @@ sequenceDiagram
 | `compare_terrain_depth(rb, view, proj, &World, log) -> (hits, sky, bad, worst)` | fn | Глубина ландшафта с GPU, переведённая в метры (`NEAR_PLANE_M / depth`), против луча по `sample_ground`; допуск 2·10⁻³ относительно; небо — глубина 0 |
 | `verify_terrain_readback(...)`, `report_terrain_readback(...)` | fn | Проверка ландшафта в самопроверке и вывод по F9 |
 | `report_readback(rb, view, proj)` | fn | То же для F9 в обычном режиме, вывод в stderr |
+| `look_camera(from, to)` | fn | Камера для `--camera` |
+| `App::toggle_wet_test()` | fn | Клавиша K: тестовая маска мокрого песка ↔ сухо (`Renderer::set_wetness`) |
+| `compare_terrain_raw(rb, view, proj, &World)` | fn | Вид `Raw`: высота ±5 см, уклон грани ±2°, доминирующий биом ближайшего узла против CPU |
 | `main()` | fn | При `--export-world` записывает слои и выходит; иначе создаёт `EventLoop` (`ControlFlow::Poll`), запускает `App`, выходит с `exit_code` |
 
 Поля `App`:
@@ -235,15 +238,15 @@ sequenceDiagram
 
 | Структура | Размер, выравнивание | Поля и смещения |
 | --- | --- | --- |
-| `FrameUniforms` | 112 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108 |
+| `FrameUniforms` | 128 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108, `view_mode u32` @112 (`TerrainView`), `map_size_m f32` @116, `_pad [f32;2]` @120 |
 | `InstanceData` | 80 Б, 16 | `model [[f32;4];4]` @0, `tint [f32;4]` @64 |
 | `Vertex` | 32 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24. В MSL — `packed_float3`, `packed_float3`, `float2` |
-| `TerrainVertex` | 32 Б, 4 | `position [f32;3]` @0 (мировые м), `normal [f32;3]` @12, `weights [u8;4]` @24 (лес, торф, берег, тропа), `material [u8;4]` @28 (субстрат, русло, влажность, резерв). В MSL — `packed_float3`, `packed_float3`, `uchar4`, `uchar4` |
+| `TerrainVertex` | 32 Б, 4 | `position [f32;3]` @0 (мировые м), `normal [f32;3]` @12, `weights [u8;4]` @24 (лес, торф, берег, тропа), `material [u8;4]` @28 (субстрат, русло, влажность, тип берега 0 песок … 255 камень). В MSL — `packed_float3`, `packed_float3`, `uchar4`, `uchar4` |
 
 | Элемент | Описание |
 | --- | --- |
-| `expected_probe() -> [u32; 17]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
-| `LAYOUT_PROBE_LEN = 17`, `LAYOUT_PROBE_NAMES` | Длина и имена полей для диагностики |
+| `expected_probe() -> [u32; 19]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
+| `LAYOUT_PROBE_LEN = 19`, `LAYOUT_PROBE_NAMES` | Длина и имена полей для диагностики |
 
 Изменение любой структуры требует правки `common.h` в той же правке; несовпадение ловят тест `cpu_layout_matches_msl_rules` и самопроверка.
 
@@ -406,6 +409,18 @@ sequenceDiagram
 | `pixel_ray(px, py, w, h, view, proj) -> (origin, dir)` | Луч из центра пикселя в мире |
 | `expected_terrain_view_depth((px, py), (w, h), view, proj, &dyn Ground, max_dist) -> Option<f32>` | Шаг 0,25 м до пересечения с грунтом, 40 шагов бисекции, глубина по оси взгляда в метрах; `None` — за картой или дальше `max_dist` |
 
+### 4.9a. `src/terrain_materials.rs` — материалы ландшафта
+
+| Элемент | Вид | Описание |
+| --- | --- | --- |
+| `MaterialLayer { id, role }`, `LAYERS` | struct, const | 5 слоёв: 0 камень `Rock062`, 1 песок `Ground093A`, 2 почва `Ground082S`, 3 мох `Moss002`, 4 лесная подстилка `Ground037`; индекс = `MAT_*` в MSL |
+| `MATERIAL_SIZE` = 1024 | const | сторона текстуры |
+| `MaterialArrays { size, layers, albedo_height, normal_rough }` | struct | упакованные слои RGBA8: цвет + высота (Displacement); нормаль XY + шероховатость + 255 |
+| `source_dir()` | fn | `Contents/Resources/ambientcg` в бандле или `assets/source/ambientcg` |
+| `load(dir) -> Result<MaterialArrays, String>` | fn | декодирует `Color`, `NormalGL`, `Roughness`, `Displacement` (JPEG, `zune-jpeg`) параллельно по слоям; ошибка называет материал и файл |
+| `TerrainView` | enum `u32` | `Lit` 0, `Height` 1, `Slope` 2, `Biome` 3, `Substrate` 4, `CoastType` 5, `Wetness` 6, `Materials` 7, `Raw` 15 (числа для самопроверки); `next(back)`, `name()`, `parse(name)` |
+| `wetness_test_mask(&World) -> (u32, Vec<u8>)` | fn | тестовая маска R8 1 м/тексель: полоса от кромки до 0,7 м над морем на песчаных участках |
+
 ### 4.10. Сборка `.app`
 
 `scripts/bundle-app.sh [--open]` собирает `target/release/Echo.app`:
@@ -446,17 +461,17 @@ sequenceDiagram
 | `common.h` | `FrameUniforms`, `InstanceData`, `Vertex`, `pattern_color` | Общие типы и эталонная функция узора |
 | `pattern.metal` | `pattern_main` (kernel), `layout_probe` (kernel) | Диагностический узор; запись размеров и смещений структур |
 | `scene.metal` | `scene_vs`, `scene_fs` | Вершины из буфера по `vertex_id`, экземпляры по `instance_id`; ambient + Ламберт с текстурой узора |
-| `terrain.metal` | `terrain_vs`, `terrain_fs` | Вершина `instance_id × 4225 + vertex_id`; цвета биомов, камень на склонах, галька, тропа, детальная текстура, временный свет. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
+| `terrain.metal` | `terrain_vs`, `terrain_fs`, `sample_layer`, `ramp` | Вершина `instance_id × 4225 + vertex_id`; 5 слоёв материалов ambientCG по весам, типу берега, уклону, тропе, руслу и дну, смешивание по высоте рельефа материала, карты нормалей, мокрый песок по маске, солнце (Ламберт + GGX) и небо; отладочные виды по `view_mode`. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
 | `tonemap.metal` | `tonemap_vs`, `tonemap_fs` | Полноэкранный треугольник без буфера; экспозиция и ACES (Narkowicz) |
 
-Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 4 буферов и 2 текстур):
+Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 4 буферов и 4 текстур):
 
 | Проход | `buffer(0)` | `buffer(1)` | `buffer(2)` | `texture(0)` | Стадии |
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины ландшафта | upload: `FrameUniforms` | — | детальная текстура | vertex, fragment |
-| `readback` | `readback_buf` + `RB_PROBE_OFFSET` | — | — | — | compute |
+| `terrain` (в проходе `scene`) | вершины ландшафта | upload: `FrameUniforms` | — | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска влажности R8 | vertex, fragment |
+| `readback` | `readback_buf` + `RB_PROBE_OFFSET` | — | — | — (копии: узор, глубина и HDR в 9 точках) | compute |
 | `tonemap` | — | upload: `FrameUniforms` | — | `hdr` (sample) | vertex, fragment |
 
 Сэмплеры заданы в MSL через `constexpr sampler`, отдельные объекты сэмплеров не используются.
@@ -567,7 +582,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.1 · Остров: суша окружена морем, плавная береговая линия, дно уходит под воду | `Generator::coast_distance`, `terrain_without_trail`, тест `island_is_surrounded_by_sea` | Выполнено (AD-36) |
 | 02.1 · Проход по тропе от начала до каменистого берега | Бот в тесте `bot_walks_whole_trail_from_start_to_shore`, брод (AD-33) | Выполнено |
 | 02.1 · Маска типа берега: песчаные бухты и каменистые мысы | `Generator::rocky`, `coast_type.png`, тест `coast_alternates_sand_and_rock` | Выполнено (AD-37) |
-| 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView`, мокрый песок, материалы берега | — | Не начато |
+| 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView`, мокрый песок, материалы берега | `terrain_materials.rs`, `Renderer::set_terrain`/`set_wetness`, `terrain.metal`, вид `Raw` в самопроверке | Выполнено (AD-38); 5 слоёв вместо 4 |
 | 02.3 · `TileBounds`, `TileDraw`, индексы 65/33/17 по маске краёв | — | Не начато |
 | 02.4 · `Placement`, группы экземпляров, береговой декор | — | Не начато |
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, накат, мокрый песок, пена | — | Не начато |
@@ -818,6 +833,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Маска не следит за реальной формой бухт: в узком заливе тип может смениться посреди изгиба. Слои формата 1 больше не читаются.
 - **Пересмотреть.** Когда берег станет рисоваться вручную (слои) или появятся устья других рек.
 
+### AD-38. Материалы ландшафта: фотосканы ambientCG в двух массивах, смешивание по высоте
+
+- **Решение.** 5 материалов ambientCG (CC0, 1K): камень, песок, почва, мох, лесная подстилка. JPEG читаются при запуске (`zune-jpeg`) и упаковываются в два `texture2d_array` по 5 слоёв: альбедо (sRGB) + высота и нормаль + шероховатость; mip строит GPU. Шейдер выбирает доли слоёв по весам биомов, типу берега, тропе, руслу, уклону и дну, затем смешивает по высоте рельефа материала; повторы гасит вторая выборка в повёрнутых координатах. Мокрый песок — тот же песок по маске влажности R8 (1 м/тексель) с учётом впитывания слоя, отдельного слоя нет. Отладочные виды — `FrameUniforms.view_mode`; вид `Raw` пишет числа в HDR, самопроверка сверяет их с CPU через readback HDR.
+- **Почему.** Фотосканы дают реалистичный камень и песок у воды без ручной работы, лицензия CC0. Два массива вместо пяти пар текстур — одна привязка на тип данных и индекс слоя, общий для Rust и MSL. Смешивание по высоте даёт естественную границу (камень выступает из песка) вместо мутного перехода. Маска влажности вынесена в текстуру, чтобы прибой 03.1 обновлял её в compute без пересборки вершин.
+- **Отброшено.** Процедурные текстуры в коде — заметно синтетичнее. Хранить в репозитории упакованные PNG вместо JPEG — в 3–4 раза больше. Пятый слой «трава» вместо лесной подстилки — трава будет геометрией в 02.4. Триплановая проекция камня — в этой итерации не нужна, склоны пологие; пересмотреть на скалах.
+- **Цена.** 23 МБ JPEG в репозитории, ~0,8 с загрузки при старте (Debug), 2 × 5 × 4 МБ текстур на GPU с mip. Спецификация 02.2 называла 4 слоя — добавлена лесная подстилка. Отладочные виды проходят через тонмаппинг и выглядят светлее.
+- **Пересмотреть.** При скалах и оврагах (триплан), при стриминге этапа 08 (сжатые форматы ASTC/BC), при появлении травы 02.4.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -828,7 +851,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - Время GPU не измеряется: нужны `MTL4CounterHeap` и временные метки по проходам.
 - Ландшафт рисуется целиком без отсечения и LOD: 2,1 млн треугольников за кадр на карте 1024 м (подэтап 02.3).
 - Поверхности воды нет (этап 03): с высоты видны морское дно и квадратный край карты.
-- Освещение ландшафта временное (солнце + небо), без теней и тумана — до этапа 04.
+- Освещение ландшафта временное (солнце: Ламберт + GGX, небо), без теней и тумана — до этапа 04.
 - Диагностика выводится в заголовок окна и stderr, текстового оверлея нет.
 - Для подэтапа 02.5 планировщику нужна стадия indirect-аргументов (`compute output → indirect args`).
 
@@ -853,3 +876,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-08 | 02.1 | после `53f9e47` | AD-36: остров на карте 16 × 16 тайлов, `FIRST_MAP_TILES`, `Generator::coast_distance`, `first_map(seed)`, `island_*`/`cape_center`, `ROCKY_COAST_X`, `SEA_FLOOR_M`; `island_overview_camera` для `--overview`; `App::land` и клавиша R; G над водой переносит на начало тропы; диапазон высот слоёв −40…60 м |
 | 2026-11-08 | 02, 03 | после `2044379` | Спецификации: этап 03 разбит на подэтапы 03.1–03.4 (море и прибой после 02.2), в 02.1 — маска типа берега, в 02.2 — мокрый песок, в 02.4 — береговой декор; таблица соответствия дополнена. Код не менялся |
 | 2026-11-08 | 02.1 | после `7d787d0` | AD-37: маска типа берега `Generator::rocky`, `Generator::mouth`, `Fields.rocky`, `Sample.rocky`, `TerrainVertex.material[3]`, `substrate` без параметра x, слой `coast_type.png` (формат слоёв 2), генератор v4; `ROCKY_COAST_X` удалён |
+| 2026-11-08 | 02.2 | после `453a670` | AD-38: модуль `terrain_materials` (ambientCG, `TerrainView`, тестовая маска влажности), `FrameUniforms` 128 Б (`view_mode`, `map_size_m`), `layout_probe` 19 полей, `Renderer::set_terrain(…, &TerrainTextures)`, `set_wetness`, `upload_textures`, `sampled_texture`, readback HDR (`RB_HDR_OFFSET`, `Readback.hdr`, `f16_to_f32`), таблица `terrain` с 4 текстурами, новый `terrain.metal`; аргументы `--camera`, `--view`, `--wet-test`, клавиши V и K; шаг самопроверки вида `Raw` (19 проверок); ambientCG в `.app`. Зависимость `zune-jpeg` |

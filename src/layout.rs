@@ -18,6 +18,11 @@ pub struct FrameUniforms {
     pub exposure: f32,
     pub pattern_time: f32,
     pub frame_index: u32,
+    /// Режим вида ландшафта `TerrainView` (0 — с освещением).
+    pub view_mode: u32,
+    /// Сторона карты, м: мировые XZ → координаты маски влажности.
+    pub map_size_m: f32,
+    pub _pad: [f32; 2],
 }
 
 #[repr(C, align(16))]
@@ -60,6 +65,8 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(FrameUniforms, exposure) as u32,
         offset_of!(FrameUniforms, pattern_time) as u32,
         offset_of!(FrameUniforms, frame_index) as u32,
+        offset_of!(FrameUniforms, view_mode) as u32,
+        offset_of!(FrameUniforms, map_size_m) as u32,
         size_of::<InstanceData>() as u32,
         offset_of!(InstanceData, tint) as u32,
         size_of::<Vertex>() as u32,
@@ -72,7 +79,7 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 17;
+pub const LAYOUT_PROBE_LEN: usize = 19;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -83,6 +90,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "FrameUniforms.exposure",
     "FrameUniforms.pattern_time",
     "FrameUniforms.frame_index",
+    "FrameUniforms.view_mode",
+    "FrameUniforms.map_size_m",
     "sizeof(InstanceData)",
     "InstanceData.tint",
     "sizeof(Vertex)",
@@ -104,7 +113,7 @@ mod tests {
         assert_eq!(
             expected_probe(),
             [
-                112, 16, 64, 80, 96, 100, 104, 108, 80, 64, 32, 12, 24, 32, 12, 24, 28
+                128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28
             ]
         );
     }

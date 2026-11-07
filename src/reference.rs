@@ -125,13 +125,26 @@ pub fn pixel_ray(
 /// затем бисекция по `ground.sample_ground`. `None` — луч ушёл за карту или
 /// дальше `max_dist`.
 pub fn expected_terrain_view_depth(
+    pixel: (u32, u32),
+    size: (u32, u32),
+    view: Mat4,
+    proj: Mat4,
+    ground: &dyn crate::world::Ground,
+    max_dist: f32,
+) -> Option<f32> {
+    terrain_hit(pixel, size, view, proj, ground, max_dist)
+        .map(|hit| -(view.transform_point3(hit)).z)
+}
+
+/// Точка пересечения луча пикселя с ландшафтом в мировых координатах.
+pub fn terrain_hit(
     (px, py): (u32, u32),
     (width, height): (u32, u32),
     view: Mat4,
     proj: Mat4,
     ground: &dyn crate::world::Ground,
     max_dist: f32,
-) -> Option<f32> {
+) -> Option<Vec3> {
     let (origin, dir) = pixel_ray(px, py, width, height, view, proj);
     let above = |t: f32| {
         let p = origin + dir * t;
@@ -152,8 +165,7 @@ pub fn expected_terrain_view_depth(
                         hi = mid
                     }
                 }
-                let hit = origin + dir * hi;
-                return Some(-(view.transform_point3(hit)).z);
+                return Some(origin + dir * hi);
             }
             _ => {
                 t0 = t;

@@ -52,7 +52,9 @@ pub const DEPTH_SAMPLES: [(f32, f32); 9] = [
     (0.50, 0.20),
 ];
 const RB_PROBE_OFFSET: usize = RB_DEPTH_OFFSET + 256;
-const RB_BYTES: usize = RB_PROBE_OFFSET + 256;
+/// Пиксели HDR-буфера (RGBA16Float, 8 байт) в тех же точках, что и глубина.
+const RB_HDR_OFFSET: usize = RB_PROBE_OFFSET + 256;
+const RB_BYTES: usize = RB_HDR_OFFSET + 256;
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
@@ -148,6 +150,29 @@ struct TerrainGpu {
     index_count: usize,
     tile_count: usize,
     detail: Obj<dyn MTLTexture>,
+    /// Массив материалов: RGB — альбедо (sRGB), A — высота для смешивания.
+    albedo: Obj<dyn MTLTexture>,
+    /// Массив материалов: RG — нормаль, B — шероховатость.
+    normal: Obj<dyn MTLTexture>,
+    /// Маска влажности R8 на всю карту, 1 тексель на метр.
+    wetness: Obj<dyn MTLTexture>,
+}
+
+/// Текстуры ландшафта для `Renderer::set_terrain`.
+pub struct TerrainTextures<'a> {
+    pub detail_rgba: &'a [u8],
+    pub detail_size: u32,
+    pub materials: &'a crate::terrain_materials::MaterialArrays,
+    pub wetness: &'a [u8],
+    pub wetness_size: u32,
+}
+
+struct TextureUpload<'a> {
+    texture: &'a Obj<dyn MTLTexture>,
+    /// Слой за слоем, строки без выравнивания.
+    data: &'a [u8],
+    pixel_bytes: usize,
+    mips: bool,
 }
 
 pub struct Readback {
@@ -158,6 +183,8 @@ pub struct Readback {
     pub pattern: Vec<u8>,
     /// (x, y, глубина) в пикселях целевого буфера.
     pub depth: Vec<(u32, u32, f32)>,
+    /// Значения HDR-буфера (до тонмаппинга) в тех же точках.
+    pub hdr: Vec<[f32; 4]>,
     pub probe: [u32; LAYOUT_PROBE_LEN],
 }
 
@@ -264,6 +291,24 @@ where
     ProtocolObject::from_ref(obj)
 }
 
+/// IEEE 754 half → f32 (формат HDR-буфера `RGBA16Float`).
+fn f16_to_f32(h: u16) -> f32 {
+    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exp = ((h >> 10) & 0x1f) as i32;
+    let frac = (h & 0x3ff) as f32;
+    sign * match exp {
+        0 => frac * 2f32.powi(-24),
+        31 => {
+            if frac == 0.0 {
+                f32::INFINITY
+            } else {
+                f32::NAN
+            }
+        }
+        _ => (1.0 + frac / 1024.0) * 2f32.powi(exp - 15),
+    }
+}
+
 fn shared_buffer(
     device: &ProtocolObject<dyn MTLDevice>,
     len: usize,
@@ -287,6 +332,41 @@ fn upload_bytes(buf: &ProtocolObject<dyn MTLBuffer>, offset: usize, bytes: &[u8]
         let dst = buf.contents().as_ptr().cast::<u8>().add(offset);
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
     }
+}
+
+/// Квадратная текстура (или массив при `layers > 1`) для чтения в шейдере.
+fn sampled_texture(
+    device: &ProtocolObject<dyn MTLDevice>,
+    format: MTLPixelFormat,
+    size: u32,
+    layers: usize,
+    mips: bool,
+    name: &str,
+) -> Result<Obj<dyn MTLTexture>, String> {
+    let desc = MTLTextureDescriptor::new();
+    desc.setTextureType(if layers > 1 {
+        MTLTextureType::Type2DArray
+    } else {
+        MTLTextureType::Type2D
+    });
+    desc.setPixelFormat(format);
+    unsafe {
+        desc.setWidth(size as usize);
+        desc.setHeight(size as usize);
+        desc.setArrayLength(layers);
+        desc.setMipmapLevelCount(if mips {
+            (size.max(1).ilog2() + 1) as usize
+        } else {
+            1
+        });
+    }
+    desc.setUsage(MTLTextureUsage::ShaderRead);
+    desc.setStorageMode(MTLStorageMode::Private);
+    let tex = device
+        .newTextureWithDescriptor(&desc)
+        .ok_or_else(|| format!("текстура {name}"))?;
+    tex.setLabel(Some(&label(name)));
+    Ok(tex)
 }
 
 fn private_texture(
@@ -333,7 +413,11 @@ fn frame_passes(readback: bool) -> Vec<PassDecl> {
         passes.push(PassDecl {
             name: "readback",
             kind: PassKind::Compute,
-            reads: vec![(RES_PATTERN, Stages::BLIT), (RES_DEPTH, Stages::BLIT)],
+            reads: vec![
+                (RES_PATTERN, Stages::BLIT),
+                (RES_DEPTH, Stages::BLIT),
+                (RES_HDR, Stages::BLIT),
+            ],
             writes: vec![(RES_READBACK, Stages::DISPATCH | Stages::BLIT)],
         });
     }
@@ -420,7 +504,7 @@ impl Renderer {
             let table = |name: &str| -> Result<Obj<dyn MTL4ArgumentTable>, String> {
                 let d = MTL4ArgumentTableDescriptor::new();
                 d.setMaxBufferBindCount(4);
-                d.setMaxTextureBindCount(2);
+                d.setMaxTextureBindCount(4);
                 d.setLabel(Some(&label(&format!("{name} args, slot {i}"))));
                 device
                     .newArgumentTableWithDescriptor_error(&d)
@@ -650,6 +734,16 @@ impl Renderer {
                 )
             })
             .collect();
+        let hdr = (0..p.pixels.len())
+            .map(|i| {
+                let o = RB_HDR_OFFSET + i * 8;
+                std::array::from_fn(|c| {
+                    f16_to_f32(u16::from_le_bytes(
+                        bytes[o + c * 2..o + c * 2 + 2].try_into().unwrap(),
+                    ))
+                })
+            })
+            .collect();
         let mut probe = [0u32; LAYOUT_PROBE_LEN];
         for (i, v) in probe.iter_mut().enumerate() {
             let o = RB_PROBE_OFFSET + i * 4;
@@ -662,21 +756,21 @@ impl Renderer {
             height: p.height,
             pattern,
             depth,
+            hdr,
             probe,
         }
     }
 
-    /// Загружает ландшафт: буферы вершин и индексов, детальную текстуру
-    /// `detail_size × detail_size` RGBA8 с mip-уровнями. Mip строит GPU в
-    /// отдельном командном буфере; CPU ждёт его завершения, поэтому кадры,
-    /// отправленные позже, видят готовую текстуру без межкадрового барьера.
+    /// Загружает ландшафт: вершины всех тайлов, общие индексы, детальную текстуру,
+    /// массивы материалов и маску влажности. Mip строит GPU в отдельном командном
+    /// буфере; CPU ждёт его завершения, поэтому кадры, отправленные позже, видят
+    /// готовые текстуры без межкадрового барьера.
     pub fn set_terrain(
         &mut self,
         vertices: &[TerrainVertex],
         indices: &[u16],
         tile_count: usize,
-        detail_rgba: &[u8],
-        detail_size: u32,
+        tex: &TerrainTextures,
     ) -> Result<(), String> {
         let vbytes: &[u8] = bytemuck::cast_slice(vertices);
         let vbuf = shared_buffer(&self.device, vbytes.len(), "terrain vertices (all tiles)");
@@ -684,36 +778,128 @@ impl Renderer {
         let ibytes: &[u8] = bytemuck::cast_slice(indices);
         let ibuf = shared_buffer(&self.device, ibytes.len(), "terrain tile indices");
         upload_bytes(&ibuf, 0, ibytes);
-
-        let desc = unsafe {
-            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                MTLPixelFormat::RGBA8Unorm,
-                detail_size as usize,
-                detail_size as usize,
-                true,
-            )
-        };
-        desc.setUsage(MTLTextureUsage::ShaderRead);
-        desc.setStorageMode(MTLStorageMode::Private);
-        let detail = self
-            .device
-            .newTextureWithDescriptor(&desc)
-            .ok_or("terrain detail texture")?;
-        detail.setLabel(Some(&label("terrain detail (mipmapped)")));
-        let staging = shared_buffer(&self.device, detail_rgba.len(), "terrain detail staging");
-        upload_bytes(&staging, 0, detail_rgba);
-
-        for a in [
-            as_allocation(&*vbuf),
-            as_allocation(&*ibuf),
-            as_allocation(&*staging),
-        ] {
+        for a in [as_allocation(&*vbuf), as_allocation(&*ibuf)] {
             self.residency.addAllocation(a);
         }
-        self.residency.addAllocation(as_allocation(&*detail));
+
+        let m = tex.materials;
+        let detail = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm,
+            tex.detail_size,
+            1,
+            true,
+            "terrain detail (mipmapped)",
+        )?;
+        let albedo = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm_sRGB,
+            m.size as u32,
+            m.layers,
+            true,
+            "terrain materials: albedo + height",
+        )?;
+        let normal = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm,
+            m.size as u32,
+            m.layers,
+            true,
+            "terrain materials: normal + roughness",
+        )?;
+        let wetness = sampled_texture(
+            &self.device,
+            MTLPixelFormat::R8Unorm,
+            tex.wetness_size,
+            1,
+            false,
+            "terrain wetness mask",
+        )?;
+        self.upload_textures(&[
+            TextureUpload {
+                texture: &detail,
+                data: tex.detail_rgba,
+                pixel_bytes: 4,
+                mips: true,
+            },
+            TextureUpload {
+                texture: &albedo,
+                data: &m.albedo_height,
+                pixel_bytes: 4,
+                mips: true,
+            },
+            TextureUpload {
+                texture: &normal,
+                data: &m.normal_rough,
+                pixel_bytes: 4,
+                mips: true,
+            },
+            TextureUpload {
+                texture: &wetness,
+                data: tex.wetness,
+                pixel_bytes: 1,
+                mips: false,
+            },
+        ])?;
+
+        if let Some(old) = self.terrain.replace(TerrainGpu {
+            vertices: vbuf,
+            indices: ibuf,
+            index_count: indices.len(),
+            tile_count,
+            detail,
+            albedo,
+            normal,
+            wetness,
+        }) {
+            self.retire(
+                vec![old.detail, old.albedo, old.normal, old.wetness],
+                Some(Box::new((old.vertices, old.indices))),
+            );
+        }
+        Ok(())
+    }
+
+    /// Заменяет маску влажности ландшафта. Старая текстура освобождается после
+    /// кадров, которые могут её читать.
+    pub fn set_wetness(&mut self, data: &[u8], size: u32) -> Result<(), String> {
+        let wetness = sampled_texture(
+            &self.device,
+            MTLPixelFormat::R8Unorm,
+            size,
+            1,
+            false,
+            "terrain wetness mask",
+        )?;
+        self.upload_textures(&[TextureUpload {
+            texture: &wetness,
+            data,
+            pixel_bytes: 1,
+            mips: false,
+        }])?;
+        let terrain = self.terrain.as_mut().ok_or("ландшафт не загружен")?;
+        let old = std::mem::replace(&mut terrain.wetness, wetness);
+        self.retire(vec![old], None);
+        Ok(())
+    }
+
+    /// Одноразовая загрузка текстур: общий staging-буфер, копия каждого слоя
+    /// массива в mip 0, барьер blit → blit, генерация mip, ожидание завершения.
+    /// Текстуры добавляются в набор резидентности.
+    fn upload_textures(&mut self, uploads: &[TextureUpload]) -> Result<(), String> {
+        let total: usize = uploads.iter().map(|u| u.data.len()).sum();
+        let staging = shared_buffer(&self.device, total, "texture upload staging");
+        let mut offsets = Vec::with_capacity(uploads.len());
+        let mut at = 0;
+        for u in uploads {
+            upload_bytes(&staging, at, u.data);
+            offsets.push(at);
+            at += u.data.len();
+            self.residency.addAllocation(as_allocation(&**u.texture));
+        }
+        self.residency.addAllocation(as_allocation(&*staging));
         self.residency.commit();
 
-        // Одноразовая загрузка: копия staging → mip 0, барьер blit → blit, генерация mip.
         let allocator = self
             .device
             .newCommandAllocator()
@@ -722,29 +908,40 @@ impl Renderer {
             .device
             .newCommandBuffer()
             .ok_or("upload command buffer")?;
-        cmd.setLabel(Some(&label("terrain upload")));
+        cmd.setLabel(Some(&label("texture upload")));
         cmd.beginCommandBufferWithAllocator(&allocator);
         let enc = cmd.computeCommandEncoder().ok_or("upload encoder")?;
-        enc.setLabel(Some(&label("terrain detail mips")));
-        unsafe {
-            enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
-                &staging,
-                0,
-                detail_size as usize * 4,
-                detail_rgba.len(),
-                MTLSize { width: detail_size as usize, height: detail_size as usize, depth: 1 },
-                &detail,
-                0,
-                0,
-                MTLOrigin { x: 0, y: 0, z: 0 },
-            );
+        enc.setLabel(Some(&label("texture upload + mips")));
+        for (u, &offset) in uploads.iter().zip(&offsets) {
+            let (w, h) = (u.texture.width(), u.texture.height());
+            let slices = u.texture.arrayLength();
+            let row = w * u.pixel_bytes;
+            let image = row * h;
+            assert_eq!(u.data.len(), image * slices, "размер данных текстуры");
+            for slice in 0..slices {
+                unsafe {
+                    enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        &staging,
+                        offset + slice * image,
+                        row,
+                        image,
+                        MTLSize { width: w, height: h, depth: 1 },
+                        u.texture,
+                        slice,
+                        0,
+                        MTLOrigin { x: 0, y: 0, z: 0 },
+                    );
+                }
+            }
         }
         enc.barrierAfterEncoderStages_beforeEncoderStages_visibilityOptions(
             MTLStages::Blit,
             MTLStages::Blit,
             MTL4VisibilityOptions::Device,
         );
-        unsafe { enc.generateMipmapsForTexture(&detail) };
+        for u in uploads.iter().filter(|u| u.mips) {
+            unsafe { enc.generateMipmapsForTexture(u.texture) };
+        }
         enc.endEncoding();
         cmd.endCommandBuffer();
         let done = self.device.newSharedEvent().ok_or("upload event")?;
@@ -752,24 +949,11 @@ impl Renderer {
         unsafe { self.queue.commit_count(NonNull::from(&mut cmd_ptr), 1) };
         let done_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*done);
         self.queue.signalEvent_value(done_event, 1);
-        if !done.waitUntilSignaledValue_timeoutMS(1, 5000) {
-            return Err("загрузка ландшафта не завершилась за 5 с".into());
+        if !done.waitUntilSignaledValue_timeoutMS(1, 10_000) {
+            return Err("загрузка текстур не завершилась за 10 с".into());
         }
         self.residency.removeAllocation(as_allocation(&*staging));
         self.residency.commit();
-
-        if let Some(old) = self.terrain.replace(TerrainGpu {
-            vertices: vbuf,
-            indices: ibuf,
-            index_count: indices.len(),
-            tile_count,
-            detail,
-        }) {
-            self.retire(
-                vec![old.detail],
-                Some(Box::new((old.vertices, old.indices))),
-            );
-        }
         Ok(())
     }
 
@@ -928,6 +1112,9 @@ impl Renderer {
                             ttable.setAddress_atIndex(terrain.vertices.gpuAddress(), 0);
                             ttable.setAddress_atIndex(upload_addr, 1);
                             ttable.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
+                            ttable.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
+                            ttable.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
+                            ttable.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
                         }
                         enc.pushDebugGroup(&label(&format!(
                             "terrain: {} tiles",
@@ -1026,6 +1213,17 @@ impl Renderer {
                                 RB_DEPTH_OFFSET + i * 4,
                                 4,
                                 4,
+                            );
+                            enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                                &targets.hdr,
+                                0,
+                                0,
+                                MTLOrigin { x: x as usize, y: y as usize, z: 0 },
+                                MTLSize { width: 1, height: 1, depth: 1 },
+                                &self.readback_buf,
+                                RB_HDR_OFFSET + i * 8,
+                                8,
+                                8,
                             );
                         }
                     }

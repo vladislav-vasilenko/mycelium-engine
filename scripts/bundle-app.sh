@@ -2,6 +2,7 @@
 # Собирает запускаемый бандл target/release/Echo.app:
 #   Contents/MacOS/echo               — release-бинарник
 #   Contents/Resources/shaders/metal  — MSL, компилируется при запуске
+#   Contents/Resources/ambientcg      — фотосканы материалов ландшафта (CC0)
 #   Contents/Info.plist               — из packaging/Info.plist
 # Бандл подписывается ad-hoc (`codesign -s -`): запускается на этом Mac,
 # для распространения нужна подпись Developer ID и нотаризация.
@@ -42,6 +43,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/shaders"
 cp target/release/echo "$app/Contents/MacOS/echo"
 cp -R shaders/metal "$app/Contents/Resources/shaders/metal"
+cp -R assets/source/ambientcg "$app/Contents/Resources/ambientcg"
 sed -e "s/__VERSION__/$version/" -e "s/__BUILD__/$build/" packaging/Info.plist > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 

@@ -4,7 +4,8 @@
 //! Управление: клик — захват мыши, WASD — движение, Shift — бег/быстрее,
 //! Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой — на начало тропы),
 //! R — на начало тропы, E/Q — вверх/вниз в полёте,
-//! B — покачивание головы, T — ландшафт/тестовые кубы,
+//! B — покачивание головы, V/Shift+V — отладочные виды ландшафта,
+//! K — тестовая маска мокрого песка, T — ландшафт/тестовые кубы,
 //! Esc — отпустить мышь, ⌘M — свернуть, F5 — перезагрузить MSL,
 //! F9 — readback и сверка с эталоном, F12 — GPU capture одного кадра.
 //!
@@ -12,6 +13,9 @@
 //! `--overview` — старт в полёте над маршрутом,
 //! `--world DIR` — собрать мир из слоёв PNG в каталоге (`world.json`),
 //! `--export-world DIR` — записать слои сгенерированного мира и выйти,
+//! `--camera x,y,z,tx,ty,tz` — старт в полёте с взглядом на точку,
+//! `--view lit|height|slope|biome|substrate|coast|wetness|materials` — вид ландшафта,
+//! `--wet-test` — тестовая маска мокрого песка,
 //! `--capture-frame N` — записать кадр N в `captures/`.
 
 mod frame_graph;
@@ -21,6 +25,7 @@ mod reference;
 mod renderer;
 mod scene;
 mod sim;
+mod terrain_materials;
 mod terrain_mesh;
 mod world;
 
@@ -40,6 +45,7 @@ use winit::window::{Window, WindowId};
 use layout::{FrameUniforms, InstanceData};
 use renderer::{FrameInput, FrameOutcome, Readback, Renderer};
 use sim::{CameraState, FixedClock, MoveMode, Sim, TickInput};
+use terrain_materials::TerrainView;
 use world::{Ground, MarkerKind, World};
 
 const LIGHT_DIR: Vec3 = Vec3::new(-0.45, -0.8, -0.4);
@@ -68,6 +74,12 @@ struct Args {
     world: Option<std::path::PathBuf>,
     /// Записать слои мира в каталог и выйти.
     export_world: Option<std::path::PathBuf>,
+    /// Стартовая камера в полёте: откуда и куда смотреть, мировые метры.
+    camera: Option<(Vec3, Vec3)>,
+    /// Стартовый вид ландшафта.
+    view: Option<TerrainView>,
+    /// Включить тестовую маску мокрого песка при старте.
+    wet_test: bool,
 }
 
 impl Args {
@@ -81,6 +93,29 @@ impl Args {
                 "--capture-frame" => args.capture_frame = it.next().and_then(|v| v.parse().ok()),
                 "--world" => args.world = it.next().map(Into::into),
                 "--export-world" => args.export_world = it.next().map(Into::into),
+                "--camera" => {
+                    let v: Vec<f32> = it
+                        .next()
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter_map(|x| x.trim().parse().ok())
+                        .collect();
+                    if v.len() == 6 {
+                        args.camera =
+                            Some((Vec3::new(v[0], v[1], v[2]), Vec3::new(v[3], v[4], v[5])));
+                    } else {
+                        eprintln!("--camera x,y,z,tx,ty,tz — нужно 6 чисел");
+                    }
+                }
+                "--view" => {
+                    args.view = it.next().and_then(|n| TerrainView::parse(&n));
+                    if args.view.is_none() {
+                        eprintln!(
+                            "--view: lit, height, slope, biome, substrate, coast, wetness, materials"
+                        );
+                    }
+                }
+                "--wet-test" => args.wet_test = true,
                 other => eprintln!("неизвестный аргумент {other}"),
             }
         }
@@ -111,6 +146,16 @@ fn trail_start_camera(world: &World) -> CameraState {
         // forward = (−sin yaw, −cos yaw) в плоскости XZ.
         yaw: (-dir.x).atan2(-dir.y),
         pitch: -0.05,
+    }
+}
+
+/// Камера из точки `from` с взглядом на `to`.
+fn look_camera(from: Vec3, to: Vec3) -> CameraState {
+    let dir = to - from;
+    CameraState {
+        position: from,
+        yaw: (-dir.x).atan2(-dir.z),
+        pitch: (dir.y / dir.length()).asin(),
     }
 }
 
@@ -232,6 +277,10 @@ struct App {
     keys: HashSet<KeyCode>,
     modifiers: ModifiersState,
     look: (f32, f32),
+    /// Вид ландшафта (клавиша V).
+    view_mode: TerrainView,
+    /// Тестовая маска мокрого песка включена (клавиша K).
+    wet_test: bool,
     grabbed: bool,
     last_frame: Instant,
     started: Instant,
@@ -246,6 +295,7 @@ struct App {
 
 impl App {
     fn new(args: Args) -> App {
+        let start_view = args.view.unwrap_or(TerrainView::Lit);
         let selftest = args.selftest.then(|| SelfTest {
             step: TestStep::Warmup,
             frames_in_step: 0,
@@ -271,7 +321,9 @@ impl App {
             started.elapsed().as_secs_f64() * 1000.0,
             world.checksum()
         );
-        let mut sim = Sim::new(if args.overview {
+        let mut sim = Sim::new(if let Some((from, to)) = args.camera {
+            look_camera(from, to)
+        } else if args.overview {
             island_overview_camera(&world)
         } else {
             trail_start_camera(&world)
@@ -281,7 +333,7 @@ impl App {
         } else {
             SceneMode::Terrain
         };
-        if !args.selftest && !args.overview {
+        if !args.selftest && !args.overview && args.camera.is_none() {
             sim.set_mode(MoveMode::Walk, &world);
         }
         App {
@@ -295,6 +347,8 @@ impl App {
             keys: HashSet::new(),
             modifiers: ModifiersState::empty(),
             look: (0.0, 0.0),
+            view_mode: start_view,
+            wet_test: false,
             grabbed: false,
             last_frame: Instant::now(),
             started: Instant::now(),
@@ -387,12 +441,41 @@ impl App {
             (SceneMode::Terrain, None) => " · за картой".into(),
             (SceneMode::Cubes, _) => " · тестовые кубы".into(),
         };
+        let view = match (self.scene, self.view_mode, self.wet_test) {
+            (SceneMode::Cubes, ..) => String::new(),
+            (_, TerrainView::Lit, false) => String::new(),
+            (_, v, wet) => format!(
+                " · вид: {}{}",
+                v.name(),
+                if wet {
+                    ", мокрый песок (тест)"
+                } else {
+                    ""
+                }
+            ),
+        };
         window.set_title(&format!(
-            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}",
+            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}",
             r.info.name, r.stats.cpu_encode_ms
         ));
         self.title_timer = Instant::now();
         self.frames_since_title = 0;
+    }
+
+    /// Включает или выключает тестовую маску мокрого песка (клавиша K).
+    fn toggle_wet_test(&mut self) {
+        self.wet_test = !self.wet_test;
+        let (size, mask) = if self.wet_test {
+            terrain_materials::wetness_test_mask(&self.world)
+        } else {
+            let size = self.world.size_m().x as u32;
+            (size, vec![0u8; (size * size) as usize])
+        };
+        if let Some(r) = self.renderer.as_mut()
+            && let Err(e) = r.set_wetness(&mask, size)
+        {
+            eprintln!("маска влажности: {e}");
+        }
     }
 
     /// Переход в ходьбу. Над сушей игрок встаёт на грунт под камерой; над морем,
@@ -464,6 +547,14 @@ impl App {
                 time
             },
             frame_index: 0,
+            // Самопроверка ландшафта читает числа из HDR-буфера (вид Raw).
+            view_mode: if selftest && self.scene == SceneMode::Terrain {
+                TerrainView::Raw as u32
+            } else {
+                self.view_mode as u32
+            },
+            map_size_m: self.world.size_m().x,
+            _pad: [0.0; 2],
         };
         let instances = match self.scene {
             SceneMode::Cubes => scene::instances().to_vec(),
@@ -825,7 +916,56 @@ fn compare_terrain_depth(
     (hits, sky, bad, worst)
 }
 
+/// Вид Raw: HDR = (высота, уклон в градусах, доминирующий биом, тип берега).
+/// Сверка с CPU в точках попадания луча: высота ±5 см (half), уклон грани ±2°,
+/// доминирующий биом ближайшего узла — допускается одно расхождение на границе.
+fn compare_terrain_raw(
+    rb: &Readback,
+    view: Mat4,
+    proj: Mat4,
+    world: &World,
+) -> (u32, u32, f32, f32, u32) {
+    let (mut checked, mut bad, mut dh, mut ds, mut biome_miss) = (0, 0, 0.0f32, 0.0f32, 0);
+    for (&(x, y, _), got) in rb.depth.iter().zip(&rb.hdr) {
+        let Some(hit) =
+            reference::terrain_hit((x, y), (rb.width, rb.height), view, proj, world, 3000.0)
+        else {
+            continue;
+        };
+        let g = world
+            .sample_ground(hit.x, hit.z)
+            .expect("попадание на карте");
+        let slope = g.normal.y.clamp(-1.0, 1.0).acos().to_degrees();
+        let e_h = (got[0] - g.height).abs();
+        let e_s = (got[1] - slope).abs();
+        dh = dh.max(e_h);
+        ds = ds.max(e_s);
+        let tile = world.tile(g.tile).expect("тайл");
+        let local = (glam::Vec2::new(hit.x, hit.z) - g.tile.origin()).round();
+        let s = tile.at(local.x as usize, local.y as usize);
+        let w = [s.weights.forest, s.weights.peat, s.weights.shore];
+        let dominant = (0..3).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap() as f32;
+        biome_miss += (got[2] != dominant) as u32;
+        checked += 1;
+        if e_h > 0.05 || e_s > 2.0 {
+            bad += 1;
+            println!(
+                "       вид Raw ({x},{y}): GPU h {:.3} уклон {:.2}°, CPU h {:.3} уклон {slope:.2}°",
+                got[0], got[1], g.height
+            );
+        }
+    }
+    (checked, bad, dh, ds, biome_miss)
+}
+
 fn verify_terrain_readback(t: &mut SelfTest, rb: &Readback, view: Mat4, proj: Mat4, world: &World) {
+    let (checked, bad_raw, dh, ds, biome_miss) = compare_terrain_raw(rb, view, proj, world);
+    t.check(
+        checked >= 4 && bad_raw == 0 && biome_miss <= 1,
+        format!(
+            "отладочный вид ландшафта: высота и уклон GPU совпадают с SampleGround в {checked} точках (макс. {dh:.3} м, {ds:.2}°), биом не совпал в {biome_miss}"
+        ),
+    );
     let (hits, sky, bad, worst) = compare_terrain_depth(rb, view, proj, world, false);
     t.check(
         bad == 0 && hits >= 4,
@@ -891,17 +1031,28 @@ impl ApplicationHandler for App {
             let terrain = terrain_mesh::vertices(&self.world);
             let detail =
                 terrain_mesh::detail_texture(self.world.seed, DETAIL_TEXTURE_SIZE as usize);
+            let t_mat = Instant::now();
+            let materials = terrain_materials::load(&terrain_materials::source_dir())?;
+            let mat_ms = t_mat.elapsed().as_secs_f64() * 1000.0;
+            let wet_size = self.world.size_m().x as u32;
+            let dry = vec![0u8; (wet_size * wet_size) as usize];
             r.set_terrain(
                 &terrain,
                 &terrain_mesh::tile_indices(),
                 self.world.tiles.len(),
-                &detail,
-                DETAIL_TEXTURE_SIZE,
+                &renderer::TerrainTextures {
+                    detail_rgba: &detail,
+                    detail_size: DETAIL_TEXTURE_SIZE,
+                    materials: &materials,
+                    wetness: &dry,
+                    wetness_size: wet_size,
+                },
             )?;
             eprintln!(
-                "ландшафт: {} вершин, {} треугольников, загружен за {:.0} мс",
+                "ландшафт: {} вершин, {} треугольников, материалов {} (JPEG за {mat_ms:.0} мс), загружен за {:.0} мс",
                 terrain.len(),
                 self.world.tiles.len() * 64 * 64 * 2,
+                materials.layers,
                 t0.elapsed().as_secs_f64() * 1000.0
             );
             Ok::<_, String>(r)
@@ -917,6 +1068,9 @@ impl ApplicationHandler for App {
                     r.shader_dir().display()
                 );
                 self.renderer = Some(r);
+                if self.args.wet_test {
+                    self.toggle_wet_test();
+                }
             }
             Err(e) => {
                 eprintln!("ОШИБКА: {e}");
@@ -981,6 +1135,14 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::KeyR => {
                             self.land(true);
+                            self.update_title(true);
+                        }
+                        KeyCode::KeyV => {
+                            self.view_mode = self.view_mode.next(self.modifiers.shift_key());
+                            self.update_title(true);
+                        }
+                        KeyCode::KeyK => {
+                            self.toggle_wet_test();
                             self.update_title(true);
                         }
                         KeyCode::KeyB => {

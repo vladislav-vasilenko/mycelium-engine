@@ -35,7 +35,7 @@ pub const MAX_STEP_M: f32 = 0.35;
 /// Наибольший уклон, по которому можно идти вверх, градусы.
 pub const MAX_SLOPE_DEG: f32 = 40.0;
 /// Скорость шага и бега, м/с. Быстрее реальной ходьбы (1,4 м/с), чтобы
-/// маршрут 768 м проходился за минуты, а не за десятки минут.
+/// маршрут ~850 м проходился за минуты, а не за десятки минут.
 pub const WALK_SPEED: f32 = 4.0;
 pub const RUN_SPEED: f32 = 7.0;
 /// Разгон к нужной скорости на грунте, м/с²: 0 → шаг за ~0,1 с.
@@ -718,11 +718,13 @@ mod tests {
         assert!((sim.interpolated(1.0).yaw - expected).abs() < 1e-6);
     }
 
+    const FIRST: i32 = crate::world::FIRST_MAP_TILES;
+
     /// Бот проходит всю тропу первой карты бегом, держа точку в 3 м впереди
     /// на оси тропы. Замена ручного прохода из критериев 02.1.
     #[test]
     fn bot_walks_whole_trail_from_start_to_shore() {
-        walk_trail(&crate::world::World::generate(0xEC40, 12, 12));
+        walk_trail(&crate::world::World::generate(0xEC40, FIRST, FIRST));
     }
 
     /// Тот же проход по миру, собранному из экспортированных слоёв PNG.
@@ -731,7 +733,8 @@ mod tests {
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/test-layers/bot");
         let _ = std::fs::remove_dir_all(&dir);
-        crate::world::layers::export(&crate::world::World::generate(0xEC40, 12, 12), &dir).unwrap();
+        crate::world::layers::export(&crate::world::World::generate(0xEC40, FIRST, FIRST), &dir)
+            .unwrap();
         walk_trail(&crate::world::layers::import(&dir).unwrap());
     }
 

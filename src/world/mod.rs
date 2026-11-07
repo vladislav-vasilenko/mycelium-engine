@@ -21,7 +21,9 @@ pub const TILE_SIZE_M: f32 = 64.0;
 pub const TILE_SAMPLES: usize = 65;
 pub const SAMPLE_STEP_M: f32 = 1.0;
 /// Версия алгоритма генерации. Меняется вместе с результатом генератора.
-pub const GENERATOR_VERSION: u32 = 2;
+pub const GENERATOR_VERSION: u32 = 3;
+/// Первая карта: 16 × 16 тайлов, 1024 × 1024 м.
+pub const FIRST_MAP_TILES: i32 = 16;
 
 /// Стабильный идентификатор тайла: целые координаты в сетке тайлов.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -185,7 +187,7 @@ impl World {
 
     /// Генерирует и запекает карту: поля генератора, затем сборка тайлов.
     pub fn generate(seed: u64, tiles_x: i32, tiles_z: i32) -> World {
-        let generator = Generator::first_map(seed, tiles_z as f32 * TILE_SIZE_M);
+        let generator = Generator::first_map(seed);
         let grid = FieldGrid::generate(&generator, tiles_x, tiles_z);
         World::from_grid(seed, generator, grid, &DerivedOverrides::default(), None)
     }
@@ -296,7 +298,7 @@ impl World {
         // Устье — точка реки на береговой линии.
         let mouth = (0..=400)
             .map(|k| g.river.point_at(k as f32 / 400.0))
-            .find(|p| p.y >= g.shoreline_z(p.x))
+            .find(|p| g.coast_distance(*p) <= 0.0)
             .unwrap_or(g.river.point_at(1.0));
         vec![
             Marker {
@@ -307,7 +309,7 @@ impl World {
             Marker {
                 name: "склон над лесом".into(),
                 kind: MarkerKind::Viewpoint,
-                position: on_ground(g.trail.point_at(0.18)),
+                position: on_ground(g.trail.point_at(0.07)),
             },
             Marker {
                 name: "край торфяника".into(),
@@ -413,7 +415,7 @@ mod tests {
 
     pub fn test_world() -> &'static World {
         static W: OnceLock<World> = OnceLock::new();
-        W.get_or_init(|| World::generate(0xEC40, 12, 12))
+        W.get_or_init(|| World::generate(0xEC40, FIRST_MAP_TILES, FIRST_MAP_TILES))
     }
 
     #[test]
@@ -515,10 +517,56 @@ mod tests {
             w.sample_ground(src.x, src.y).unwrap().wet,
             "середина русла мокрая"
         );
-        let sea = w.sample_ground(300.0, 760.0).unwrap();
+        let sea = w.sample_ground(512.0, 1000.0).unwrap();
         assert!(sea.height < 0.0 && sea.wet, "юг карты — море");
         let peat = w.sample_ground(g.basin_center.x, g.basin_center.y).unwrap();
         assert_eq!(peat.substrate, Substrate::Peat);
         assert_eq!(w.markers.len(), 6);
+    }
+
+    /// Остров: весь край карты — открытое море, тропа и река до устья на суше
+    /// не ближе 15 м к кромке, суша занимает разумную долю карты.
+    #[test]
+    fn island_is_surrounded_by_sea() {
+        let w = test_world();
+        let g = &w.generator;
+        let size = w.size_m();
+        for k in 0..=64 {
+            let t = k as f32 / 64.0;
+            for (x, z) in [
+                (t * size.x, 0.0),
+                (t * size.x, size.y),
+                (0.0, t * size.y),
+                (size.x, t * size.y),
+            ] {
+                let s = w.sample_ground(x, z).unwrap();
+                assert!(
+                    s.height < -10.0,
+                    "край карты ({x}, {z}) на глубине {}",
+                    s.height
+                );
+            }
+        }
+        for k in 0..=200 {
+            let p = g.trail.point_at(k as f32 / 200.0);
+            assert!(g.coast_distance(p) > 15.0, "тропа у кромки в {p}");
+        }
+        for k in 0..=150 {
+            let p = g.river.point_at(k as f32 / 200.0);
+            assert!(
+                g.coast_distance(p) > 15.0,
+                "русло выходит к морю раньше устья в {p}"
+            );
+        }
+        let mut land = 0;
+        let n = 128;
+        for j in 0..n {
+            for i in 0..n {
+                let (x, z) = ((i as f32 + 0.5) * 8.0, (j as f32 + 0.5) * 8.0);
+                land += (w.sample_ground(x, z).unwrap().height > 0.0) as usize;
+            }
+        }
+        let share = land as f32 / (n * n) as f32;
+        assert!((0.45..0.75).contains(&share), "доля суши {share}");
     }
 }

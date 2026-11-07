@@ -1,7 +1,7 @@
 //! Слои карты: экспорт мира в PNG и сборка мира из PNG.
 //!
 //! Каталог слоёв содержит `world.json` и изображения размером `nx × nz`
-//! (769 × 769 для карты 12 × 12 тайлов, по точке на метр с общими краями).
+//! (1025 × 1025 для карты 16 × 16 тайлов, по точке на метр с общими краями).
 //! Пиксель (i, j) — точка мировой сетки x = i, z = j; z растёт вниз по картинке.
 //!
 //! | Файл | Формат | Роль | Каналы |
@@ -31,8 +31,8 @@ use super::{
 
 /// Версия формата каталога слоёв.
 pub const FORMAT_VERSION: u32 = 1;
-/// Диапазон высот 16-битного слоя, м: шаг 80 / 65535 ≈ 1,2 мм.
-pub const HEIGHT_RANGE_M: [f32; 2] = [-10.0, 70.0];
+/// Диапазон высот 16-битного слоя, м: шаг 100 / 65535 ≈ 1,5 мм.
+pub const HEIGHT_RANGE_M: [f32; 2] = [-40.0, 60.0];
 pub const TEMPERATURE_RANGE_C: [f32; 2] = [-10.0, 40.0];
 /// Шаг кода субстрата в `substrate.png`: 0, 60, 120, 180, 240.
 pub const SUBSTRATE_STEP: u8 = 60;
@@ -397,7 +397,7 @@ pub fn import(dir: &Path) -> Result<World, String> {
         }
     }
 
-    let generator = Generator::first_map(m.seed, m.tiles_z as f32 * super::TILE_SIZE_M);
+    let generator = Generator::first_map(m.seed);
     let markers = m
         .markers
         .iter()
@@ -619,7 +619,11 @@ mod tests {
     #[test]
     #[ignore]
     fn export_first_map() {
-        let w = World::generate(0xEC40, 12, 12);
+        let w = World::generate(
+            0xEC40,
+            crate::world::FIRST_MAP_TILES,
+            crate::world::FIRST_MAP_TILES,
+        );
         let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/world-layers");
         let m = export(&w, &dir).unwrap();
         println!("{} → {}", m.exported_checksum, dir.display());

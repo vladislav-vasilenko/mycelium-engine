@@ -2,7 +2,8 @@
 //! compute → raster, HDR и тонмаппинг, перезагрузка MSL по F5.
 //!
 //! Управление: клик — захват мыши, WASD — движение, Shift — бег/быстрее,
-//! Space — прыжок (в полёте вверх), G — ходьба/полёт, E/Q — вверх/вниз в полёте,
+//! Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой — на начало тропы),
+//! R — на начало тропы, E/Q — вверх/вниз в полёте,
 //! B — покачивание головы, T — ландшафт/тестовые кубы,
 //! Esc — отпустить мышь, ⌘M — свернуть, F5 — перезагрузить MSL,
 //! F9 — readback и сверка с эталоном, F12 — GPU capture одного кадра.
@@ -42,9 +43,9 @@ use sim::{CameraState, FixedClock, MoveMode, Sim, TickInput};
 use world::{Ground, MarkerKind, World};
 
 const LIGHT_DIR: Vec3 = Vec3::new(-0.45, -0.8, -0.4);
-/// Seed первой карты и её размер в тайлах (768 × 768 м).
+/// Seed первой карты и её размер в тайлах (1024 × 1024 м, остров).
 const WORLD_SEED: u64 = 0xEC40;
-const WORLD_TILES: i32 = 12;
+const WORLD_TILES: i32 = world::FIRST_MAP_TILES;
 const DETAIL_TEXTURE_SIZE: u32 = 512;
 const SKY_COLOR: [f32; 3] = [0.30, 0.42, 0.62];
 const TEST_SCENE_CLEAR: [f32; 3] = [0.035, 0.045, 0.06];
@@ -110,6 +111,19 @@ fn trail_start_camera(world: &World) -> CameraState {
         // forward = (−sin yaw, −cos yaw) в плоскости XZ.
         yaw: (-dir.x).atan2(-dir.y),
         pitch: -0.05,
+    }
+}
+
+/// Вид на весь остров с высоты над юго-западным морем.
+fn island_overview_camera(world: &World) -> CameraState {
+    let size = world.size_m();
+    let from = Vec3::new(0.12 * size.x, 330.0, 1.12 * size.y);
+    let to = Vec3::new(0.52 * size.x, 0.0, 0.45 * size.y);
+    let dir = to - from;
+    CameraState {
+        position: from,
+        yaw: (-dir.x).atan2(-dir.z),
+        pitch: (dir.y / dir.length()).asin(),
     }
 }
 
@@ -258,7 +272,7 @@ impl App {
             world.checksum()
         );
         let mut sim = Sim::new(if args.overview {
-            terrain_check_camera(&world)
+            island_overview_camera(&world)
         } else {
             trail_start_camera(&world)
         });
@@ -379,6 +393,19 @@ impl App {
         ));
         self.title_timer = Instant::now();
         self.frames_since_title = 0;
+    }
+
+    /// Переход в ходьбу. Над сушей игрок встаёт на грунт под камерой; над морем,
+    /// за картой или при `to_trail_start` — на начало тропы, взгляд вдоль неё.
+    fn land(&mut self, to_trail_start: bool) {
+        let p = self.sim.curr.position;
+        let dry = self.world.sample_ground(p.x, p.z).is_some_and(|g| !g.wet);
+        if to_trail_start || !dry {
+            let head_bob = self.sim.head_bob;
+            self.sim = Sim::new(trail_start_camera(&self.world));
+            self.sim.head_bob = head_bob;
+        }
+        self.sim.set_mode(MoveMode::Walk, &self.world);
     }
 
     fn is_minimized(&self) -> bool {
@@ -946,11 +973,14 @@ impl ApplicationHandler for App {
                         KeyCode::F9 => self.readback_requested = true,
                         KeyCode::F12 => self.capture_requested = true,
                         KeyCode::KeyG => {
-                            let mode = match self.sim.mode {
-                                MoveMode::Walk => MoveMode::Fly,
-                                MoveMode::Fly => MoveMode::Walk,
-                            };
-                            self.sim.set_mode(mode, &self.world);
+                            match self.sim.mode {
+                                MoveMode::Walk => self.sim.set_mode(MoveMode::Fly, &self.world),
+                                MoveMode::Fly => self.land(false),
+                            }
+                            self.update_title(true);
+                        }
+                        KeyCode::KeyR => {
+                            self.land(true);
                             self.update_title(true);
                         }
                         KeyCode::KeyB => {

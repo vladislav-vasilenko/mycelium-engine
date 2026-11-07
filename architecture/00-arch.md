@@ -3,7 +3,7 @@
 Живой документ: описывает код в том виде, в котором он есть сейчас. Правила обновления — в [AGENTS.md](../AGENTS.md#архитектура).
 
 - Состояние на — 2026-11-07, ревизия `22c3804` и правки после неё
-- Покрытые этапы — [00. Платформа и архитектура](../specs/00-platform.md) (`completed`), [01. Основа Metal 4](../specs/01-metal-foundation.md) (`partial`), [02. Ландшафт и биомы](../specs/02-terrain-biomes.md) (`partial`): подэтап [02.1](../specs/02-1-terrain-data.md) (`completed`), 02.2–02.5 не начаты; [10. Руки от первого лица](../specs/10-first-person-hands.md) (`partial`, шаг 1 — ассет)
+- Покрытые этапы — [00. Платформа и архитектура](../specs/00-platform.md) (`completed`), [01. Основа Metal 4](../specs/01-metal-foundation.md) (`partial`), [02. Ландшафт и биомы](../specs/02-terrain-biomes.md) (`partial`): подэтап [02.1](../specs/02-1-terrain-data.md) (`partial`: маска типа берега), 02.2–02.5 не начаты; [10. Руки от первого лица](../specs/10-first-person-hands.md) (`partial`, шаг 1 — ассет)
 - Отчёты — [00](../reports/00-platform.md), [01](../reports/01-metal-foundation.md), [02](../reports/02-terrain-biomes.md), [02.1](../reports/02-1-terrain-data.md), [10](../reports/10-first-person-hands.md)
 - Подсистемы — [мир и ландшафт](02-terrain.md)
 - Язык и API — Rust 1.99.1 (edition 2024), Metal 4 через `objc2-metal` 0.3.2, MSL
@@ -566,9 +566,12 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.1 · Точки наблюдения, место моста, коридор реки до моря | `World::place_markers`, `marker_posts` | Выполнено |
 | 02.1 · Остров: суша окружена морем, плавная береговая линия, дно уходит под воду | `Generator::coast_distance`, `terrain_without_trail`, тест `island_is_surrounded_by_sea` | Выполнено (AD-36) |
 | 02.1 · Проход по тропе от начала до каменистого берега | Бот в тесте `bot_walks_whole_trail_from_start_to_shore`, брод (AD-33) | Выполнено |
-| 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView` | — | Не начато |
+| 02.1 · Маска типа берега: песчаные бухты и каменистые мысы | Только `ROCKY_COAST_X` и мыс в конце тропы | Не сделано |
+| 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView`, мокрый песок, материалы берега | — | Не начато |
 | 02.3 · `TileBounds`, `TileDraw`, индексы 65/33/17 по маске краёв | — | Не начато |
-| 02.4 · `Placement`, группы экземпляров | — | Не начато |
+| 02.4 · `Placement`, группы экземпляров, береговой декор | — | Не начато |
+| 03.1 · Море до горизонта, волны Герстнера, мелководье, накат, мокрый песок, пена | — | Не начато |
+| 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 02.5 · Видимые списки, indirect, импосторы | — | Не начато |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
 | 10.2–10.5 · glTF и скиннинг, проход `viewmodel`, движение, кожа и волосы | — | Не начато |
@@ -840,3 +843,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-08 | 02.1 | после `d2608c5` | AD-34: модуль `world::layers` (экспорт и импорт слоёв PNG и `world.json`), `FieldGrid`, `DerivedOverrides`, `World::from_grid`, `World.fields`, аргументы `--world` и `--export-world`, функция `load_world`; удалены `dump_map` и `scripts/rgb-to-png.py`. Зависимости `png`, `serde`, `serde_json` |
 | 2026-11-08 | 10 | после `3016a9e` | Этап 10, шаг 1: исходник рук `assets/source/fps-arms/`, скрипты `tools/blender/export_arms.py` и `check_arms.py`, позы `arms_poses.json`, ассет `assets/models/fps-arms.glb`; раздел 4.11; AD-35. Код движка не менялся |
 | 2026-11-08 | 02.1 | после `53f9e47` | AD-36: остров на карте 16 × 16 тайлов, `FIRST_MAP_TILES`, `Generator::coast_distance`, `first_map(seed)`, `island_*`/`cape_center`, `ROCKY_COAST_X`, `SEA_FLOOR_M`; `island_overview_camera` для `--overview`; `App::land` и клавиша R; G над водой переносит на начало тропы; диапазон высот слоёв −40…60 м |
+| 2026-11-08 | 02, 03 | после `2044379` | Спецификации: этап 03 разбит на подэтапы 03.1–03.4 (море и прибой после 02.2), в 02.1 — маска типа берега, в 02.2 — мокрый песок, в 02.4 — береговой декор; таблица соответствия дополнена. Код не менялся |

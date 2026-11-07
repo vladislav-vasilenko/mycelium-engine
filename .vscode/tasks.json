@@ -87,6 +87,20 @@
             "problemMatcher": ["$rustc"]
         },
         {
+            "label": "bundle Echo.app",
+            "detail": "Release-сборка в target/release/Echo.app с шейдерами и ad-hoc подписью, затем запуск",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/bundle-app.sh --open",
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "make Echo.dmg",
+            "detail": "dist/Echo-<версия>.dmg с Echo.app и ярлыком Applications, оформленное окно Finder",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/make-dmg.sh --layout && open -R dist/*.dmg",
+            "problemMatcher": ["$rustc"]
+        },
+        {
             "label": "check all",
             "detail": "fmt --check, clippy, test, selftest",
             "dependsOrder": "sequence",

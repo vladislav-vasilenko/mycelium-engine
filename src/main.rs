@@ -1,11 +1,13 @@
-//! «Эхо мицелия», этап 01: окно, камера от первого лица, compute → raster,
-//! HDR и тонмаппинг, перезагрузка MSL по F5.
+//! «Эхо мицелия»: окно, камера от первого лица, ландшафт маршрута (этап 02),
+//! compute → raster, HDR и тонмаппинг, перезагрузка MSL по F5.
 //!
-//! Управление: клик — захват мыши, WASD — движение, E/Q — вверх/вниз,
-//! Shift — быстрее, Esc — отпустить мышь, F5 — перезагрузить MSL,
+//! Управление: клик — захват мыши, WASD — движение, Shift — бег/быстрее,
+//! G — ходьба/полёт, E/Q — вверх/вниз в полёте, T — ландшафт/тестовые кубы,
+//! Esc — отпустить мышь, ⌘M — свернуть, F5 — перезагрузить MSL,
 //! F9 — readback и сверка с эталоном, F12 — GPU capture одного кадра.
 //!
 //! Режимы: `--selftest` — автоматическая проверка с кодом выхода,
+//! `--overview` — старт в полёте над маршрутом,
 //! `--capture-frame N` — записать кадр N в `captures/`.
 
 mod frame_graph;
@@ -15,29 +17,48 @@ mod reference;
 mod renderer;
 mod scene;
 mod sim;
+mod terrain_mesh;
+mod world;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::window::{Window, WindowId};
 
-use layout::FrameUniforms;
+use layout::{FrameUniforms, InstanceData};
 use renderer::{FrameInput, FrameOutcome, Readback, Renderer};
-use sim::{CameraState, FixedClock, Sim, TickInput};
+use sim::{CameraState, FixedClock, MoveMode, Sim, TickInput};
+use world::{Ground, MarkerKind, World};
 
 const LIGHT_DIR: Vec3 = Vec3::new(-0.45, -0.8, -0.4);
+/// Seed первой карты и её размер в тайлах (768 × 768 м).
+const WORLD_SEED: u64 = 0xEC40;
+const WORLD_TILES: i32 = 12;
+const DETAIL_TEXTURE_SIZE: u32 = 512;
+const SKY_COLOR: [f32; 3] = [0.30, 0.42, 0.62];
+const TEST_SCENE_CLEAR: [f32; 3] = [0.035, 0.045, 0.06];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SceneMode {
+    /// Тестовая сцена этапа 01: два куба.
+    Cubes,
+    /// Ландшафт маршрута и маркеры.
+    Terrain,
+}
 
 #[derive(Default)]
 struct Args {
     selftest: bool,
+    /// Старт в полёте с контрольной камеры ландшафта.
+    overview: bool,
     capture_frame: Option<u64>,
 }
 
@@ -48,12 +69,65 @@ impl Args {
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--selftest" => args.selftest = true,
+                "--overview" => args.overview = true,
                 "--capture-frame" => args.capture_frame = it.next().and_then(|v| v.parse().ok()),
                 other => eprintln!("неизвестный аргумент {other}"),
             }
         }
         args
     }
+}
+
+/// Поза на начале тропы, взгляд вдоль тропы.
+fn trail_start_camera(world: &World) -> CameraState {
+    let trail = &world.generator.trail;
+    let a = trail.point_at(0.0);
+    let dir = trail.point_at(0.02) - a;
+    let h = world.sample_ground(a.x, a.y).map_or(0.0, |g| g.height);
+    CameraState {
+        position: Vec3::new(a.x, h + sim::EYE_HEIGHT_M, a.y),
+        // forward = (−sin yaw, −cos yaw) в плоскости XZ.
+        yaw: (-dir.x).atan2(-dir.y),
+        pitch: -0.05,
+    }
+}
+
+/// Контрольная камера ландшафта: над точкой обзора, взгляд на торфяник.
+fn terrain_check_camera(world: &World) -> CameraState {
+    let from = world.marker(MarkerKind::Viewpoint).unwrap().position + Vec3::new(0.0, 12.0, 0.0);
+    let to = world.generator.basin_center;
+    let dir = Vec3::new(to.x, 6.0, to.y) - from;
+    CameraState {
+        position: from,
+        yaw: (-dir.x).atan2(-dir.z),
+        pitch: (dir.y / dir.length()).asin(),
+    }
+}
+
+/// Столбики 0,5 × 4 м на маркерах маршрута.
+fn marker_posts(world: &World) -> Vec<InstanceData> {
+    world
+        .markers
+        .iter()
+        .map(|m| {
+            let tint = match m.kind {
+                MarkerKind::TrailStart => [1.0, 0.9, 0.3, 1.0],
+                MarkerKind::Viewpoint => [0.4, 1.0, 0.5, 1.0],
+                MarkerKind::BridgeSite => [1.0, 0.45, 0.2, 1.0],
+                MarkerKind::RiverMouth => [0.3, 0.6, 1.0, 1.0],
+                MarkerKind::ShoreEnd => [0.9, 0.9, 0.95, 1.0],
+            };
+            let model = Mat4::from_scale_rotation_translation(
+                Vec3::new(0.5, 4.0, 0.5),
+                Quat::IDENTITY,
+                m.position + Vec3::new(0.0, 2.0, 0.0),
+            );
+            InstanceData {
+                model: model.to_cols_array_2d(),
+                tint,
+            }
+        })
+        .collect()
 }
 
 fn start_camera() -> CameraState {
@@ -70,9 +144,25 @@ enum TestStep {
     Warmup,
     ReadbackA,
     HotReload,
-    AfterBrokenReload { frames: u32 },
+    AfterBrokenReload {
+        frames: u32,
+    },
+    /// Окно свёрнуто; разворачивает `about_to_wait` по таймеру.
+    /// `presented_at` — счётчик кадров в момент, когда система подтвердила сворачивание.
+    Minimized {
+        since: Instant,
+        presented_at: Option<u64>,
+    },
+    /// Окно развёрнуто, ждём возобновления вывода.
+    Restored {
+        presented_before: u64,
+        presented_while_minimized: u64,
+    },
     Resize,
     ReadbackB,
+    /// Сцена переключена на ландшафт с контрольной камерой.
+    TerrainView,
+    TerrainReadback,
     Done,
 }
 
@@ -98,11 +188,14 @@ impl SelfTest {
 
 struct App {
     args: Args,
+    world: World,
+    scene: SceneMode,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     sim: Sim,
     clock: FixedClock,
     keys: HashSet<KeyCode>,
+    modifiers: ModifiersState,
     look: (f32, f32),
     grabbed: bool,
     last_frame: Instant,
@@ -126,13 +219,40 @@ impl App {
             resize_target: PhysicalSize::new(960, 600),
             size_before: None,
         });
+        let started = Instant::now();
+        let world = World::generate(WORLD_SEED, WORLD_TILES, WORLD_TILES);
+        eprintln!(
+            "мир: seed {:#x}, {}×{} тайлов, генератор v{}, запечён за {:.0} мс, контрольная сумма {:016x}",
+            world.seed,
+            world.tiles_x,
+            world.tiles_z,
+            world::GENERATOR_VERSION,
+            started.elapsed().as_secs_f64() * 1000.0,
+            world.checksum()
+        );
+        let mut sim = Sim::new(if args.overview {
+            terrain_check_camera(&world)
+        } else {
+            trail_start_camera(&world)
+        });
+        let scene = if args.selftest {
+            SceneMode::Cubes
+        } else {
+            SceneMode::Terrain
+        };
+        if !args.selftest && !args.overview {
+            sim.set_mode(MoveMode::Walk, &world);
+        }
         App {
             args,
+            world,
+            scene,
             window: None,
             renderer: None,
-            sim: Sim::new(start_camera()),
+            sim,
             clock: FixedClock::default(),
             keys: HashSet::new(),
+            modifiers: ModifiersState::empty(),
             look: (0.0, 0.0),
             grabbed: false,
             last_frame: Instant::now(),
@@ -149,15 +269,7 @@ impl App {
 
     fn set_grab(&mut self, grab: bool) {
         let Some(window) = &self.window else { return };
-        if grab {
-            if window.set_cursor_grab(CursorGrabMode::Locked).is_err() {
-                let _ = window.set_cursor_grab(CursorGrabMode::Confined);
-            }
-            window.set_cursor_visible(false);
-        } else {
-            let _ = window.set_cursor_grab(CursorGrabMode::None);
-            window.set_cursor_visible(true);
-        }
+        platform::grab_cursor(window, grab);
         self.grabbed = grab;
         self.look = (0.0, 0.0);
     }
@@ -213,17 +325,48 @@ impl App {
             ),
             None => format!("MSL поколение {}", r.pipeline_generation()),
         };
+        let p = self.sim.curr.position;
+        let place = match (self.scene, self.world.sample_ground(p.x, p.z)) {
+            (SceneMode::Terrain, Some(g)) => format!(
+                " · {} · тайл ({}, {}) · {:?}{}{} · {:.1} м",
+                if self.sim.mode == MoveMode::Walk {
+                    "ходьба"
+                } else {
+                    "полёт"
+                },
+                g.tile.x,
+                g.tile.z,
+                g.substrate,
+                if g.on_trail { ", тропа" } else { "" },
+                if g.wet { ", вода" } else { "" },
+                g.height
+            ),
+            (SceneMode::Terrain, None) => " · за картой".into(),
+            (SceneMode::Cubes, _) => " · тестовые кубы".into(),
+        };
         window.set_title(&format!(
-            "Эхо мицелия · {} · macOS {} · {size} · Metal 4 · {fps:.0} fps · CPU {:.2} мс · {status}",
-            r.info.name,
-            r.info.os.trim_start_matches("Version "),
-            r.stats.cpu_encode_ms
+            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}",
+            r.info.name, r.stats.cpu_encode_ms
         ));
         self.title_timer = Instant::now();
         self.frames_since_title = 0;
     }
 
+    fn is_minimized(&self) -> bool {
+        self.window
+            .as_ref()
+            .and_then(|w| w.is_minimized())
+            .unwrap_or(false)
+    }
+
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        if self.is_minimized() {
+            // Свёрнутое окно не видно: кадр не кодируем, ресурсы освобождаем.
+            if let Some(r) = self.renderer.as_mut() {
+                r.collect_completed();
+            }
+            return;
+        }
         let now = Instant::now();
         let dt = (now - self.last_frame).as_secs_f64();
         self.last_frame = now;
@@ -239,17 +382,17 @@ impl App {
                 input.look_dx = 0.0;
                 input.look_dy = 0.0;
             }
-            self.sim.step(&input);
+            self.sim.step(&input, Some(&self.world));
         }
         if ticks > 0 {
             self.look = (0.0, 0.0);
         }
 
         let selftest = self.selftest.is_some();
-        let camera = if selftest {
-            start_camera()
-        } else {
-            self.sim.interpolated(alpha)
+        let camera = match (selftest, self.scene) {
+            (true, SceneMode::Cubes) => start_camera(),
+            (true, SceneMode::Terrain) => terrain_check_camera(&self.world),
+            (false, _) => self.sim.interpolated(alpha),
         };
         let Some(r) = self.renderer.as_mut() else {
             return;
@@ -274,7 +417,10 @@ impl App {
             },
             frame_index: 0,
         };
-        let instances = scene::instances();
+        let instances = match self.scene {
+            SceneMode::Cubes => scene::instances().to_vec(),
+            SceneMode::Terrain => marker_posts(&self.world),
+        };
         let capture = (self.capture_requested || self.args.capture_frame == Some(r.frame_index()))
             .then(|| {
                 let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("captures");
@@ -286,6 +432,11 @@ impl App {
         let outcome = r.render(&FrameInput {
             uniforms,
             instances: &instances,
+            draw_terrain: self.scene == SceneMode::Terrain,
+            clear_color: match self.scene {
+                SceneMode::Cubes => TEST_SCENE_CLEAR,
+                SceneMode::Terrain => SKY_COLOR,
+            },
             readback,
             capture,
         });
@@ -299,7 +450,10 @@ impl App {
         let readbacks = r.take_readbacks();
         for rb in &readbacks {
             if !selftest {
-                report_readback(rb, view, proj);
+                match self.scene {
+                    SceneMode::Cubes => report_readback(rb, view, proj),
+                    SceneMode::Terrain => report_terrain_readback(rb, view, proj, &self.world),
+                }
             }
         }
         if selftest {
@@ -330,6 +484,16 @@ impl App {
                     println!("{}", r.info);
                     println!("план проходов (с readback):\n{}", r.plan_summary());
                 }
+                // Захват мыши как по клику: скрытие курсора и Locked-режим.
+                if let Some(window) = &self.window {
+                    if t.frames_in_step == 2 {
+                        platform::grab_cursor(window, true);
+                    }
+                    if t.frames_in_step == 4 {
+                        platform::grab_cursor(window, false);
+                        t.check(true, "захват и освобождение курсора".into());
+                    }
+                }
                 if t.frames_in_step >= 5 {
                     self.readback_requested = true;
                     t.step = TestStep::ReadbackA;
@@ -342,7 +506,8 @@ impl App {
                     if t.step == TestStep::ReadbackA {
                         t.step = TestStep::HotReload;
                     } else {
-                        t.step = TestStep::Done;
+                        self.scene = SceneMode::Terrain;
+                        t.step = TestStep::TerrainView;
                     }
                     t.frames_in_step = 0;
                 }
@@ -398,14 +563,48 @@ impl App {
                         ok.is_ok(),
                         "исправленная правка подхватывается в том же запуске".into(),
                     );
+                    if let Some(window) = &self.window {
+                        window.set_minimized(true);
+                    }
+                    t.step = TestStep::Minimized {
+                        since: Instant::now(),
+                        presented_at: None,
+                    };
+                    t.frames_in_step = 0;
+                } else {
+                    t.step = TestStep::AfterBrokenReload { frames: frames + 1 };
+                }
+            }
+            // Пока окно свёрнуто, кадры могут не приходить вовсе; разворачивает
+            // окно `about_to_wait` через секунду.
+            TestStep::Minimized { .. } => {}
+            TestStep::Restored {
+                presented_before,
+                presented_while_minimized,
+            } => {
+                let presented = r.stats.presented - presented_before;
+                if presented >= 5 {
+                    let minimized = self.window.as_ref().and_then(|w| w.is_minimized());
+                    t.check(
+                        presented_while_minimized == 0,
+                        format!("в свёрнутом окне вывод пропускается: выведено {presented_while_minimized} кадров"),
+                    );
+                    t.check(
+                        minimized == Some(false),
+                        format!(
+                            "после разворота вывод возобновился: {presented} кадров, пропусков без drawable {}",
+                            r.stats.skipped_no_drawable
+                        ),
+                    );
                     t.size_before = r.size();
                     if let Some(window) = &self.window {
                         let _ = window.request_inner_size(t.resize_target);
                     }
                     t.step = TestStep::Resize;
                     t.frames_in_step = 0;
-                } else {
-                    t.step = TestStep::AfterBrokenReload { frames: frames + 1 };
+                } else if t.frames_in_step > 300 {
+                    t.check(false, "вывод не возобновился после разворота окна".into());
+                    t.step = TestStep::Done;
                 }
             }
             TestStep::Resize => {
@@ -419,6 +618,19 @@ impl App {
                     t.frames_in_step = 0;
                 } else if t.frames_in_step > 120 {
                     t.check(false, "resize не пришёл за 120 кадров".into());
+                    t.step = TestStep::Done;
+                }
+            }
+            TestStep::TerrainView => {
+                if t.frames_in_step >= 3 {
+                    self.readback_requested = true;
+                    t.step = TestStep::TerrainReadback;
+                    t.frames_in_step = 0;
+                }
+            }
+            TestStep::TerrainReadback => {
+                if let Some(rb) = readbacks.first() {
+                    verify_terrain_readback(&mut t, rb, view, proj, &self.world);
                     t.step = TestStep::Done;
                 }
             }
@@ -519,6 +731,77 @@ fn verify_readback(t: &mut SelfTest, rb: &Readback, view: Mat4, proj: Mat4) {
     );
 }
 
+/// Глубина ландшафта с GPU против трассировки луча по `SampleGround` на CPU.
+/// Возвращает (точек на ландшафте, точек неба, расхождений, наибольшая
+/// относительная ошибка глубины).
+fn compare_terrain_depth(
+    rb: &Readback,
+    view: Mat4,
+    proj: Mat4,
+    world: &World,
+    log: bool,
+) -> (u32, u32, u32, f32) {
+    // Для reversed-Z с бесконечной дальней плоскостью глубина = near / z_view.
+    let near = sim::NEAR_PLANE_M;
+    let (mut hits, mut sky, mut bad, mut worst) = (0, 0, 0, 0.0f32);
+    for &(x, y, got) in &rb.depth {
+        let expected = reference::expected_terrain_view_depth(
+            (x, y),
+            (rb.width, rb.height),
+            view,
+            proj,
+            world,
+            3000.0,
+        );
+        let ok = match expected {
+            Some(z) => {
+                hits += 1;
+                let gpu_z = if got > 0.0 { near / got } else { f32::INFINITY };
+                let rel = (gpu_z - z).abs() / z;
+                worst = worst.max(rel);
+                if log {
+                    println!("       ландшафт ({x},{y}): GPU {gpu_z:.3} м, CPU {z:.3} м");
+                }
+                rel < 2e-3
+            }
+            None => {
+                sky += 1;
+                got == 0.0
+            }
+        };
+        if !ok {
+            bad += 1;
+            println!("       расхождение в ({x},{y}): GPU глубина {got:.7}, CPU {expected:?}");
+        }
+    }
+    (hits, sky, bad, worst)
+}
+
+fn verify_terrain_readback(t: &mut SelfTest, rb: &Readback, view: Mat4, proj: Mat4, world: &World) {
+    let (hits, sky, bad, worst) = compare_terrain_depth(rb, view, proj, world, false);
+    t.check(
+        bad == 0 && hits >= 4,
+        format!(
+            "ландшафт: глубина GPU совпадает с лучом по SampleGround в {hits} точках (небо {sky}), макс. отн. ошибка {worst:.1e}"
+        ),
+    );
+    let expected = layout::expected_probe();
+    t.check(
+        rb.probe == expected,
+        format!(
+            "раскладка TerrainVertex и общих структур ({} полей)",
+            expected.len()
+        ),
+    );
+}
+
+fn report_terrain_readback(rb: &Readback, view: Mat4, proj: Mat4, world: &World) {
+    let (hits, sky, bad, worst) = compare_terrain_depth(rb, view, proj, world, true);
+    eprintln!(
+        "[readback] ландшафт: точек {hits}, небо {sky}, расхождений {bad}, макс. отн. ошибка {worst:.1e}"
+    );
+}
+
 fn report_readback(rb: &Readback, view: Mat4, proj: Mat4) {
     let (mismatches, max_diff) =
         reference::compare_pattern(&rb.pattern, reference::PATTERN_SIZE, rb.pattern_time, 2);
@@ -555,7 +838,25 @@ impl ApplicationHandler for App {
             eprintln!("{info}");
             let layer = platform::attach_metal_layer(&window)?;
             let (vertices, indices) = scene::cube();
-            Renderer::new(device, info, layer, &vertices, &indices)
+            let mut r = Renderer::new(device, info, layer, &vertices, &indices)?;
+            let t0 = Instant::now();
+            let terrain = terrain_mesh::vertices(&self.world);
+            let detail =
+                terrain_mesh::detail_texture(self.world.seed, DETAIL_TEXTURE_SIZE as usize);
+            r.set_terrain(
+                &terrain,
+                &terrain_mesh::tile_indices(),
+                self.world.tiles.len(),
+                &detail,
+                DETAIL_TEXTURE_SIZE,
+            )?;
+            eprintln!(
+                "ландшафт: {} вершин, {} треугольников, загружен за {:.0} мс",
+                terrain.len(),
+                self.world.tiles.len() * 64 * 64 * 2,
+                t0.elapsed().as_secs_f64() * 1000.0
+            );
+            Ok::<_, String>(r)
         })();
         match result {
             Ok(mut r) => {
@@ -589,6 +890,7 @@ impl ApplicationHandler for App {
                     r.resize(size.width, size.height, scale);
                 }
             }
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::Focused(false) => {
                 self.keys.clear();
                 self.set_grab(false);
@@ -622,6 +924,30 @@ impl ApplicationHandler for App {
                         KeyCode::F5 => self.reload_shaders(),
                         KeyCode::F9 => self.readback_requested = true,
                         KeyCode::F12 => self.capture_requested = true,
+                        KeyCode::KeyG => {
+                            let mode = match self.sim.mode {
+                                MoveMode::Walk => MoveMode::Fly,
+                                MoveMode::Fly => MoveMode::Walk,
+                            };
+                            self.sim.set_mode(mode, &self.world);
+                            self.update_title(true);
+                        }
+                        KeyCode::KeyT => {
+                            self.scene = match self.scene {
+                                SceneMode::Terrain => SceneMode::Cubes,
+                                SceneMode::Cubes => SceneMode::Terrain,
+                            };
+                            self.update_title(true);
+                        }
+                        // Меню winit на macOS не содержит пункта Window → Minimize,
+                        // поэтому ⌘M обрабатываем сами.
+                        KeyCode::KeyM if self.modifiers.super_key() => {
+                            self.keys.clear();
+                            self.set_grab(false);
+                            if let Some(w) = &self.window {
+                                w.set_minimized(true);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -643,9 +969,54 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(w) = &self.window {
-            w.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Самопроверка: сворачивание асинхронное (анимация macOS). Счёт кадров
+        // начинается, когда окно действительно свёрнуто; через секунду — разворот.
+        let minimized_now = self.is_minimized();
+        if let (Some(t), Some(w), Some(r)) = (self.selftest.as_mut(), &self.window, &self.renderer)
+            && let TestStep::Minimized {
+                since,
+                presented_at,
+            } = &mut t.step
+        {
+            if presented_at.is_none() && minimized_now {
+                *presented_at = Some(r.stats.presented);
+                *since = Instant::now();
+            }
+            let elapsed = since.elapsed().as_secs_f64();
+            match *presented_at {
+                Some(at) if elapsed >= 1.0 => {
+                    w.set_minimized(false);
+                    w.focus_window();
+                    t.step = TestStep::Restored {
+                        presented_before: r.stats.presented,
+                        presented_while_minimized: r.stats.presented - at,
+                    };
+                    t.frames_in_step = 0;
+                }
+                None if elapsed >= 5.0 => {
+                    t.check(false, "окно не свернулось за 5 с".into());
+                    w.set_minimized(false);
+                    t.step = TestStep::Done;
+                }
+                _ => {}
+            }
+        }
+        if self.is_minimized() {
+            // Не крутить цикл вхолостую: проверять состояние 10 раз в секунду.
+            if let Some(r) = self.renderer.as_mut() {
+                r.collect_completed();
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + std::time::Duration::from_millis(100),
+            ));
+            // Пауза не должна превратиться в догоняющие тики после разворота.
+            self.last_frame = Instant::now();
+        } else {
+            event_loop.set_control_flow(ControlFlow::Poll);
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
         }
     }
 

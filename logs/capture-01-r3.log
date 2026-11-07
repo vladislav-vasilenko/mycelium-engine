@@ -1,0 +1,31 @@
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: не запрошено (capture) | raytracing from render: не запрошено (capture)
+кадр 2560×1440 px, шейдеры из /Users/vladmac/Code/GameDev/GameEngine/shaders/metal
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: не запрошено (capture) | raytracing from render: не запрошено (capture)
+план проходов (с readback):
+  [кадр с readback после такого же]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  scene     after Stages(14) before Stages(2) [(ResourceId(1), Raw), (ResourceId(2), War), (ResourceId(3), War)]
+  readback  after Stages(14) before Stages(12) [(ResourceId(1), Raw), (ResourceId(3), Raw), (ResourceId(5), Waw)]
+  tonemap   after Stages(2) before Stages(2) [(ResourceId(2), Raw), (ResourceId(4), Waw)]
+  [обычный кадр после кадра с readback]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  scene     after Stages(14) before Stages(2) [(ResourceId(1), Raw), (ResourceId(2), War), (ResourceId(3), War)]
+  tonemap   after Stages(2) before Stages(2) [(ResourceId(2), Raw), (ResourceId(4), Waw)]
+
+[capture] кадр 6 записан
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 5)
+[pass] reversed-Z глубина в 9 точках 2560×1440 (попаданий в кубы 5, видны оба куба true): макс. ошибка 5.40e-8
+[pass] раскладка структур CPU/GPU (13 полей) 
+[pass] перезагрузка MSL без изменений: Ok(2)
+[pass] поколение pipeline 1 → 2
+       диагностика: pattern.metal [compile MSL]: program_source:37:1: error: 'kernel' attribute only applies to functions
+[pass] ошибочная правка отклонена: файл pattern.metal, стадия compile MSL
+[pass] после ошибки остаётся предыдущее поколение pipeline
+[pass] кадры рисуются после ошибочной правки (3 кадра)
+[pass] исправленная правка подхватывается в том же запуске
+[pass] resize: новые цели (960, 600)
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 17)
+[pass] reversed-Z глубина в 9 точках 960×600 (попаданий в кубы 6, видны оба куба true): макс. ошибка 8.38e-8
+[pass] раскладка структур CPU/GPU (13 полей) 
+кадров 20, пропуски: занят слот 0, нет drawable 0; отложенно освобождено 3; CPU кодирование последнего кадра 0.166 мс
+SELFTEST PASSED (13 проверок)

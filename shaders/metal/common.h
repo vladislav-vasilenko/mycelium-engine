@@ -24,6 +24,17 @@ struct Vertex {
     float2 uv;
 };
 
+// Вершина ландшафта (src/layout.rs, TerrainVertex).
+struct TerrainVertex {
+    packed_float3 position;
+    packed_float3 normal;
+    uchar4 weights;   // лес, торф, берег, тропа
+    uchar4 material;  // субстрат, русло, влажность, резерв
+};
+
+// Точек на сторону тайла LOD 0 (src/world/mod.rs, TILE_SAMPLES).
+constant uint TILE_SAMPLES = 65;
+
 // Эталон на CPU: src/reference.rs, pattern_color.
 inline float3 pattern_color(uint2 p, uint size, float t) {
     float u = float(p.x) / float(size - 1);

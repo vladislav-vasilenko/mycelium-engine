@@ -22,6 +22,7 @@ pub struct Pipelines {
     pub layout_probe: Obj<dyn MTLComputePipelineState>,
     pub scene: Obj<dyn MTLRenderPipelineState>,
     pub tonemap: Obj<dyn MTLRenderPipelineState>,
+    pub terrain: Obj<dyn MTLRenderPipelineState>,
     /// Счётчик поколений для диагностики после перезагрузки.
     pub generation: u32,
 }
@@ -42,11 +43,30 @@ impl std::fmt::Display for ShaderError {
 /// Исходники можно подменить в памяти (самопроверка ошибочной правки).
 pub type SourceOverride<'a> = Option<(&'a str, &'a str)>;
 
+/// Каталог MSL. Порядок поиска:
+/// 1. `ECHO_SHADER_DIR` — явное переопределение;
+/// 2. `Echo.app/Contents/Resources/shaders/metal` — запуск из бандла;
+/// 3. `shaders/metal` рядом с `Cargo.toml` — запуск через cargo.
 pub fn shader_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("ECHO_SHADER_DIR") {
         return PathBuf::from(dir);
     }
+    if let Some(dir) = bundle_shader_dir() {
+        return dir;
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shaders/metal")
+}
+
+/// `<exe>/../../Resources/shaders/metal`, если исполняемый файл лежит
+/// в `Contents/MacOS` бандла и каталог существует.
+fn bundle_shader_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let macos = exe.parent()?;
+    if macos.file_name()? != "MacOS" {
+        return None;
+    }
+    let dir = macos.parent()?.join("Resources/shaders/metal");
+    dir.is_dir().then_some(dir)
 }
 
 fn read_source(dir: &Path, file: &str, over: SourceOverride) -> Result<String, ShaderError> {
@@ -169,6 +189,7 @@ pub fn build_pipelines(
     let pattern_lib = compile_library(device, dir, "pattern.metal", over)?;
     let scene_lib = compile_library(device, dir, "scene.metal", over)?;
     let tonemap_lib = compile_library(device, dir, "tonemap.metal", over)?;
+    let terrain_lib = compile_library(device, dir, "terrain.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -189,6 +210,15 @@ pub fn build_pipelines(
             "tonemap_vs",
             "tonemap_fs",
             DRAWABLE_FORMAT,
+        )?,
+        terrain: render_pipeline(
+            compiler,
+            &terrain_lib,
+            "terrain.metal",
+            "terrain",
+            "terrain_vs",
+            "terrain_fs",
+            HDR_FORMAT,
         )?,
         generation,
     })

@@ -18,7 +18,7 @@ use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::frame_graph::{self, FramePlan, PassDecl, PassKind, ResourceId, Stages};
-use crate::layout::{FrameUniforms, InstanceData, LAYOUT_PROBE_LEN, Vertex};
+use crate::layout::{FrameUniforms, InstanceData, LAYOUT_PROBE_LEN, TerrainVertex, Vertex};
 use crate::reference::PATTERN_SIZE;
 use shaders::{Obj, Pipelines, ShaderError, SourceOverride};
 
@@ -130,9 +130,24 @@ pub enum FrameOutcome {
 
 pub struct FrameInput<'a> {
     pub uniforms: FrameUniforms,
+    /// Экземпляры куба: тестовая сцена или столбики маркеров.
     pub instances: &'a [InstanceData],
+    /// Рисовать ландшафт, если он загружен `set_terrain`.
+    pub draw_terrain: bool,
+    /// Цвет очистки HDR-цели (линейный).
+    pub clear_color: [f32; 3],
     pub readback: bool,
     pub capture: Option<PathBuf>,
+}
+
+/// Ландшафт на GPU: вершины всех тайлов подряд, общие индексы одного тайла,
+/// детальная текстура с mip-уровнями.
+struct TerrainGpu {
+    vertices: Obj<dyn MTLBuffer>,
+    indices: Obj<dyn MTLBuffer>,
+    index_count: usize,
+    tile_count: usize,
+    detail: Obj<dyn MTLTexture>,
 }
 
 pub struct Readback {
@@ -158,7 +173,8 @@ struct PendingReadback {
 struct FrameSlot {
     allocator: Obj<dyn MTL4CommandAllocator>,
     cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 4],
+    /// pattern, scene, readback, tonemap, terrain.
+    tables: [Obj<dyn MTL4ArgumentTable>; 5],
     upload: Obj<dyn MTLBuffer>,
     signal_value: u64,
 }
@@ -214,6 +230,7 @@ pub struct Renderer {
     pending_readback: Option<PendingReadback>,
     completed_readbacks: Vec<Readback>,
     shader_dir: PathBuf,
+    terrain: Option<TerrainGpu>,
     pub stats: Stats,
 }
 
@@ -414,6 +431,7 @@ impl Renderer {
                 table("scene")?,
                 table("readback")?,
                 table("tonemap")?,
+                table("terrain")?,
             ];
             let upload = shared_buffer(&device, UPLOAD_BYTES, &format!("upload slot {i}"));
             residency.addAllocation(as_allocation(&*upload));
@@ -473,6 +491,7 @@ impl Renderer {
             pending_readback: None,
             completed_readbacks: Vec::new(),
             shader_dir,
+            terrain: None,
             stats: Stats::default(),
         })
     }
@@ -647,6 +666,113 @@ impl Renderer {
         }
     }
 
+    /// Загружает ландшафт: буферы вершин и индексов, детальную текстуру
+    /// `detail_size × detail_size` RGBA8 с mip-уровнями. Mip строит GPU в
+    /// отдельном командном буфере; CPU ждёт его завершения, поэтому кадры,
+    /// отправленные позже, видят готовую текстуру без межкадрового барьера.
+    pub fn set_terrain(
+        &mut self,
+        vertices: &[TerrainVertex],
+        indices: &[u16],
+        tile_count: usize,
+        detail_rgba: &[u8],
+        detail_size: u32,
+    ) -> Result<(), String> {
+        let vbytes: &[u8] = bytemuck::cast_slice(vertices);
+        let vbuf = shared_buffer(&self.device, vbytes.len(), "terrain vertices (all tiles)");
+        upload_bytes(&vbuf, 0, vbytes);
+        let ibytes: &[u8] = bytemuck::cast_slice(indices);
+        let ibuf = shared_buffer(&self.device, ibytes.len(), "terrain tile indices");
+        upload_bytes(&ibuf, 0, ibytes);
+
+        let desc = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat::RGBA8Unorm,
+                detail_size as usize,
+                detail_size as usize,
+                true,
+            )
+        };
+        desc.setUsage(MTLTextureUsage::ShaderRead);
+        desc.setStorageMode(MTLStorageMode::Private);
+        let detail = self
+            .device
+            .newTextureWithDescriptor(&desc)
+            .ok_or("terrain detail texture")?;
+        detail.setLabel(Some(&label("terrain detail (mipmapped)")));
+        let staging = shared_buffer(&self.device, detail_rgba.len(), "terrain detail staging");
+        upload_bytes(&staging, 0, detail_rgba);
+
+        for a in [
+            as_allocation(&*vbuf),
+            as_allocation(&*ibuf),
+            as_allocation(&*staging),
+        ] {
+            self.residency.addAllocation(a);
+        }
+        self.residency.addAllocation(as_allocation(&*detail));
+        self.residency.commit();
+
+        // Одноразовая загрузка: копия staging → mip 0, барьер blit → blit, генерация mip.
+        let allocator = self
+            .device
+            .newCommandAllocator()
+            .ok_or("upload allocator")?;
+        let cmd = self
+            .device
+            .newCommandBuffer()
+            .ok_or("upload command buffer")?;
+        cmd.setLabel(Some(&label("terrain upload")));
+        cmd.beginCommandBufferWithAllocator(&allocator);
+        let enc = cmd.computeCommandEncoder().ok_or("upload encoder")?;
+        enc.setLabel(Some(&label("terrain detail mips")));
+        unsafe {
+            enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                &staging,
+                0,
+                detail_size as usize * 4,
+                detail_rgba.len(),
+                MTLSize { width: detail_size as usize, height: detail_size as usize, depth: 1 },
+                &detail,
+                0,
+                0,
+                MTLOrigin { x: 0, y: 0, z: 0 },
+            );
+        }
+        enc.barrierAfterEncoderStages_beforeEncoderStages_visibilityOptions(
+            MTLStages::Blit,
+            MTLStages::Blit,
+            MTL4VisibilityOptions::Device,
+        );
+        unsafe { enc.generateMipmapsForTexture(&detail) };
+        enc.endEncoding();
+        cmd.endCommandBuffer();
+        let done = self.device.newSharedEvent().ok_or("upload event")?;
+        let mut cmd_ptr = NonNull::from(&*cmd);
+        unsafe { self.queue.commit_count(NonNull::from(&mut cmd_ptr), 1) };
+        let done_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*done);
+        self.queue.signalEvent_value(done_event, 1);
+        if !done.waitUntilSignaledValue_timeoutMS(1, 5000) {
+            return Err("загрузка ландшафта не завершилась за 5 с".into());
+        }
+        self.residency.removeAllocation(as_allocation(&*staging));
+        self.residency.commit();
+
+        if let Some(old) = self.terrain.replace(TerrainGpu {
+            vertices: vbuf,
+            indices: ibuf,
+            index_count: indices.len(),
+            tile_count,
+            detail,
+        }) {
+            self.retire(
+                vec![old.detail],
+                Some(Box::new((old.vertices, old.indices))),
+            );
+        }
+        Ok(())
+    }
+
     /// Ждёт завершения всех отправленных кадров (выход, тесты).
     pub fn wait_idle(&self) {
         let _ = self
@@ -751,9 +877,9 @@ impl Renderer {
                     color.setLoadAction(MTLLoadAction::Clear);
                     color.setStoreAction(MTLStoreAction::Store);
                     color.setClearColor(MTLClearColor {
-                        red: 0.035,
-                        green: 0.045,
-                        blue: 0.06,
+                        red: input.clear_color[0] as f64,
+                        green: input.clear_color[1] as f64,
+                        blue: input.clear_color[2] as f64,
                         alpha: 1.0,
                     });
                     let depth = rp.depthAttachment();
@@ -796,6 +922,35 @@ impl Renderer {
                         znear: 0.0,
                         zfar: 1.0,
                     });
+                    if let (true, Some(terrain)) = (input.draw_terrain, &self.terrain) {
+                        let ttable = &slot.tables[4];
+                        unsafe {
+                            ttable.setAddress_atIndex(terrain.vertices.gpuAddress(), 0);
+                            ttable.setAddress_atIndex(upload_addr, 1);
+                            ttable.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
+                        }
+                        enc.pushDebugGroup(&label(&format!(
+                            "terrain: {} tiles",
+                            terrain.tile_count
+                        )));
+                        enc.setRenderPipelineState(&self.pipelines.terrain);
+                        enc.setArgumentTable_atStages(
+                            ttable,
+                            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+                        );
+                        unsafe {
+                            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
+                                MTLPrimitiveType::Triangle,
+                                terrain.index_count,
+                                MTLIndexType::UInt16,
+                                terrain.indices.gpuAddress(),
+                                terrain.indices.length(),
+                                terrain.tile_count,
+                            );
+                        }
+                        enc.popDebugGroup();
+                        enc.setRenderPipelineState(&self.pipelines.scene);
+                    }
                     enc.setArgumentTable_atStages(
                         table,
                         MTLRenderStages::Vertex | MTLRenderStages::Fragment,

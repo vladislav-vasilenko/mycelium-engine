@@ -1,0 +1,5 @@
+мир: seed 0xec40, 12×12 тайлов, генератор v1, запечён за 270 мс, контрольная сумма 261451dbad0d94d0
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: не запрошено (capture) | raytracing from render: не запрошено (capture)
+ландшафт: 608400 вершин, 1179648 треугольников, загружен за 417 мс
+кадр 2560×1440 px, шейдеры из /Users/vladmac/Code/GameDev/GameEngine/shaders/metal
+[capture] кадр 30 записан

@@ -36,6 +36,18 @@ pub struct Vertex {
     pub uv: [f32; 2],
 }
 
+/// Вершина ландшафта, 32 байта: `packed_float3` позиции и нормали,
+/// `uchar4` весов (лес, торф, берег, тропа) и `uchar4` материала
+/// (субстрат, русло, влажность, резерв).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct TerrainVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub weights: [u8; 4],
+    pub material: [u8; 4],
+}
+
 /// Ожидаемые значения, которые ядро `layout_probe` записывает в буфер.
 /// Порядок полей совпадает с порядком записи в MSL.
 pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
@@ -53,10 +65,14 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<Vertex>() as u32,
         offset_of!(Vertex, normal) as u32,
         offset_of!(Vertex, uv) as u32,
+        size_of::<TerrainVertex>() as u32,
+        offset_of!(TerrainVertex, normal) as u32,
+        offset_of!(TerrainVertex, weights) as u32,
+        offset_of!(TerrainVertex, material) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 13;
+pub const LAYOUT_PROBE_LEN: usize = 17;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -72,6 +88,10 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(Vertex)",
     "Vertex.normal",
     "Vertex.uv",
+    "sizeof(TerrainVertex)",
+    "TerrainVertex.normal",
+    "TerrainVertex.weights",
+    "TerrainVertex.material",
 ];
 
 #[cfg(test)]
@@ -83,7 +103,9 @@ mod tests {
         // float4x4 = 64 байта, float4 выравнивается по 16.
         assert_eq!(
             expected_probe(),
-            [112, 16, 64, 80, 96, 100, 104, 108, 80, 64, 32, 12, 24]
+            [
+                112, 16, 64, 80, 96, 100, 104, 108, 80, 64, 32, 12, 24, 32, 12, 24, 28
+            ]
         );
     }
 }

@@ -102,6 +102,68 @@ pub fn expected_depth(
     best.unwrap_or(0.0)
 }
 
+/// Луч из центра пикселя (начало вверху слева) в мировых координатах.
+pub fn pixel_ray(
+    px: u32,
+    py: u32,
+    width: u32,
+    height: u32,
+    view: Mat4,
+    proj: Mat4,
+) -> (Vec3, Vec3) {
+    let ndc_x = (px as f32 + 0.5) / width as f32 * 2.0 - 1.0;
+    let ndc_y = 1.0 - (py as f32 + 0.5) / height as f32 * 2.0;
+    let inv = (proj * view).inverse();
+    let near = inv * Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+    let far = inv * Vec4::new(ndc_x, ndc_y, 0.5, 1.0);
+    let origin = near.truncate() / near.w;
+    let dir = (far.truncate() / far.w - origin).normalize();
+    (origin, dir)
+}
+
+/// Глубина по оси взгляда (м) до ландшафта вдоль луча пикселя: шаг 0,25 м,
+/// затем бисекция по `ground.sample_ground`. `None` — луч ушёл за карту или
+/// дальше `max_dist`.
+pub fn expected_terrain_view_depth(
+    (px, py): (u32, u32),
+    (width, height): (u32, u32),
+    view: Mat4,
+    proj: Mat4,
+    ground: &dyn crate::world::Ground,
+    max_dist: f32,
+) -> Option<f32> {
+    let (origin, dir) = pixel_ray(px, py, width, height, view, proj);
+    let above = |t: f32| {
+        let p = origin + dir * t;
+        ground.sample_ground(p.x, p.z).map(|g| p.y - g.height)
+    };
+    let step = 0.25;
+    let mut t0 = 0.0;
+    let mut t = step;
+    while t < max_dist {
+        match above(t)? {
+            d if d <= 0.0 => {
+                let (mut lo, mut hi) = (t0, t);
+                for _ in 0..40 {
+                    let mid = 0.5 * (lo + hi);
+                    if above(mid)? > 0.0 {
+                        lo = mid
+                    } else {
+                        hi = mid
+                    }
+                }
+                let hit = origin + dir * hi;
+                return Some(-(view.transform_point3(hit)).z);
+            }
+            _ => {
+                t0 = t;
+                t += step;
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,6 +22,8 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     FrameUniforms f;
     InstanceData i;
     Vertex v;
+    TerrainVertex tv;
+    thread char* tb = (thread char*)&tv;
     thread char* fb = (thread char*)&f;
     thread char* ib = (thread char*)&i;
     thread char* vb = (thread char*)&v;
@@ -38,4 +40,8 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[10] = sizeof(Vertex);
     out[11] = uint((thread char*)&v.normal - vb);
     out[12] = uint((thread char*)&v.uv - vb);
+    out[13] = sizeof(TerrainVertex);
+    out[14] = uint((thread char*)&tv.normal - tb);
+    out[15] = uint((thread char*)&tv.weights - tb);
+    out[16] = uint((thread char*)&tv.material - tb);
 }

@@ -162,6 +162,8 @@ pub struct Fields {
     pub coast: f32,
     /// Вес чаши торфяника.
     pub basin: f32,
+    /// Тип берега: 0 — песок, 1 — камень.
+    pub rocky: f32,
 }
 
 /// Сторона первой карты, м: 16 × 16 тайлов. Остров с полосой моря по краям.
@@ -169,6 +171,8 @@ pub const FIRST_MAP_SIZE_M: f32 = 1024.0;
 /// Каменистый мыс на востоке: насколько выдаётся в море и радиус влияния, м.
 pub const CAPE_EXTENT_M: f32 = 55.0;
 pub const CAPE_RADIUS_M: f32 = 110.0;
+/// Радиус песчаного пляжа вокруг устья, м.
+pub const MOUTH_BEACH_RADIUS_M: f32 = 90.0;
 /// Глубина открытого моря у края карты, м.
 pub const SEA_FLOOR_M: f32 = -24.0;
 
@@ -185,6 +189,8 @@ pub struct Generator {
     pub island_radii: Vec2,
     /// Центр каменистого мыса в конце тропы.
     pub cape_center: Vec2,
+    /// Устье: первая точка реки в море. Пляж вокруг него песчаный.
+    pub mouth: Vec2,
 }
 
 /// Брод: расстояние от оси тропы, где берега русла полностью и совсем не
@@ -234,7 +240,7 @@ impl Generator {
             ],
             24,
         );
-        Generator {
+        let mut g = Generator {
             seed,
             size_m: FIRST_MAP_SIZE_M,
             river,
@@ -244,7 +250,13 @@ impl Generator {
             island_center: v(512.0, 512.0),
             island_radii: v(410.0, 385.0),
             cape_center: v(800.0, 800.0),
-        }
+            mouth: Vec2::ZERO,
+        };
+        g.mouth = (0..=400)
+            .map(|k| g.river.point_at(k as f32 / 400.0))
+            .find(|p| g.coast_distance(*p) <= 0.0)
+            .unwrap_or(g.river.point_at(1.0));
+        g
     }
 
     fn seed_of(&self, salt: u64) -> u64 {
@@ -268,9 +280,19 @@ impl Generator {
         (1.0 + wobble - r) * mean_radius + cape
     }
 
-    /// Восточный каменистый берег: 0 на западе, 1 к востоку от устья.
-    fn east(&self, x: f32) -> f32 {
-        smoothstep(690.0, 770.0, x)
+    /// Тип берега: 0 — песчаная бухта, 1 — каменистый берег. Зависит от
+    /// направления от центра острова, поэтому одинаков вдоль луча от суши к дну.
+    /// Чередование задаёт шум по углу; выступающие мысы чаще каменистые;
+    /// мыс в конце тропы — камень, пляж у устья — песок.
+    pub fn rocky(&self, p: Vec2) -> f32 {
+        let q = (p - self.island_center) / self.island_radii;
+        let dir = q / q.length().max(1e-6);
+        let alternation = fbm(self.seed_of(15), dir.x * 2.6 + 5.0, dir.y * 2.6 + 2.0, 2);
+        let headland = fbm(self.seed_of(11), dir.x * 1.7 + 7.0, dir.y * 1.7 + 3.0, 2);
+        let near = |c: Vec2, r: f32| (-(p - c).length_squared() / (r * r)).exp();
+        let raw = alternation + 0.35 * headland + 1.5 * near(self.cape_center, CAPE_RADIUS_M)
+            - 1.5 * near(self.mouth, MOUTH_BEACH_RADIUS_M);
+        smoothstep(-0.22, 0.22, raw)
     }
 
     /// Рельеф без тропы: основа, торфяник, берег острова, морское дно, русло.
@@ -283,12 +305,12 @@ impl Generator {
             + 2.5 * fbm(self.seed_of(2), x / 35.0, z / 35.0, 3);
 
         let dc = self.coast_distance(p);
-        let east = self.east(x);
+        let rocky = self.rocky(p);
 
         // Каменистые гряды у восточного берега.
         let ridge = 1.0 - fbm(self.seed_of(3), x / 28.0, z / 28.0, 3).abs();
         let near_shore = 1.0 - smoothstep(0.0, 80.0, dc.abs());
-        h += 6.0 * ridge * ridge * east * near_shore;
+        h += 6.0 * ridge * ridge * rocky * near_shore;
 
         // Чаша торфяника: плоская низина с мелкими кочками.
         let noisy_r =
@@ -300,14 +322,14 @@ impl Generator {
             basin,
         );
 
-        // Берег: суша плавно спускается к кромке (пологий пляж на западе и юге,
-        // крутой каменистый берег на востоке), под водой — шельф и спуск к дну.
-        let beach_slope = lerp(0.045, 0.3, east);
+        // Берег: суша плавно спускается к кромке (пологий пляж в бухтах, крутой
+        // каменистый берег на мысах), под водой — шельф и спуск к дну.
+        let beach_slope = lerp(0.045, 0.3, rocky);
         if dc >= 0.0 {
             h = lerp(beach_slope * dc, h, smoothstep(0.0, 70.0, dc));
         } else {
             let out = -dc;
-            let shelf = lerp(0.06, 0.25, east) * out.min(30.0);
+            let shelf = lerp(0.06, 0.25, rocky) * out.min(30.0);
             h = -shelf
                 + (SEA_FLOOR_M + 1.8) * smoothstep(30.0, 110.0, out)
                 + 0.6 * fbm(self.seed_of(13), x / 25.0, z / 25.0, 2);
@@ -366,6 +388,7 @@ impl Generator {
             river,
             coast,
             basin,
+            rocky: self.rocky(p),
         }
     }
 }
@@ -386,13 +409,10 @@ pub fn biome_weights(f: &Fields, slope: f32) -> BiomeWeights {
     }
 }
 
-/// Восточнее этой линии берег и дно у берега каменистые, м.
-pub const ROCKY_COAST_X: f32 = 730.0;
-
 /// Субстрат по полям, наклону и весам.
-pub fn substrate(f: &Fields, slope: f32, w: &BiomeWeights, x: f32) -> Substrate {
+pub fn substrate(f: &Fields, slope: f32, w: &BiomeWeights) -> Substrate {
     if f.height < SEA_LEVEL + 0.4 && f.coast > 0.5 {
-        if x > ROCKY_COAST_X {
+        if f.rocky > 0.5 {
             Substrate::Rock
         } else {
             Substrate::Sand
@@ -402,7 +422,7 @@ pub fn substrate(f: &Fields, slope: f32, w: &BiomeWeights, x: f32) -> Substrate 
     } else if f.river > 0.5 {
         Substrate::Gravel
     } else if w.shore > 0.5 {
-        if x > ROCKY_COAST_X {
+        if f.rocky > 0.5 {
             Substrate::Rock
         } else {
             Substrate::Sand

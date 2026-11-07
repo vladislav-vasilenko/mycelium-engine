@@ -49,7 +49,12 @@ pub fn vertices(world: &World) -> Vec<TerrainVertex> {
                         unorm8(s.weights.shore),
                         unorm8(s.trail),
                     ],
-                    material: [s.substrate as u8, unorm8(s.river), unorm8(s.moisture), 0],
+                    material: [
+                        s.substrate as u8,
+                        unorm8(s.river),
+                        unorm8(s.moisture),
+                        unorm8(s.rocky),
+                    ],
                 });
             }
         }

@@ -21,7 +21,7 @@ pub const TILE_SIZE_M: f32 = 64.0;
 pub const TILE_SAMPLES: usize = 65;
 pub const SAMPLE_STEP_M: f32 = 1.0;
 /// Версия алгоритма генерации. Меняется вместе с результатом генератора.
-pub const GENERATOR_VERSION: u32 = 3;
+pub const GENERATOR_VERSION: u32 = 4;
 /// Первая карта: 16 × 16 тайлов, 1024 × 1024 м.
 pub const FIRST_MAP_TILES: i32 = 16;
 
@@ -67,6 +67,8 @@ pub struct Sample {
     pub weights: BiomeWeights,
     pub trail: f32,
     pub river: f32,
+    /// Тип берега: 0 — песок, 1 — камень.
+    pub rocky: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -237,10 +239,10 @@ impl World {
                             .weights
                             .as_ref()
                             .map_or_else(|| generator::biome_weights(&f, slope), |w| w[k]);
-                        let substrate = overrides.substrate.as_ref().map_or_else(
-                            || generator::substrate(&f, slope, &weights, gi as f32),
-                            |s| s[k],
-                        );
+                        let substrate = overrides
+                            .substrate
+                            .as_ref()
+                            .map_or_else(|| generator::substrate(&f, slope, &weights), |s| s[k]);
                         samples.push(Sample {
                             height: f.height,
                             normal: n,
@@ -250,6 +252,7 @@ impl World {
                             weights,
                             trail: f.trail,
                             river: f.river,
+                            rocky: f.rocky,
                         });
                     }
                 }
@@ -295,11 +298,7 @@ impl World {
             .map(|k| g.trail.point_at(k as f32 / 400.0))
             .min_by(|a, b| g.river.nearest(*a).0.total_cmp(&g.river.nearest(*b).0))
             .unwrap();
-        // Устье — точка реки на береговой линии.
-        let mouth = (0..=400)
-            .map(|k| g.river.point_at(k as f32 / 400.0))
-            .find(|p| g.coast_distance(*p) <= 0.0)
-            .unwrap_or(g.river.point_at(1.0));
+        let mouth = g.mouth;
         vec![
             Marker {
                 name: "начало тропы".into(),
@@ -568,5 +567,47 @@ mod tests {
         }
         let share = land as f32 / (n * n) as f32;
         assert!((0.45..0.75).contains(&share), "доля суши {share}");
+    }
+
+    /// Вдоль береговой линии чередуются песчаные и каменистые участки: не меньше
+    /// трёх каждого вида длиннее 40 м; мыс в конце тропы каменистый, устье песчаное.
+    #[test]
+    fn coast_alternates_sand_and_rock() {
+        let g = &test_world().generator;
+        let n = 1440;
+        let mut coast = Vec::with_capacity(n);
+        for k in 0..n {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU;
+            let dir = Vec2::new(a.cos(), a.sin()) * g.island_radii;
+            // Первая точка моря на луче от центра.
+            let mut t = 0.6;
+            while g.coast_distance(g.island_center + dir * t) > 0.0 {
+                t += 0.002;
+            }
+            coast.push(g.island_center + dir * t);
+        }
+        let rocky: Vec<bool> = coast.iter().map(|p| g.rocky(*p) > 0.5).collect();
+        let start = rocky
+            .iter()
+            .position(|&r| r != rocky[0])
+            .expect("берег одного типа");
+        let (mut sand, mut rock) = (0, 0);
+        let mut run = 0.0;
+        for i in 0..n {
+            let (a, b) = ((start + i) % n, (start + i + 1) % n);
+            run += coast[a].distance(coast[b]);
+            if rocky[a] != rocky[b] {
+                if run > 40.0 {
+                    if rocky[a] { rock += 1 } else { sand += 1 }
+                }
+                run = 0.0;
+            }
+        }
+        assert!(
+            sand >= 3 && rock >= 3,
+            "песчаных участков {sand}, каменистых {rock}"
+        );
+        assert!(g.rocky(g.cape_center) > 0.9, "мыс в конце тропы каменистый");
+        assert!(g.rocky(g.mouth) < 0.1, "пляж у устья песчаный");
     }
 }

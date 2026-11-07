@@ -20,18 +20,19 @@ flowchart LR
     mesh --> gpu["Renderer::set_terrain<br/>один instanced draw"]
 ```
 
-Генерация детерминирована: результат зависит от `seed` и `GENERATOR_VERSION`, но не от числа потоков. Контрольная сумма `World::checksum` печатается при запуске (`f7f242290bef4027` для seed `0xEC40`, версии 3).
+Генерация детерминирована: результат зависит от `seed` и `GENERATOR_VERSION`, но не от числа потоков. Контрольная сумма `World::checksum` печатается при запуске (`a3f119f4a3951199` для seed `0xEC40`, версии 4).
 
 ## 2. Карта первого маршрута
 
-Карта 16 × 16 тайлов, 1024 × 1024 м, seed `0xEC40`, генератор v3 ([AD-36](00-arch.md#ad-36-остров-на-карте-1024-м-вместо-берега-только-на-юге)). Остров около 830 × 790 м, вокруг море; весь край карты глубже −10 м. Север — малые z.
+Карта 16 × 16 тайлов, 1024 × 1024 м, seed `0xEC40`, генератор v4 ([AD-36](00-arch.md#ad-36-остров-на-карте-1024-м-вместо-берега-только-на-юге)). Остров около 830 × 790 м, вокруг море; весь край карты глубже −10 м. Север — малые z.
 
 | Элемент | Как задан | Где в коде |
 | --- | --- | --- |
 | Основной рельеф | 9 м + подъём к северу до 24 м + fbm 10 м (масштаб 170 м) + fbm 2,5 м (35 м) | `Generator::terrain_without_trail` |
 | Береговая линия | эллипс с центром (512, 512) и полуосями 410 × 385 м; край изгибается шумом по углу (±13 % и ±4 %, плавные заливы и мысы) и мелким шумом по положению (±1,2 %); каменистый мыс в конце тропы — выступ до 55 м с центром (800, 800) и радиусом 110 м | `Generator::coast_distance` — знаковое расстояние, > 0 на суше |
-| Берег и дно | на суше к кромке рельеф сходит в пологий пляж (уклон 4,5 %, на востоке 30 %) за 70 м; под водой шельф 30 м (уклон 6 %, на востоке 25 %), затем спуск до `SEA_FLOOR_M` = −24 м к 110 м от кромки; `SEA_LEVEL` = 0 | `terrain_without_trail` |
-| Каменистые гряды | ridged-шум 6 м восточнее x = 690…770 у берега; восточнее `ROCKY_COAST_X` = 730 берег и дно у берега — камень | там же, `substrate` |
+| Тип берега | маска `rocky` 0..1 от направления из центра острова: шум по углу (чередование), +0,35 × изгиб мысов, каменистый мыс в конце тропы, песчаный пляж в радиусе 90 м у устья; переход ±0,22 по шуму. Вдоль берега 3+ песчаных и 3+ каменистых участков ([AD-37](00-arch.md#ad-37-маска-типа-берега-по-направлению-от-центра-острова)) | `Generator::rocky`, `MOUTH_BEACH_RADIUS_M` |
+| Берег и дно | на суше к кромке рельеф сходит в пляж за 70 м (уклон 4,5 % в бухтах, до 30 % на каменистых участках); под водой шельф 30 м (уклон 6 %, до 25 % у камней), затем спуск до `SEA_FLOOR_M` = −24 м к 110 м от кромки; `SEA_LEVEL` = 0 | `terrain_without_trail` |
+| Каменистые гряды | ridged-шум 6 м у каменистых участков берега (× `rocky`); при `rocky` > 0,5 берег и дно у кромки — камень | там же, `substrate` |
 | Торфяник | чаша радиусом ~120 м с шумным краем, центр (523, 518), дно 7,5 м с кочками | там же |
 | Река | сплайн Катмулла — Рома, 10 опорных точек от истока (322, 250) к устью на юге и дальше в море (690, 990); полуширина 3 → 9 м; дно не выше профиля 17 → −2,5 м и на 1,8 м ниже берегов; в море русло затухает за 60 м от кромки | `Generator::first_map`, `river_half_width` |
 | Тропа | сплайн 10 точек от (265, 290) через торфяник к каменистому мысу (765, 790), длина 781 м; полоса ±1,1…2,6 м выравнивается к высоте оси на 85 %; у реки маска обнуляется (место моста) | `Generator::sample` |
@@ -64,15 +65,16 @@ flowchart LR
 | `Path::catmull_rom(control, per_segment)` | fn | уплотнение опорных точек, построение сетки |
 | `Path::nearest(p) -> (d, t, q)` | fn | расстояние, параметр 0..1 по длине, точка на оси; дальше радиуса — `(∞, 0, p)` |
 | `Path::point_at(t)`, `Path::length()` | fn | точка по параметру, длина |
-| `Fields` | struct (`Default`) | `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
-| `FIRST_MAP_SIZE_M` = 1024, `SEA_FLOOR_M` = −24, `CAPE_EXTENT_M` = 55, `CAPE_RADIUS_M` = 110, `ROCKY_COAST_X` = 730 | const | раскладка острова |
-| `Generator` | struct | `seed`, `size_m`, `river`, `trail`, `basin_center`, `basin_radius`, `island_center`, `island_radii`, `cape_center` |
+| `Fields` | struct (`Default`) | `rocky` (тип берега), `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
+| `FIRST_MAP_SIZE_M` = 1024, `SEA_FLOOR_M` = −24, `CAPE_EXTENT_M` = 55, `CAPE_RADIUS_M` = 110, `MOUTH_BEACH_RADIUS_M` = 90 | const | раскладка острова |
+| `Generator` | struct | `seed`, `size_m`, `river`, `trail`, `basin_center`, `basin_radius`, `island_center`, `island_radii`, `cape_center`, `mouth` (первая точка реки в море) |
 | `Generator::first_map(seed)` | fn | авторская раскладка острова 1024 м |
 | `Generator::coast_distance(p) -> f32` | fn | знаковое расстояние до кромки острова, м (> 0 — суша) |
+| `Generator::rocky(p) -> f32` | fn | тип берега 0 (песок) … 1 (камень) |
 | `Generator::sample(x, z) -> Fields` | fn | высота и поля в мировой точке |
 | `river_half_width(t)` | fn | полуширина русла 3 → 9 м |
 | `biome_weights(&Fields, slope) -> BiomeWeights` | fn | веса из полей, наклона (1 − ny) и масок, квадраты с нормировкой до суммы 1 |
-| `substrate(&Fields, slope, &BiomeWeights, x) -> Substrate` | fn | песок у моря, камень на склонах > 0,35, галька в русле, камень/песок на берегу, торф, иначе почва |
+| `substrate(&Fields, slope, &BiomeWeights) -> Substrate` | fn | у моря песок или камень по `rocky`, камень на склонах > 0,35, галька в русле, камень/песок на берегу по `rocky`, торф, иначе почва |
 
 Поля среды: влажность = 0,45 + шум + 0,45·торфяник + 0,35·близость реки + 0,15·берег − 0,012·(h − 10); температура = 15 − 0,0065·h + шум.
 
@@ -84,7 +86,7 @@ flowchart LR
 | `TileId { x, z }` | struct | целые координаты тайла; `origin()` — угол в метрах |
 | `Substrate` | enum `u8` | `Soil` 0, `Peat` 1, `Sand` 2, `Rock` 3, `Gravel` 4 — те же числа в `TerrainVertex.material[0]` |
 | `BiomeWeights { forest, peat, shore }` | struct | нормированные веса |
-| `Sample` | struct | `height`, `normal`, `moisture`, `temperature`, `substrate`, `weights`, `trail`, `river` |
+| `Sample` | struct | `height`, `normal`, `moisture`, `temperature`, `substrate`, `weights`, `trail`, `river`, `rocky` (в `TerrainVertex.material[3]`) |
 | `Tile` | struct | `id`, `world_seed`, `generator_version`, `samples` (65 × 65, строки по z); `at(i, j)` |
 | `GroundSample` | struct | `height`, `normal` (треугольника LOD 0), `substrate`, `on_trail`, `wet` (русло или ниже моря), `tile` |
 | `Ground` | trait | `sample_ground(x, z) -> Option<GroundSample>`; `None` за картой. Реализуют `World` и тестовые поверхности |
@@ -109,13 +111,14 @@ flowchart LR
 | `height.png` | серый 16 бит | источник | высота в `height_range_m` (−40…60 м, шаг ≈ 1,5 мм) |
 | `masks.png` | RGB 8 бит | источник | тропа, русло, чаша торфяника |
 | `climate.png` | RGB 8 бит | источник | влажность, температура в `temperature_range_c` (−10…40 °C), близость берега моря |
+| `coast_type.png` | серый 8 бит | источник | тип берега: 0 песок, 255 камень (формат слоёв 2) |
 | `biome.png` | RGB 8 бит | замена, если указан в `overrides` | лес, торф, берег; сумма каналов ровно 255 |
 | `substrate.png` | серый 8 бит | замена, если указан в `overrides` | индекс `Substrate` × 60 |
 | `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
-| `FORMAT_VERSION` = 1, `HEIGHT_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json` | const | параметры формата |
+| `FORMAT_VERSION` = 2, `HEIGHT_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json` | const | параметры формата |
 | `Manifest` | struct (serde) | `format`, `seed`, `generator_version`, `tiles_x`, `tiles_z`, `sample_step_m`, `size_samples`, `height_range_m`, `temperature_range_c`, `substrate_codes`, `overrides` (`biome`, `substrate`), `exported_checksum`, `markers` |
 | `MarkerEntry { name, kind, x, z }` | struct (serde) | маркер в `world.json`; высота при импорте берётся с грунта |
 | `export(&World, dir) -> Result<Manifest, String>` | fn | пишет все слои и `world.json` (`overrides` пустой) |
@@ -124,7 +127,7 @@ flowchart LR
 | приватные `encode_weights`, `decode_weights` | fn | веса ↔ три байта с суммой 255 (метод наибольших остатков), чтобы повторный экспорт давал те же байты |
 | приватные `read_png`, `write_png`, `Image` | fn, struct | PNG 8/16 бит, палитра разворачивается, лишние каналы допускаются |
 
-Квантование источников идемпотентно: экспорт → импорт → экспорт даёт побайтно те же `height.png`, `masks.png`, `climate.png`. Мир после импорта отличается от сгенерированного на половину шага квантования (контрольная сумма другая).
+Квантование источников идемпотентно: экспорт → импорт → экспорт даёт побайтно те же `height.png`, `masks.png`, `climate.png`, `coast_type.png`. Мир после импорта отличается от сгенерированного на половину шага квантования (контрольная сумма другая).
 
 Запуск: `echo --export-world DIR` записывает слои и выходит; `echo --world DIR` собирает мир из слоёв. Ошибки слоёв выводятся с именем файла и завершают программу с кодом 2.
 
@@ -187,3 +190,4 @@ flowchart LR
 | 2026-11-08 | 02.1 | после `4e7f17e` | Генератор v2: брод у тропы (AD-33). Тест `bot_walks_whole_trail_from_start_to_shore` |
 | 2026-11-08 | 02.1 | после `d2608c5` | Модуль `layers`: экспорт и импорт слоёв PNG, `FieldGrid`, `DerivedOverrides`, `World::from_grid`, `World.fields`, `Marker.name: String`; `dump_map` и `rgb-to-png.py` заменены на `preview.png` ([AD-34](00-arch.md#ad-34-слои-карты-в-png-источники-и-ручные-замены)) |
 | 2026-11-08 | 02.1 | после `53f9e47` | Генератор v3: остров на карте 16 × 16 тайлов (1024 м), `coast_distance`, каменистый мыс, шельф и дно до −24 м, русло затухает в море; диапазон `height.png` −40…60 м ([AD-36](00-arch.md#ad-36-остров-на-карте-1024-м-вместо-берега-только-на-юге)) |
+| 2026-11-08 | 02.1 | после `7d787d0` | Генератор v4: маска типа берега `Generator::rocky`, `Fields.rocky`, `Sample.rocky`, `TerrainVertex.material[3]`, `Generator::mouth`; уклоны пляжа, шельфа и каменистые гряды от `rocky` вместо востока; слой `coast_type.png`, формат слоёв 2 ([AD-37](00-arch.md#ad-37-маска-типа-берега-по-направлению-от-центра-острова)) |

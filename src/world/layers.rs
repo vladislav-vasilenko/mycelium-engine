@@ -9,6 +9,7 @@
 //! | `height.png` | серый 16 бит | источник | высота в `height_range_m` |
 //! | `masks.png` | RGB 8 бит | источник | тропа, русло, чаша торфяника |
 //! | `climate.png` | RGB 8 бит | источник | влажность 0..1, температура в `temperature_range_c`, близость берега моря 0..1 |
+//! | `coast_type.png` | серый 8 бит | источник | тип берега: 0 песок, 255 камень |
 //! | `biome.png` | RGB 8 бит | замена по `overrides` | лес, торф, берег; сумма каналов 255 |
 //! | `substrate.png` | серый 8 бит | замена по `overrides` | индекс субстрата × 60 |
 //! | `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
@@ -30,7 +31,7 @@ use super::{
 };
 
 /// Версия формата каталога слоёв.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 /// Диапазон высот 16-битного слоя, м: шаг 100 / 65535 ≈ 1,5 мм.
 pub const HEIGHT_RANGE_M: [f32; 2] = [-40.0, 60.0];
 pub const TEMPERATURE_RANGE_C: [f32; 2] = [-10.0, 40.0];
@@ -228,6 +229,7 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
     let mut climate = Vec::with_capacity(nx * nz * 3);
     let mut biome = Vec::with_capacity(nx * nz * 3);
     let mut substrate = Vec::with_capacity(nx * nz);
+    let mut coast_type = Vec::with_capacity(nx * nz);
     for j in 0..nz {
         for i in 0..nx {
             let s = sample(i, j);
@@ -241,12 +243,20 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
             ]);
             biome.extend_from_slice(&encode_weights(&s.weights));
             substrate.push(substrate_index(s.substrate) * SUBSTRATE_STEP);
+            coast_type.push(unit8(f.rocky));
         }
     }
     use png::{BitDepth::*, ColorType::*};
     write_png(&dir.join("height.png"), size, Grayscale, Sixteen, &height)?;
     write_png(&dir.join("masks.png"), size, Rgb, Eight, &masks)?;
     write_png(&dir.join("climate.png"), size, Rgb, Eight, &climate)?;
+    write_png(
+        &dir.join("coast_type.png"),
+        size,
+        Grayscale,
+        Eight,
+        &coast_type,
+    )?;
     write_png(&dir.join("biome.png"), size, Rgb, Eight, &biome)?;
     write_png(
         &dir.join("substrate.png"),
@@ -337,6 +347,7 @@ pub fn import(dir: &Path) -> Result<World, String> {
     }
     let masks = load("masks.png", 3)?;
     let climate = load("climate.png", 3)?;
+    let coast_type = load("coast_type.png", 1)?;
     let unit = |img: &Image, i, j, c| img.get(i, j, c) as f32 / img.max as f32;
 
     let mut fields = Vec::with_capacity(nx * nz);
@@ -354,6 +365,7 @@ pub fn import(dir: &Path) -> Result<World, String> {
                 river: unit(&masks, i, j, 1),
                 basin: unit(&masks, i, j, 2),
                 coast: unit(&climate, i, j, 2),
+                rocky: unit(&coast_type, i, j, 0),
             });
         }
     }
@@ -513,7 +525,7 @@ mod tests {
         let imported = import(&a).unwrap();
         export(&imported, &b).unwrap();
         // Источники после импорта и повторного экспорта совпадают побайтно.
-        for name in ["height.png", "masks.png", "climate.png"] {
+        for name in ["height.png", "masks.png", "climate.png", "coast_type.png"] {
             assert_eq!(
                 std::fs::read(a.join(name)).unwrap(),
                 std::fs::read(b.join(name)).unwrap(),

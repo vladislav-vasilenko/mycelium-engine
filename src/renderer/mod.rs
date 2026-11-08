@@ -1,265 +1,59 @@
-//! Конкретный рендерер на Metal 4.
+//! Конкретный рендерер на Metal 4 — фасад над модулями бэкенда.
 //!
 //! Одна очередь `MTL4CommandQueue` для compute, render и copy. Два слота кадра,
 //! у каждого свой `MTL4CommandAllocator`, командный буфер, таблицы аргументов
 //! и upload-буфер в `StorageModeShared`. Завершение кадра отмечает `MTLSharedEvent`.
-//! Все нативные типы и `unsafe` вызовы Metal остаются в этом модуле.
+//! Все нативные типы и `unsafe` вызовы Metal остаются в этом модуле и его
+//! подмодулях:
+//!
+//! - `device` — проверка устройства и GPU capture;
+//! - `resources` — буферы, текстуры, загрузка, отложенное освобождение;
+//! - `frame` — вход и итог кадра, слоты, состав проходов;
+//! - `passes` — проходы как объекты за трейтом `FramePass`;
+//! - `readback` — раскладка и разбор копий для самопроверки;
+//! - `targets`, `terrain`, `water` — цели рендера и ресурсы сцены.
 
+mod device;
+mod frame;
+mod passes;
+mod readback;
+mod resources;
 pub mod shaders;
+mod targets;
+mod terrain;
+mod water;
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2_foundation::{NSProcessInfo, NSString, NSURL};
+use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
-use crate::frame_graph::{self, FramePlan, PassDecl, PassKind, ResourceId, Stages};
-use crate::layout::{
-    FrameUniforms, InstanceData, LAYOUT_PROBE_LEN, SeaParams, TerrainVertex, Vertex, WATER_PROBES,
-    WaterLevel,
-};
+pub use device::{DeviceInfo, probe_device};
+pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
+pub use readback::Readback;
+pub use terrain::TerrainTextures;
+
+use crate::frame_graph::{self, FramePlan};
+use crate::layout::Vertex;
 use crate::reference::PATTERN_SIZE;
-use crate::water::{ShoreField, WATER_LEVELS};
+use frame::{
+    FRAME_SLOTS, FrameSlot, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES, SEA_OFFSET,
+    SLOT_WAIT_TIMEOUT_MS, frame_passes,
+};
+use passes::{PassBarrier, PassCtx};
+use readback::{PendingReadback, RB_BYTES};
+use resources::{
+    DeferredRelease, TextureUpload, as_allocation, buffer_with, label, private_texture,
+    shared_buffer, to_mtl_stages, upload_bytes,
+};
 use shaders::{Obj, Pipelines, ShaderError, SourceOverride};
-
-const FRAME_SLOTS: usize = 2;
-const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
-// Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
-// SeaParams @4096, WaterLevel[] @4608.
-const UPLOAD_BYTES: usize = 8192;
-const INSTANCE_OFFSET: usize = 256;
-const INSTANCE_END: usize = 4096;
-const MAX_INSTANCES: usize = (INSTANCE_END - INSTANCE_OFFSET) / size_of::<InstanceData>();
-const SEA_OFFSET: usize = 4096;
-const LEVELS_OFFSET: usize = 4608;
-
-// Ресурсы для планировщика проходов.
-const RES_PATTERN: ResourceId = ResourceId(1);
-const RES_HDR: ResourceId = ResourceId(2);
-const RES_DEPTH: ResourceId = ResourceId(3);
-const RES_DRAWABLE: ResourceId = ResourceId(4);
-const RES_READBACK: ResourceId = ResourceId(5);
-const RES_WETNESS: ResourceId = ResourceId(6);
-
-// Раскладка буфера readback.
-const RB_PATTERN_BYTES: usize = (PATTERN_SIZE * PATTERN_SIZE * 4) as usize;
-const RB_DEPTH_OFFSET: usize = RB_PATTERN_BYTES;
-/// Точки проверки глубины в долях кадра для стартовой камеры самопроверки:
-/// куб A, куб B (ближе к камере, перекрывает A) и фон.
-pub const DEPTH_SAMPLES: [(f32, f32); 9] = [
-    (0.42, 0.50),
-    (0.45, 0.67),
-    (0.46, 0.55),
-    (0.52, 0.47),
-    (0.55, 0.45),
-    (0.58, 0.60),
-    (0.05, 0.05),
-    (0.95, 0.90),
-    (0.50, 0.20),
-];
-const RB_PROBE_OFFSET: usize = RB_DEPTH_OFFSET + 256;
-/// Пиксели HDR-буфера (RGBA16Float, 8 байт) в тех же точках, что и глубина.
-const RB_HDR_OFFSET: usize = RB_PROBE_OFFSET + 256;
-/// Результаты ядра `water_probe`: `WATER_PROBES` × float4.
-const RB_WATER_OFFSET: usize = RB_HDR_OFFSET + 256;
-const RB_BYTES: usize = RB_WATER_OFFSET + 256;
-
-#[derive(Clone, Debug)]
-pub struct DeviceInfo {
-    pub name: String,
-    pub os: String,
-    pub metal4: bool,
-    pub apple_family: Option<u32>,
-    /// `None` — не запрашивалось (режим GPU capture).
-    pub raytracing: Option<bool>,
-    pub raytracing_from_render: Option<bool>,
-}
-
-fn flag(v: Option<bool>) -> &'static str {
-    match v {
-        Some(true) => "да",
-        Some(false) => "нет",
-        None => "не запрошено (capture)",
-    }
-}
-
-impl std::fmt::Display for DeviceInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "GPU: {} | ОС: {} | Metal 4: {} | семейство Apple{} | raytracing: {} | raytracing from render: {}",
-            self.name,
-            self.os,
-            if self.metal4 { "да" } else { "нет" },
-            self.apple_family.map_or("?".to_string(), |v| v.to_string()),
-            flag(self.raytracing),
-            flag(self.raytracing_from_render)
-        )
-    }
-}
-
-fn capture_enabled() -> bool {
-    std::env::var_os("MTL_CAPTURE_ENABLED").is_some_and(|v| v == "1")
-}
-
-pub fn probe_device() -> Result<(Obj<dyn MTLDevice>, DeviceInfo), String> {
-    let device = MTLCreateSystemDefaultDevice().ok_or("Metal-устройство не найдено")?;
-    let families = [
-        (10u32, MTLGPUFamily::Apple10),
-        (9, MTLGPUFamily::Apple9),
-        (8, MTLGPUFamily::Apple8),
-        (7, MTLGPUFamily::Apple7),
-    ];
-    let apple_family = families
-        .iter()
-        .find(|(_, f)| device.supportsFamily(*f))
-        .map(|(v, _)| *v);
-    let info = DeviceInfo {
-        name: device.name().to_string(),
-        os: NSProcessInfo::processInfo()
-            .operatingSystemVersionString()
-            .to_string(),
-        metal4: device.supportsFamily(MTLGPUFamily::Metal4),
-        apple_family,
-        // При GPU capture устройство обёрнуто в CaptureMTLDevice, который только
-        // пересылает эти селекторы; проверка objc2 в Debug считает это ошибкой.
-        // В режиме capture признаки трассировки не запрашиваем.
-        raytracing: (!capture_enabled()).then(|| device.supportsRaytracing()),
-        raytracing_from_render: (!capture_enabled()).then(|| device.supportsRaytracingFromRender()),
-    };
-    Ok((device, info))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrameOutcome {
-    Presented,
-    SkippedZeroSize,
-    SkippedNoDrawable,
-    SkippedBusySlot,
-}
-
-pub struct FrameInput<'a> {
-    pub uniforms: FrameUniforms,
-    /// Экземпляры куба: тестовая сцена или столбики маркеров.
-    pub instances: &'a [InstanceData],
-    /// Рисовать ландшафт, если он загружен `set_terrain`.
-    pub draw_terrain: bool,
-    /// Цвет очистки HDR-цели (линейный).
-    pub clear_color: [f32; 3],
-    pub readback: bool,
-    pub capture: Option<PathBuf>,
-    /// Море: параметры и уровни сетки вокруг камеры. `None` — без воды.
-    pub water: Option<WaterFrame>,
-}
-
-/// Вода в кадре (03.1).
-pub struct WaterFrame {
-    pub params: SeaParams,
-    pub levels: [WaterLevel; WATER_LEVELS],
-}
-
-/// Вода на GPU: поле берега и индексы одного уровня кольцевой сетки.
-struct WaterGpu {
-    /// RGBA32Float: высота дна, расстояние до кромки, тип берега.
-    field: Obj<dyn MTLTexture>,
-    indices: Obj<dyn MTLBuffer>,
-    index_count: usize,
-}
-
-/// Ландшафт на GPU: вершины всех тайлов подряд, общие индексы одного тайла,
-/// детальная текстура с mip-уровнями.
-struct TerrainGpu {
-    vertices: Obj<dyn MTLBuffer>,
-    indices: Obj<dyn MTLBuffer>,
-    index_count: usize,
-    tile_count: usize,
-    detail: Obj<dyn MTLTexture>,
-    /// Массив материалов: RGB — альбедо (sRGB), A — высота для смешивания.
-    albedo: Obj<dyn MTLTexture>,
-    /// Массив материалов: RG — нормаль, B — шероховатость.
-    normal: Obj<dyn MTLTexture>,
-    /// Маска мокрого песка R16Float на всю карту, 1 тексель на метр;
-    /// пишет ядро `wet_sand_update`, читает шейдер ландшафта.
-    wetness: Obj<dyn MTLTexture>,
-}
-
-/// Текстуры ландшафта для `Renderer::set_terrain`.
-pub struct TerrainTextures<'a> {
-    pub detail_rgba: &'a [u8],
-    pub detail_size: u32,
-    pub materials: &'a crate::terrain_materials::MaterialArrays,
-    /// Сторона маски мокрого песка, тексели (1 на метр).
-    pub wetness_size: u32,
-}
-
-struct TextureUpload<'a> {
-    texture: &'a Obj<dyn MTLTexture>,
-    /// Слой за слоем, строки без выравнивания.
-    data: &'a [u8],
-    pixel_bytes: usize,
-    mips: bool,
-}
-
-pub struct Readback {
-    pub frame: u64,
-    pub pattern_time: f32,
-    pub width: u32,
-    pub height: u32,
-    pub pattern: Vec<u8>,
-    /// (x, y, глубина) в пикселях целевого буфера.
-    pub depth: Vec<(u32, u32, f32)>,
-    /// Значения HDR-буфера (до тонмаппинга) в тех же точках.
-    pub hdr: Vec<[f32; 4]>,
-    /// Ядро `water_probe`: смещённая точка поверхности и пена в точках `SeaParams.probe`.
-    pub water_probe: [[f32; 4]; WATER_PROBES],
-    pub probe: [u32; LAYOUT_PROBE_LEN],
-}
-
-struct PendingReadback {
-    signal_value: u64,
-    frame: u64,
-    pattern_time: f32,
-    width: u32,
-    height: u32,
-    pixels: Vec<(u32, u32)>,
-}
-
-struct FrameSlot {
-    allocator: Obj<dyn MTL4CommandAllocator>,
-    cmd: Obj<dyn MTL4CommandBuffer>,
-    /// pattern, scene, readback, tonemap, terrain, wet sand, water, water probe.
-    tables: [Obj<dyn MTL4ArgumentTable>; 8],
-    upload: Obj<dyn MTLBuffer>,
-    signal_value: u64,
-}
-
-struct Targets {
-    width: u32,
-    height: u32,
-    hdr: Obj<dyn MTLTexture>,
-    depth: Obj<dyn MTLTexture>,
-}
-
-/// Ресурс, который нельзя освобождать до завершения кадров, где он использовался.
-struct Retired {
-    after_value: u64,
-    textures: Vec<Obj<dyn MTLTexture>>,
-    /// Держит объект (например, старые pipeline) живым до завершения кадров.
-    _keep_alive: Option<Box<dyn Any>>,
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct Stats {
-    pub presented: u64,
-    pub skipped_busy: u64,
-    pub skipped_no_drawable: u64,
-    pub released_deferred: u64,
-    pub cpu_encode_ms: f64,
-}
+use targets::Targets;
+use terrain::TerrainGpu;
+use water::WaterGpu;
 
 pub struct Renderer {
     pub info: DeviceInfo,
@@ -270,6 +64,8 @@ pub struct Renderer {
     residency: Obj<dyn MTLResidencySet>,
     event: Obj<dyn MTLSharedEvent>,
     depth_state: Obj<dyn MTLDepthStencilState>,
+    /// Глубина для прозрачной воды: проверка без записи.
+    water_depth_state: Obj<dyn MTLDepthStencilState>,
     slots: Vec<FrameSlot>,
     pipelines: Pipelines,
     targets: Option<Targets>,
@@ -284,213 +80,27 @@ pub struct Renderer {
     /// Был ли readback в последнем отправленном кадре.
     prev_readback: bool,
     frame_index: u64,
-    retired: Vec<Retired>,
+    retired: DeferredRelease,
     pending_readback: Option<PendingReadback>,
     completed_readbacks: Vec<Readback>,
     shader_dir: PathBuf,
     terrain: Option<TerrainGpu>,
     water: Option<WaterGpu>,
-    /// Глубина для прозрачной воды: проверка без записи.
-    water_depth_state: Obj<dyn MTLDepthStencilState>,
     pub stats: Stats,
 }
 
-fn label(s: &str) -> Retained<NSString> {
-    NSString::from_str(s)
-}
-
-fn to_mtl_stages(s: Stages) -> MTLStages {
-    let mut out = MTLStages(0);
-    if s.contains(Stages::VERTEX) {
-        out |= MTLStages::Vertex;
-    }
-    if s.contains(Stages::FRAGMENT) {
-        out |= MTLStages::Fragment;
-    }
-    if s.contains(Stages::DISPATCH) {
-        out |= MTLStages::Dispatch;
-    }
-    if s.contains(Stages::BLIT) {
-        out |= MTLStages::Blit;
-    }
-    out
-}
-
-fn as_allocation<T: ?Sized + MTLAllocation>(
-    obj: &ProtocolObject<T>,
-) -> &ProtocolObject<dyn MTLAllocation>
-where
-    ProtocolObject<T>: MTLAllocation,
-{
-    ProtocolObject::from_ref(obj)
-}
-
-/// IEEE 754 half → f32 (формат HDR-буфера `RGBA16Float`).
-fn f16_to_f32(h: u16) -> f32 {
-    let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
-    let exp = ((h >> 10) & 0x1f) as i32;
-    let frac = (h & 0x3ff) as f32;
-    sign * match exp {
-        0 => frac * 2f32.powi(-24),
-        31 => {
-            if frac == 0.0 {
-                f32::INFINITY
-            } else {
-                f32::NAN
-            }
-        }
-        _ => (1.0 + frac / 1024.0) * 2f32.powi(exp - 15),
-    }
-}
-
-fn shared_buffer(
+fn depth_state(
     device: &ProtocolObject<dyn MTLDevice>,
-    len: usize,
+    write: bool,
     name: &str,
-) -> Obj<dyn MTLBuffer> {
-    let buf = device
-        .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
-        .expect("не удалось создать буфер");
-    buf.setLabel(Some(&label(name)));
-    buf
-}
-
-fn upload_bytes(buf: &ProtocolObject<dyn MTLBuffer>, offset: usize, bytes: &[u8]) {
-    assert!(
-        offset + bytes.len() <= buf.length(),
-        "запись за пределы буфера"
-    );
-    // SAFETY: буфер в shared-памяти, диапазон проверен выше. Слот кадра
-    // переиспользуется только после сигнала завершения его кадра на GPU.
-    unsafe {
-        let dst = buf.contents().as_ptr().cast::<u8>().add(offset);
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, bytes.len());
-    }
-}
-
-/// Квадратная текстура (или массив при `layers > 1`) для чтения в шейдере.
-fn sampled_texture(
-    device: &ProtocolObject<dyn MTLDevice>,
-    format: MTLPixelFormat,
-    size: u32,
-    layers: usize,
-    mips: bool,
-    name: &str,
-) -> Result<Obj<dyn MTLTexture>, String> {
-    sampled_texture_usage(
-        device,
-        format,
-        size,
-        layers,
-        mips,
-        MTLTextureUsage::ShaderRead,
-        name,
-    )
-}
-
-fn sampled_texture_usage(
-    device: &ProtocolObject<dyn MTLDevice>,
-    format: MTLPixelFormat,
-    size: u32,
-    layers: usize,
-    mips: bool,
-    usage: MTLTextureUsage,
-    name: &str,
-) -> Result<Obj<dyn MTLTexture>, String> {
-    let desc = MTLTextureDescriptor::new();
-    desc.setTextureType(if layers > 1 {
-        MTLTextureType::Type2DArray
-    } else {
-        MTLTextureType::Type2D
-    });
-    desc.setPixelFormat(format);
-    unsafe {
-        desc.setWidth(size as usize);
-        desc.setHeight(size as usize);
-        desc.setArrayLength(layers);
-        desc.setMipmapLevelCount(if mips {
-            (size.max(1).ilog2() + 1) as usize
-        } else {
-            1
-        });
-    }
-    desc.setUsage(usage);
-    desc.setStorageMode(MTLStorageMode::Private);
-    let tex = device
-        .newTextureWithDescriptor(&desc)
-        .ok_or_else(|| format!("текстура {name}"))?;
-    tex.setLabel(Some(&label(name)));
-    Ok(tex)
-}
-
-fn private_texture(
-    device: &ProtocolObject<dyn MTLDevice>,
-    format: MTLPixelFormat,
-    width: u32,
-    height: u32,
-    usage: MTLTextureUsage,
-    name: &str,
-) -> Obj<dyn MTLTexture> {
-    let desc = unsafe {
-        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-            format,
-            width as usize,
-            height as usize,
-            false,
-        )
-    };
-    desc.setUsage(usage);
-    desc.setStorageMode(MTLStorageMode::Private);
-    let tex = device
-        .newTextureWithDescriptor(&desc)
-        .expect("не удалось создать текстуру");
-    tex.setLabel(Some(&label(name)));
-    tex
-}
-
-fn frame_passes(readback: bool) -> Vec<PassDecl> {
-    let mut passes = vec![
-        PassDecl {
-            name: "pattern",
-            kind: PassKind::Compute,
-            reads: vec![],
-            writes: vec![(RES_PATTERN, Stages::DISPATCH)],
-        },
-        PassDecl {
-            name: "wet_sand",
-            kind: PassKind::Compute,
-            reads: vec![],
-            writes: vec![(RES_WETNESS, Stages::DISPATCH)],
-        },
-        PassDecl {
-            name: "scene",
-            kind: PassKind::Render,
-            reads: vec![
-                (RES_PATTERN, Stages::FRAGMENT),
-                (RES_WETNESS, Stages::FRAGMENT),
-            ],
-            writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
-        },
-    ];
-    if readback {
-        passes.push(PassDecl {
-            name: "readback",
-            kind: PassKind::Compute,
-            reads: vec![
-                (RES_PATTERN, Stages::BLIT),
-                (RES_DEPTH, Stages::BLIT),
-                (RES_HDR, Stages::BLIT),
-            ],
-            writes: vec![(RES_READBACK, Stages::DISPATCH | Stages::BLIT)],
-        });
-    }
-    passes.push(PassDecl {
-        name: "tonemap",
-        kind: PassKind::Render,
-        reads: vec![(RES_HDR, Stages::FRAGMENT)],
-        writes: vec![(RES_DRAWABLE, Stages::FRAGMENT)],
-    });
-    passes
+) -> Result<Obj<dyn MTLDepthStencilState>, String> {
+    let d = MTLDepthStencilDescriptor::new();
+    d.setDepthCompareFunction(MTLCompareFunction::GreaterEqual);
+    d.setDepthWriteEnabled(write);
+    d.setLabel(Some(&label(name)));
+    device
+        .newDepthStencilStateWithDescriptor(&d)
+        .ok_or_else(|| format!("depth state {name}"))
 }
 
 impl Renderer {
@@ -531,31 +141,15 @@ impl Renderer {
             .newResidencySetWithDescriptor_error(&residency_desc)
             .map_err(|e| format!("MTLResidencySet: {}", e.localizedDescription()))?;
 
-        let ds_desc = MTLDepthStencilDescriptor::new();
-        ds_desc.setDepthCompareFunction(MTLCompareFunction::GreaterEqual);
-        ds_desc.setDepthWriteEnabled(true);
-        ds_desc.setLabel(Some(&label("reversed-Z GreaterEqual")));
-        let depth_state = device
-            .newDepthStencilStateWithDescriptor(&ds_desc)
-            .ok_or("depth state")?;
-        let water_ds = MTLDepthStencilDescriptor::new();
-        water_ds.setDepthCompareFunction(MTLCompareFunction::GreaterEqual);
-        water_ds.setDepthWriteEnabled(false);
-        water_ds.setLabel(Some(&label("reversed-Z test, no write (water)")));
-        let water_depth_state = device
-            .newDepthStencilStateWithDescriptor(&water_ds)
-            .ok_or("water depth state")?;
+        let depth_state = depth_state(&device, true, "reversed-Z GreaterEqual")?;
+        let water_depth_state = depth_state_no_write(&device, "reversed-Z test, no write (water)")?;
 
         let shader_dir = shaders::shader_dir();
         let pipelines = shaders::build_pipelines(&device, &compiler, &shader_dir, 1, None)
             .map_err(|e| e.to_string())?;
 
-        let vertex_bytes: &[u8] = bytemuck::cast_slice(vertices);
-        let vertex_buf = shared_buffer(&device, vertex_bytes.len(), "cube vertices");
-        upload_bytes(&vertex_buf, 0, vertex_bytes);
-        let index_bytes: &[u8] = bytemuck::cast_slice(indices);
-        let index_buf = shared_buffer(&device, index_bytes.len(), "cube indices");
-        upload_bytes(&index_buf, 0, index_bytes);
+        let vertex_buf = buffer_with(&device, bytemuck::cast_slice(vertices), "cube vertices");
+        let index_buf = buffer_with(&device, bytemuck::cast_slice(indices), "cube indices");
         let readback_buf = shared_buffer(&device, RB_BYTES, "readback");
         let pattern_tex = private_texture(
             &device,
@@ -566,40 +160,9 @@ impl Renderer {
             "pattern (compute → fragment)",
         );
 
-        let mut slots = Vec::with_capacity(FRAME_SLOTS);
-        for i in 0..FRAME_SLOTS {
-            let allocator = device.newCommandAllocator().ok_or("command allocator")?;
-            let cmd = device.newCommandBuffer().ok_or("command buffer")?;
-            cmd.setLabel(Some(&label(&format!("frame slot {i}"))));
-            let table = |name: &str| -> Result<Obj<dyn MTL4ArgumentTable>, String> {
-                let d = MTL4ArgumentTableDescriptor::new();
-                d.setMaxBufferBindCount(4);
-                d.setMaxTextureBindCount(4);
-                d.setLabel(Some(&label(&format!("{name} args, slot {i}"))));
-                device
-                    .newArgumentTableWithDescriptor_error(&d)
-                    .map_err(|e| format!("argument table: {}", e.localizedDescription()))
-            };
-            let tables = [
-                table("pattern")?,
-                table("scene")?,
-                table("readback")?,
-                table("tonemap")?,
-                table("terrain")?,
-                table("wet sand")?,
-                table("water")?,
-                table("water probe")?,
-            ];
-            let upload = shared_buffer(&device, UPLOAD_BYTES, &format!("upload slot {i}"));
-            residency.addAllocation(as_allocation(&*upload));
-            slots.push(FrameSlot {
-                allocator,
-                cmd,
-                tables,
-                upload,
-                signal_value: 0,
-            });
-        }
+        let slots = (0..FRAME_SLOTS)
+            .map(|i| FrameSlot::new(&device, &residency, i))
+            .collect::<Result<Vec<_>, _>>()?;
 
         for a in [
             as_allocation(&*vertex_buf),
@@ -633,6 +196,7 @@ impl Renderer {
             residency,
             event,
             depth_state,
+            water_depth_state,
             slots,
             pipelines,
             targets: None,
@@ -644,13 +208,12 @@ impl Renderer {
             plans,
             prev_readback: false,
             frame_index: 0,
-            retired: Vec::new(),
+            retired: DeferredRelease::default(),
             pending_readback: None,
             completed_readbacks: Vec::new(),
             shader_dir,
             terrain: None,
             water: None,
-            water_depth_state,
             stats: Stats::default(),
         })
     }
@@ -704,42 +267,22 @@ impl Renderer {
         }
         self.layer
             .setDrawableSize(objc2_foundation::NSSize::new(width as f64, height as f64));
-        let hdr = private_texture(
-            &self.device,
-            shaders::HDR_FORMAT,
-            width,
-            height,
-            MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead,
-            "HDR scene",
-        );
-        let depth = private_texture(
-            &self.device,
-            shaders::DEPTH_FORMAT,
-            width,
-            height,
-            MTLTextureUsage::RenderTarget,
-            "depth (reversed-Z)",
-        );
-        self.residency.addAllocation(as_allocation(&*hdr));
-        self.residency.addAllocation(as_allocation(&*depth));
+        let fresh = Targets::new(&self.device, width, height);
+        self.residency.addAllocation(as_allocation(&*fresh.hdr));
+        self.residency.addAllocation(as_allocation(&*fresh.depth));
         self.residency.commit();
-        if let Some(old) = self.targets.replace(Targets {
-            width,
-            height,
-            hdr,
-            depth,
-        }) {
+        if let Some(old) = self.targets.replace(fresh) {
             self.retire(vec![old.hdr, old.depth], None);
         }
     }
 
+    /// Освобождение после всех уже отправленных кадров.
     fn retire(&mut self, textures: Vec<Obj<dyn MTLTexture>>, other: Option<Box<dyn Any>>) {
-        // Все уже отправленные кадры могут использовать ресурс.
-        self.retired.push(Retired {
-            after_value: self.frame_index,
-            textures,
-            _keep_alive: other,
-        });
+        self.retired.push(self.frame_index, textures, other);
+    }
+
+    fn upload_textures(&self, uploads: &[TextureUpload]) -> Result<(), String> {
+        resources::upload_textures(&self.device, &self.queue, &self.residency, uploads)
     }
 
     /// Компилирует шейдеры заново и подменяет pipeline на границе кадра.
@@ -761,294 +304,21 @@ impl Renderer {
     /// Освобождает ресурсы завершённых кадров и забирает готовый readback.
     pub fn collect_completed(&mut self) {
         let done = self.event.signaledValue();
-        let mut keep = Vec::new();
-        for r in self.retired.drain(..) {
-            if r.after_value <= done {
-                for t in &r.textures {
-                    self.residency.removeAllocation(as_allocation(&**t));
-                }
-                if !r.textures.is_empty() {
-                    self.residency.commit();
-                }
-                self.stats.released_deferred += 1;
-                drop(r);
-            } else {
-                keep.push(r);
-            }
-        }
-        self.retired = keep;
-
+        self.stats.released_deferred += self.retired.collect(done, &self.residency);
         if let Some(p) = &self.pending_readback
             && p.signal_value <= done
         {
             let p = self.pending_readback.take().unwrap();
-            self.completed_readbacks.push(self.read_back(p));
+            let base = self.readback_buf.contents().as_ptr().cast::<u8>();
+            // SAFETY: GPU закончил кадр с копированием (проверено по событию),
+            // новые записи в буфер не ставятся, пока этот readback не прочитан.
+            let bytes = unsafe { std::slice::from_raw_parts(base, RB_BYTES) };
+            self.completed_readbacks.push(p.decode(bytes));
         }
     }
 
     pub fn take_readbacks(&mut self) -> Vec<Readback> {
         std::mem::take(&mut self.completed_readbacks)
-    }
-
-    fn read_back(&self, p: PendingReadback) -> Readback {
-        let base = self.readback_buf.contents().as_ptr().cast::<u8>();
-        // SAFETY: GPU закончил кадр с копированием (проверено по событию),
-        // новые записи в буфер не ставятся, пока этот readback не прочитан.
-        let bytes = unsafe { std::slice::from_raw_parts(base, RB_BYTES) };
-        let pattern = bytes[..RB_PATTERN_BYTES].to_vec();
-        let depth = p
-            .pixels
-            .iter()
-            .enumerate()
-            .map(|(i, &(x, y))| {
-                let o = RB_DEPTH_OFFSET + i * 4;
-                (
-                    x,
-                    y,
-                    f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap()),
-                )
-            })
-            .collect();
-        let hdr = (0..p.pixels.len())
-            .map(|i| {
-                let o = RB_HDR_OFFSET + i * 8;
-                std::array::from_fn(|c| {
-                    f16_to_f32(u16::from_le_bytes(
-                        bytes[o + c * 2..o + c * 2 + 2].try_into().unwrap(),
-                    ))
-                })
-            })
-            .collect();
-        let mut probe = [0u32; LAYOUT_PROBE_LEN];
-        for (i, v) in probe.iter_mut().enumerate() {
-            let o = RB_PROBE_OFFSET + i * 4;
-            *v = u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        }
-        let water_probe = std::array::from_fn(|i| {
-            std::array::from_fn(|c| {
-                let o = RB_WATER_OFFSET + i * 16 + c * 4;
-                f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())
-            })
-        });
-        Readback {
-            water_probe,
-            frame: p.frame,
-            pattern_time: p.pattern_time,
-            width: p.width,
-            height: p.height,
-            pattern,
-            depth,
-            hdr,
-            probe,
-        }
-    }
-
-    /// Загружает ландшафт: вершины всех тайлов, общие индексы, детальную текстуру,
-    /// массивы материалов и маску влажности. Mip строит GPU в отдельном командном
-    /// буфере; CPU ждёт его завершения, поэтому кадры, отправленные позже, видят
-    /// готовые текстуры без межкадрового барьера.
-    pub fn set_terrain(
-        &mut self,
-        vertices: &[TerrainVertex],
-        indices: &[u16],
-        tile_count: usize,
-        tex: &TerrainTextures,
-    ) -> Result<(), String> {
-        let vbytes: &[u8] = bytemuck::cast_slice(vertices);
-        let vbuf = shared_buffer(&self.device, vbytes.len(), "terrain vertices (all tiles)");
-        upload_bytes(&vbuf, 0, vbytes);
-        let ibytes: &[u8] = bytemuck::cast_slice(indices);
-        let ibuf = shared_buffer(&self.device, ibytes.len(), "terrain tile indices");
-        upload_bytes(&ibuf, 0, ibytes);
-        for a in [as_allocation(&*vbuf), as_allocation(&*ibuf)] {
-            self.residency.addAllocation(a);
-        }
-
-        let m = tex.materials;
-        let detail = sampled_texture(
-            &self.device,
-            MTLPixelFormat::RGBA8Unorm,
-            tex.detail_size,
-            1,
-            true,
-            "terrain detail (mipmapped)",
-        )?;
-        let albedo = sampled_texture(
-            &self.device,
-            MTLPixelFormat::RGBA8Unorm_sRGB,
-            m.size as u32,
-            m.layers,
-            true,
-            "terrain materials: albedo + height",
-        )?;
-        let normal = sampled_texture(
-            &self.device,
-            MTLPixelFormat::RGBA8Unorm,
-            m.size as u32,
-            m.layers,
-            true,
-            "terrain materials: normal + roughness",
-        )?;
-        let wetness = sampled_texture_usage(
-            &self.device,
-            MTLPixelFormat::R16Float,
-            tex.wetness_size,
-            1,
-            false,
-            MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
-            "wet sand mask",
-        )?;
-        // Сухо: половинная точность, ноль — нулевые байты.
-        let dry = vec![0u8; (tex.wetness_size * tex.wetness_size * 2) as usize];
-        self.upload_textures(&[
-            TextureUpload {
-                texture: &detail,
-                data: tex.detail_rgba,
-                pixel_bytes: 4,
-                mips: true,
-            },
-            TextureUpload {
-                texture: &albedo,
-                data: &m.albedo_height,
-                pixel_bytes: 4,
-                mips: true,
-            },
-            TextureUpload {
-                texture: &normal,
-                data: &m.normal_rough,
-                pixel_bytes: 4,
-                mips: true,
-            },
-            TextureUpload {
-                texture: &wetness,
-                data: &dry,
-                pixel_bytes: 2,
-                mips: false,
-            },
-        ])?;
-
-        if let Some(old) = self.terrain.replace(TerrainGpu {
-            vertices: vbuf,
-            indices: ibuf,
-            index_count: indices.len(),
-            tile_count,
-            detail,
-            albedo,
-            normal,
-            wetness,
-        }) {
-            self.retire(
-                vec![old.detail, old.albedo, old.normal, old.wetness],
-                Some(Box::new((old.vertices, old.indices))),
-            );
-        }
-        Ok(())
-    }
-
-    /// Загружает воду: поле берега (RGBA32Float) и индексы уровня сетки.
-    pub fn set_water(&mut self, field: &ShoreField) -> Result<(), String> {
-        let tex = sampled_texture(
-            &self.device,
-            MTLPixelFormat::RGBA32Float,
-            field.size as u32,
-            1,
-            false,
-            "shore field (bed, coast distance, rocky)",
-        )?;
-        self.upload_textures(&[TextureUpload {
-            texture: &tex,
-            data: bytemuck::cast_slice(&field.data),
-            pixel_bytes: 16,
-            mips: false,
-        }])?;
-        let indices = crate::water::grid_indices();
-        let ibytes: &[u8] = bytemuck::cast_slice(&indices);
-        let ibuf = shared_buffer(&self.device, ibytes.len(), "water grid indices");
-        upload_bytes(&ibuf, 0, ibytes);
-        self.residency.addAllocation(as_allocation(&*ibuf));
-        self.residency.commit();
-        if let Some(old) = self.water.replace(WaterGpu {
-            field: tex,
-            indices: ibuf,
-            index_count: indices.len(),
-        }) {
-            self.retire(vec![old.field], Some(Box::new(old.indices)));
-        }
-        Ok(())
-    }
-
-    /// Одноразовая загрузка текстур: общий staging-буфер, копия каждого слоя
-    /// массива в mip 0, барьер blit → blit, генерация mip, ожидание завершения.
-    /// Текстуры добавляются в набор резидентности.
-    fn upload_textures(&mut self, uploads: &[TextureUpload]) -> Result<(), String> {
-        let total: usize = uploads.iter().map(|u| u.data.len()).sum();
-        let staging = shared_buffer(&self.device, total, "texture upload staging");
-        let mut offsets = Vec::with_capacity(uploads.len());
-        let mut at = 0;
-        for u in uploads {
-            upload_bytes(&staging, at, u.data);
-            offsets.push(at);
-            at += u.data.len();
-            self.residency.addAllocation(as_allocation(&**u.texture));
-        }
-        self.residency.addAllocation(as_allocation(&*staging));
-        self.residency.commit();
-
-        let allocator = self
-            .device
-            .newCommandAllocator()
-            .ok_or("upload allocator")?;
-        let cmd = self
-            .device
-            .newCommandBuffer()
-            .ok_or("upload command buffer")?;
-        cmd.setLabel(Some(&label("texture upload")));
-        cmd.beginCommandBufferWithAllocator(&allocator);
-        let enc = cmd.computeCommandEncoder().ok_or("upload encoder")?;
-        enc.setLabel(Some(&label("texture upload + mips")));
-        for (u, &offset) in uploads.iter().zip(&offsets) {
-            let (w, h) = (u.texture.width(), u.texture.height());
-            let slices = u.texture.arrayLength();
-            let row = w * u.pixel_bytes;
-            let image = row * h;
-            assert_eq!(u.data.len(), image * slices, "размер данных текстуры");
-            for slice in 0..slices {
-                unsafe {
-                    enc.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
-                        &staging,
-                        offset + slice * image,
-                        row,
-                        image,
-                        MTLSize { width: w, height: h, depth: 1 },
-                        u.texture,
-                        slice,
-                        0,
-                        MTLOrigin { x: 0, y: 0, z: 0 },
-                    );
-                }
-            }
-        }
-        enc.barrierAfterEncoderStages_beforeEncoderStages_visibilityOptions(
-            MTLStages::Blit,
-            MTLStages::Blit,
-            MTL4VisibilityOptions::Device,
-        );
-        for u in uploads.iter().filter(|u| u.mips) {
-            unsafe { enc.generateMipmapsForTexture(u.texture) };
-        }
-        enc.endEncoding();
-        cmd.endCommandBuffer();
-        let done = self.device.newSharedEvent().ok_or("upload event")?;
-        let mut cmd_ptr = NonNull::from(&*cmd);
-        unsafe { self.queue.commit_count(NonNull::from(&mut cmd_ptr), 1) };
-        let done_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*done);
-        self.queue.signalEvent_value(done_event, 1);
-        if !done.waitUntilSignaledValue_timeoutMS(1, 10_000) {
-            return Err("загрузка текстур не завершилась за 10 с".into());
-        }
-        self.residency.removeAllocation(as_allocation(&*staging));
-        self.residency.commit();
-        Ok(())
     }
 
     /// Ждёт завершения всех отправленных кадров (выход, тесты).
@@ -1058,12 +328,13 @@ impl Renderer {
             .waitUntilSignaledValue_timeoutMS(self.frame_index, 2000);
     }
 
+    /// Кадр: ждёт свободный слот и drawable, записывает upload, кодирует
+    /// проходы плана с барьерами, отправляет и показывает.
     pub fn render(&mut self, input: &FrameInput) -> FrameOutcome {
         self.collect_completed();
-        let Some(targets) = self.targets.as_ref() else {
+        let Some((width, height)) = self.size() else {
             return FrameOutcome::SkippedZeroSize;
         };
-        let (width, height) = (targets.width, targets.height);
         let slot_index = (self.frame_index % FRAME_SLOTS as u64) as usize;
 
         // Слот свободен, когда GPU закончил кадр, который его использовал.
@@ -1090,377 +361,12 @@ impl Renderer {
         let capturing = input
             .capture
             .as_ref()
-            .map(|path| self.start_capture(path))
-            .unwrap_or(false);
+            .is_some_and(|path| device::start_capture(&self.device, path));
         let encode_start = std::time::Instant::now();
-
-        let slot = &self.slots[slot_index];
-        slot.allocator.reset();
-        slot.cmd.beginCommandBufferWithAllocator(&slot.allocator);
-        slot.cmd
-            .pushDebugGroup(&label(&format!("frame {}", self.frame_index)));
-
-        let mut uniforms = input.uniforms;
-        uniforms.frame_index = self.frame_index as u32;
-        upload_bytes(&slot.upload, 0, bytemuck::bytes_of(&uniforms));
-        let instances = &input.instances[..input.instances.len().min(MAX_INSTANCES)];
-        upload_bytes(
-            &slot.upload,
-            INSTANCE_OFFSET,
-            bytemuck::cast_slice(instances),
-        );
-        if let Some(w) = &input.water {
-            upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
-            upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
-        }
-        let upload_addr = slot.upload.gpuAddress();
-        let water = match (&input.water, &self.water, &self.terrain) {
-            (Some(_), Some(w), Some(t)) => Some((w, t)),
-            _ => None,
-        };
-
-        let plan = &self.plans[usize::from(self.prev_readback)][usize::from(readback)];
-        let mut pixels = Vec::new();
-        for (pass, barrier) in plan.passes.iter().zip(&plan.barriers) {
-            let after = to_mtl_stages(barrier.after);
-            let before = to_mtl_stages(barrier.before);
-            match pass.name {
-                "pattern" => {
-                    let enc = slot.cmd.computeCommandEncoder().expect("compute encoder");
-                    enc.setLabel(Some(&label("pattern compute")));
-                    if !barrier.after.is_empty() {
-                        enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
-                            after,
-                            before,
-                            MTL4VisibilityOptions::Device,
-                        );
-                    }
-                    let table = &slot.tables[0];
-                    unsafe {
-                        table.setTexture_atIndex(self.pattern_tex.gpuResourceID(), 0);
-                        table.setAddress_atIndex(upload_addr, 0);
-                    }
-                    enc.setComputePipelineState(&self.pipelines.pattern);
-                    enc.setArgumentTable(Some(table));
-                    enc.dispatchThreads_threadsPerThreadgroup(
-                        MTLSize {
-                            width: PATTERN_SIZE as usize,
-                            height: PATTERN_SIZE as usize,
-                            depth: 1,
-                        },
-                        MTLSize {
-                            width: 16,
-                            height: 16,
-                            depth: 1,
-                        },
-                    );
-                    enc.endEncoding();
-                }
-                "wet_sand" => {
-                    let Some((w, t)) = water else { continue };
-                    let enc = slot.cmd.computeCommandEncoder().expect("compute encoder");
-                    enc.setLabel(Some(&label("wet sand update")));
-                    if !barrier.after.is_empty() {
-                        enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
-                            after,
-                            before,
-                            MTL4VisibilityOptions::Device,
-                        );
-                    }
-                    let table = &slot.tables[5];
-                    unsafe {
-                        table.setAddress_atIndex(upload_addr, 1);
-                        table.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
-                        table.setTexture_atIndex(t.wetness.gpuResourceID(), 0);
-                        table.setTexture_atIndex(w.field.gpuResourceID(), 1);
-                    }
-                    enc.setComputePipelineState(&self.pipelines.wet_sand);
-                    enc.setArgumentTable(Some(table));
-                    enc.dispatchThreads_threadsPerThreadgroup(
-                        MTLSize {
-                            width: t.wetness.width(),
-                            height: t.wetness.height(),
-                            depth: 1,
-                        },
-                        MTLSize {
-                            width: 16,
-                            height: 16,
-                            depth: 1,
-                        },
-                    );
-                    enc.endEncoding();
-                }
-                "scene" => {
-                    let rp = MTL4RenderPassDescriptor::new();
-                    let color = unsafe { rp.colorAttachments().objectAtIndexedSubscript(0) };
-                    color.setTexture(Some(&targets.hdr));
-                    color.setLoadAction(MTLLoadAction::Clear);
-                    color.setStoreAction(MTLStoreAction::Store);
-                    color.setClearColor(MTLClearColor {
-                        red: input.clear_color[0] as f64,
-                        green: input.clear_color[1] as f64,
-                        blue: input.clear_color[2] as f64,
-                        alpha: 1.0,
-                    });
-                    let depth = rp.depthAttachment();
-                    depth.setTexture(Some(&targets.depth));
-                    depth.setLoadAction(MTLLoadAction::Clear);
-                    depth.setClearDepth(0.0);
-                    depth.setStoreAction(if readback {
-                        MTLStoreAction::Store
-                    } else {
-                        MTLStoreAction::DontCare
-                    });
-                    let enc = slot
-                        .cmd
-                        .renderCommandEncoderWithDescriptor(&rp)
-                        .expect("render encoder");
-                    enc.setLabel(Some(&label("scene raster")));
-                    if !barrier.after.is_empty() {
-                        enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
-                            after,
-                            before,
-                            MTL4VisibilityOptions::Device,
-                        );
-                    }
-                    let table = &slot.tables[1];
-                    unsafe {
-                        table.setAddress_atIndex(self.vertex_buf.gpuAddress(), 0);
-                        table.setAddress_atIndex(upload_addr, 1);
-                        table.setAddress_atIndex(upload_addr + INSTANCE_OFFSET as u64, 2);
-                        table.setTexture_atIndex(self.pattern_tex.gpuResourceID(), 0);
-                    }
-                    enc.setRenderPipelineState(&self.pipelines.scene);
-                    enc.setDepthStencilState(Some(&self.depth_state));
-                    enc.setFrontFacingWinding(MTLWinding::CounterClockwise);
-                    enc.setCullMode(MTLCullMode::Back);
-                    enc.setViewport(MTLViewport {
-                        originX: 0.0,
-                        originY: 0.0,
-                        width: width as f64,
-                        height: height as f64,
-                        znear: 0.0,
-                        zfar: 1.0,
-                    });
-                    if let (true, Some(terrain)) = (input.draw_terrain, &self.terrain) {
-                        let ttable = &slot.tables[4];
-                        unsafe {
-                            ttable.setAddress_atIndex(terrain.vertices.gpuAddress(), 0);
-                            ttable.setAddress_atIndex(upload_addr, 1);
-                            ttable.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
-                            ttable.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
-                            ttable.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
-                            ttable.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
-                        }
-                        enc.pushDebugGroup(&label(&format!(
-                            "terrain: {} tiles",
-                            terrain.tile_count
-                        )));
-                        enc.setRenderPipelineState(&self.pipelines.terrain);
-                        enc.setArgumentTable_atStages(
-                            ttable,
-                            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-                        );
-                        unsafe {
-                            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
-                                MTLPrimitiveType::Triangle,
-                                terrain.index_count,
-                                MTLIndexType::UInt16,
-                                terrain.indices.gpuAddress(),
-                                terrain.indices.length(),
-                                terrain.tile_count,
-                            );
-                        }
-                        enc.popDebugGroup();
-                        enc.setRenderPipelineState(&self.pipelines.scene);
-                    }
-                    enc.setArgumentTable_atStages(
-                        table,
-                        MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-                    );
-                    if !instances.is_empty() {
-                        unsafe {
-                            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
-                                MTLPrimitiveType::Triangle,
-                                self.index_count,
-                                MTLIndexType::UInt16,
-                                self.index_buf.gpuAddress(),
-                                self.index_buf.length(),
-                                instances.len(),
-                            );
-                        }
-                    }
-                    if let (Some((w, _)), Some(t)) = (water, &self.terrain) {
-                        // Прозрачная вода после непрозрачной геометрии.
-                        let wtable = &slot.tables[6];
-                        unsafe {
-                            wtable.setAddress_atIndex(upload_addr, 1);
-                            wtable.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
-                            wtable.setAddress_atIndex(upload_addr + LEVELS_OFFSET as u64, 3);
-                            wtable.setTexture_atIndex(w.field.gpuResourceID(), 0);
-                            wtable.setTexture_atIndex(t.detail.gpuResourceID(), 1);
-                        }
-                        enc.pushDebugGroup(&label(&format!("water: {WATER_LEVELS} levels")));
-                        enc.setRenderPipelineState(&self.pipelines.water);
-                        enc.setDepthStencilState(Some(&self.water_depth_state));
-                        enc.setCullMode(MTLCullMode::None);
-                        enc.setArgumentTable_atStages(
-                            wtable,
-                            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-                        );
-                        unsafe {
-                            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
-                                MTLPrimitiveType::Triangle,
-                                w.index_count,
-                                MTLIndexType::UInt16,
-                                w.indices.gpuAddress(),
-                                w.indices.length(),
-                                WATER_LEVELS,
-                            );
-                        }
-                        enc.popDebugGroup();
-                    }
-                    enc.endEncoding();
-                }
-                "readback" => {
-                    let enc = slot.cmd.computeCommandEncoder().expect("compute encoder");
-                    enc.setLabel(Some(&label("readback copy")));
-                    enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
-                        after,
-                        before,
-                        MTL4VisibilityOptions::Device,
-                    );
-                    let table = &slot.tables[2];
-                    unsafe {
-                        table.setAddress_atIndex(
-                            self.readback_buf.gpuAddress() + RB_PROBE_OFFSET as u64,
-                            0,
-                        )
-                    };
-                    enc.setComputePipelineState(&self.pipelines.layout_probe);
-                    enc.setArgumentTable(Some(table));
-                    enc.dispatchThreads_threadsPerThreadgroup(
-                        MTLSize {
-                            width: 1,
-                            height: 1,
-                            depth: 1,
-                        },
-                        MTLSize {
-                            width: 1,
-                            height: 1,
-                            depth: 1,
-                        },
-                    );
-                    unsafe {
-                        enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                            &self.pattern_tex,
-                            0,
-                            0,
-                            MTLOrigin { x: 0, y: 0, z: 0 },
-                            MTLSize { width: PATTERN_SIZE as usize, height: PATTERN_SIZE as usize, depth: 1 },
-                            &self.readback_buf,
-                            0,
-                            (PATTERN_SIZE * 4) as usize,
-                            RB_PATTERN_BYTES,
-                        );
-                    }
-                    for (i, (fx, fy)) in DEPTH_SAMPLES.iter().enumerate() {
-                        let x = ((width as f32 * fx) as u32).min(width - 1);
-                        let y = ((height as f32 * fy) as u32).min(height - 1);
-                        pixels.push((x, y));
-                        unsafe {
-                            enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                                &targets.depth,
-                                0,
-                                0,
-                                MTLOrigin { x: x as usize, y: y as usize, z: 0 },
-                                MTLSize { width: 1, height: 1, depth: 1 },
-                                &self.readback_buf,
-                                RB_DEPTH_OFFSET + i * 4,
-                                4,
-                                4,
-                            );
-                            enc.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                                &targets.hdr,
-                                0,
-                                0,
-                                MTLOrigin { x: x as usize, y: y as usize, z: 0 },
-                                MTLSize { width: 1, height: 1, depth: 1 },
-                                &self.readback_buf,
-                                RB_HDR_OFFSET + i * 8,
-                                8,
-                                8,
-                            );
-                        }
-                    }
-                    if let Some((w, _)) = water {
-                        let ptable = &slot.tables[7];
-                        unsafe {
-                            ptable.setAddress_atIndex(
-                                self.readback_buf.gpuAddress() + RB_WATER_OFFSET as u64,
-                                0,
-                            );
-                            ptable.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
-                            ptable.setTexture_atIndex(w.field.gpuResourceID(), 0);
-                        }
-                        enc.setComputePipelineState(&self.pipelines.water_probe);
-                        enc.setArgumentTable(Some(ptable));
-                        enc.dispatchThreads_threadsPerThreadgroup(
-                            MTLSize {
-                                width: WATER_PROBES,
-                                height: 1,
-                                depth: 1,
-                            },
-                            MTLSize {
-                                width: WATER_PROBES,
-                                height: 1,
-                                depth: 1,
-                            },
-                        );
-                    }
-                    enc.endEncoding();
-                }
-                "tonemap" => {
-                    let rp = MTL4RenderPassDescriptor::new();
-                    let color = unsafe { rp.colorAttachments().objectAtIndexedSubscript(0) };
-                    color.setTexture(Some(&drawable.texture()));
-                    color.setLoadAction(MTLLoadAction::DontCare);
-                    color.setStoreAction(MTLStoreAction::Store);
-                    let enc = slot
-                        .cmd
-                        .renderCommandEncoderWithDescriptor(&rp)
-                        .expect("render encoder");
-                    enc.setLabel(Some(&label("tone map")));
-                    if !barrier.after.is_empty() {
-                        enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
-                            after,
-                            before,
-                            MTL4VisibilityOptions::Device,
-                        );
-                    }
-                    let table = &slot.tables[3];
-                    unsafe {
-                        table.setAddress_atIndex(upload_addr, 1);
-                        table.setTexture_atIndex(targets.hdr.gpuResourceID(), 0);
-                    }
-                    enc.setRenderPipelineState(&self.pipelines.tonemap);
-                    enc.setArgumentTable_atStages(
-                        table,
-                        MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-                    );
-                    unsafe {
-                        enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3)
-                    };
-                    enc.endEncoding();
-                }
-                other => unreachable!("проход {other} без кодировщика"),
-            }
-        }
-
-        slot.cmd.popDebugGroup();
-        slot.cmd.endCommandBuffer();
+        self.encode_frame(slot_index, &drawable, input, readback);
 
         // Схема Apple для Metal 4: ждать drawable → commit → сигнал drawable → present.
+        let slot = &self.slots[slot_index];
         let mtl_drawable: &ProtocolObject<dyn MTLDrawable> = ProtocolObject::from_ref(&*drawable);
         self.queue.waitForDrawable(mtl_drawable);
         let mut cmd_ptr = NonNull::from(&*slot.cmd);
@@ -1483,36 +389,76 @@ impl Renderer {
                 pattern_time: input.uniforms.pattern_time,
                 width,
                 height,
-                pixels,
+                pixels: readback::sample_pixels(width, height),
             });
         }
         if capturing {
-            unsafe { MTLCaptureManager::sharedCaptureManager() }.stopCapture();
-            eprintln!("[capture] кадр {} записан", self.frame_index - 1);
+            device::stop_capture(self.frame_index - 1);
         }
         FrameOutcome::Presented
     }
 
-    fn start_capture(&self, path: &Path) -> bool {
-        let manager = unsafe { MTLCaptureManager::sharedCaptureManager() };
-        if !manager.supportsDestination(MTLCaptureDestination::GPUTraceDocument) {
-            eprintln!("[capture] запись в .gputrace недоступна: запусти с MTL_CAPTURE_ENABLED=1");
-            return false;
+    /// Записывает upload слота и кодирует все проходы плана в его командный буфер.
+    fn encode_frame(
+        &self,
+        slot_index: usize,
+        drawable: &ProtocolObject<dyn CAMetalDrawable>,
+        input: &FrameInput,
+        readback: bool,
+    ) {
+        let slot = &self.slots[slot_index];
+        slot.allocator.reset();
+        slot.cmd.beginCommandBufferWithAllocator(&slot.allocator);
+        slot.cmd
+            .pushDebugGroup(&label(&format!("frame {}", self.frame_index)));
+
+        let mut uniforms = input.uniforms;
+        uniforms.frame_index = self.frame_index as u32;
+        upload_bytes(&slot.upload, 0, bytemuck::bytes_of(&uniforms));
+        let instances = &input.instances[..input.instances.len().min(MAX_INSTANCES)];
+        upload_bytes(
+            &slot.upload,
+            INSTANCE_OFFSET,
+            bytemuck::cast_slice(instances),
+        );
+        if let Some(w) = &input.water {
+            upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
+            upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
         }
-        let desc = MTLCaptureDescriptor::new();
-        let device: &AnyObject = self.device.as_ref();
-        unsafe { desc.setCaptureObject(Some(device)) };
-        desc.setDestination(MTLCaptureDestination::GPUTraceDocument);
-        let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
-        desc.setOutputURL(Some(&url));
-        match manager.startCaptureWithDescriptor_error(&desc) {
-            Ok(()) => true,
-            Err(e) => {
-                eprintln!("[capture] ошибка: {}", e.localizedDescription());
-                false
-            }
+        let drawable_tex = drawable.texture();
+        let ctx = PassCtx {
+            r: self,
+            slot,
+            upload_addr: slot.upload.gpuAddress(),
+            targets: self.targets.as_ref().expect("цели есть: размер проверен"),
+            drawable: &drawable_tex,
+            input,
+            instance_count: instances.len(),
+            readback,
+            water: match (&input.water, &self.water, &self.terrain) {
+                (Some(_), Some(w), Some(t)) => Some((w, t)),
+                _ => None,
+            },
+        };
+        let plan = &self.plans[usize::from(self.prev_readback)][usize::from(readback)];
+        for (pass, barrier) in plan.passes.iter().zip(&plan.barriers) {
+            let barrier = PassBarrier {
+                after: to_mtl_stages(barrier.after),
+                before: to_mtl_stages(barrier.before),
+                needed: !barrier.after.is_empty(),
+            };
+            passes::find(pass.name).encode(&ctx, &barrier);
         }
+        slot.cmd.popDebugGroup();
+        slot.cmd.endCommandBuffer();
     }
+}
+
+fn depth_state_no_write(
+    device: &ProtocolObject<dyn MTLDevice>,
+    name: &str,
+) -> Result<Obj<dyn MTLDepthStencilState>, String> {
+    depth_state(device, false, name)
 }
 
 impl Drop for Renderer {

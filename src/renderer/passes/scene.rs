@@ -1,0 +1,164 @@
+//! Проход `scene`: ландшафт, кубы (тестовая сцена или маркеры), затем
+//! прозрачная вода. Цели — HDR и глубина reversed-Z.
+
+use objc2::runtime::ProtocolObject;
+use objc2_metal::*;
+
+use super::{FramePass, PassBarrier, PassCtx};
+use crate::renderer::frame::{INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, Table};
+use crate::renderer::resources::label;
+use crate::water::WATER_LEVELS;
+
+pub(in crate::renderer) struct ScenePass;
+
+type RenderEncoder = ProtocolObject<dyn MTL4RenderCommandEncoder>;
+
+const BOTH_STAGES: MTLRenderStages =
+    MTLRenderStages(MTLRenderStages::Vertex.0 | MTLRenderStages::Fragment.0);
+
+impl FramePass for ScenePass {
+    fn name(&self) -> &'static str {
+        "scene"
+    }
+
+    fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier) {
+        let enc = begin(ctx);
+        barrier.apply(&*enc);
+        let r = ctx.r;
+        enc.setDepthStencilState(Some(&r.depth_state));
+        enc.setFrontFacingWinding(MTLWinding::CounterClockwise);
+        enc.setCullMode(MTLCullMode::Back);
+        enc.setViewport(MTLViewport {
+            originX: 0.0,
+            originY: 0.0,
+            width: ctx.targets.width as f64,
+            height: ctx.targets.height as f64,
+            znear: 0.0,
+            zfar: 1.0,
+        });
+        if ctx.input.draw_terrain {
+            draw_terrain(ctx, &enc);
+        }
+        draw_cubes(ctx, &enc);
+        draw_water(ctx, &enc);
+        enc.endEncoding();
+    }
+}
+
+/// Кодировщик прохода: очистка HDR цветом неба и глубины нулём (reversed-Z);
+/// глубина сохраняется только для readback.
+fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
+    let rp = MTL4RenderPassDescriptor::new();
+    let color = unsafe { rp.colorAttachments().objectAtIndexedSubscript(0) };
+    color.setTexture(Some(&ctx.targets.hdr));
+    color.setLoadAction(MTLLoadAction::Clear);
+    color.setStoreAction(MTLStoreAction::Store);
+    let c = ctx.input.clear_color;
+    color.setClearColor(MTLClearColor {
+        red: c[0] as f64,
+        green: c[1] as f64,
+        blue: c[2] as f64,
+        alpha: 1.0,
+    });
+    let depth = rp.depthAttachment();
+    depth.setTexture(Some(&ctx.targets.depth));
+    depth.setLoadAction(MTLLoadAction::Clear);
+    depth.setClearDepth(0.0);
+    depth.setStoreAction(if ctx.readback {
+        MTLStoreAction::Store
+    } else {
+        MTLStoreAction::DontCare
+    });
+    let enc = ctx
+        .slot
+        .cmd
+        .renderCommandEncoderWithDescriptor(&rp)
+        .expect("render encoder");
+    enc.setLabel(Some(&label("scene raster")));
+    enc
+}
+
+/// Все тайлы ландшафта одним instanced draw.
+fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
+    let Some(terrain) = &ctx.r.terrain else {
+        return;
+    };
+    let table = ctx.slot.table(Table::Terrain);
+    unsafe {
+        table.setAddress_atIndex(terrain.vertices.gpuAddress(), 0);
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
+        table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
+        table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
+        table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
+    }
+    enc.pushDebugGroup(&label(&format!("terrain: {} tiles", terrain.tile_count)));
+    enc.setRenderPipelineState(&ctx.r.pipelines.terrain);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe {
+        enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
+            MTLPrimitiveType::Triangle,
+            terrain.index_count,
+            MTLIndexType::UInt16,
+            terrain.indices.gpuAddress(),
+            terrain.indices.length(),
+            terrain.tile_count,
+        );
+    }
+    enc.popDebugGroup();
+}
+
+/// Кубы: тестовая сцена этапа 01 или столбики маркеров.
+fn draw_cubes(ctx: &PassCtx, enc: &RenderEncoder) {
+    let r = ctx.r;
+    let table = ctx.slot.table(Table::Scene);
+    unsafe {
+        table.setAddress_atIndex(r.vertex_buf.gpuAddress(), 0);
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(ctx.upload_addr + INSTANCE_OFFSET as u64, 2);
+        table.setTexture_atIndex(r.pattern_tex.gpuResourceID(), 0);
+    }
+    enc.setRenderPipelineState(&r.pipelines.scene);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    if ctx.instance_count > 0 {
+        unsafe {
+            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
+                MTLPrimitiveType::Triangle,
+                r.index_count,
+                MTLIndexType::UInt16,
+                r.index_buf.gpuAddress(),
+                r.index_buf.length(),
+                ctx.instance_count,
+            );
+        }
+    }
+}
+
+/// Прозрачная вода после непрозрачной геометрии: проверка глубины без записи.
+fn draw_water(ctx: &PassCtx, enc: &RenderEncoder) {
+    let Some((w, t)) = ctx.water else { return };
+    let table = ctx.slot.table(Table::Water);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(ctx.upload_addr + SEA_OFFSET as u64, 2);
+        table.setAddress_atIndex(ctx.upload_addr + LEVELS_OFFSET as u64, 3);
+        table.setTexture_atIndex(w.field.gpuResourceID(), 0);
+        table.setTexture_atIndex(t.detail.gpuResourceID(), 1);
+    }
+    enc.pushDebugGroup(&label(&format!("water: {WATER_LEVELS} levels")));
+    enc.setRenderPipelineState(&ctx.r.pipelines.water);
+    enc.setDepthStencilState(Some(&ctx.r.water_depth_state));
+    enc.setCullMode(MTLCullMode::None);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe {
+        enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
+            MTLPrimitiveType::Triangle,
+            w.index_count,
+            MTLIndexType::UInt16,
+            w.indices.gpuAddress(),
+            w.indices.length(),
+            WATER_LEVELS,
+        );
+    }
+    enc.popDebugGroup();
+}

@@ -30,10 +30,10 @@
 
 | Часть из спецификации | Модуль | Ответственность сейчас | Чего ещё нет |
 | --- | --- | --- | --- |
-| `Platform` | `src/platform.rs`, цикл окна и ввод в `src/main.rs` | Окно winit, ввод, `CAMetalLayer` на `NSView` | Отдельный модуль цикла и ввода, файловые пути |
+| `Platform` | `src/platform.rs`; приложение `src/app/` (окно, ввод, цикл, самопроверка), точка входа `src/main.rs` | Окно winit, ввод, `CAMetalLayer` на `NSView` | Файловые пути |
 | `World` | `src/world/` ([подробно](02-terrain.md)) | Генератор, тайлы 64 × 64 м, поля среды, `BiomeWeights`, `sample_ground` по треугольникам LOD 0, маркеры маршрута, экспорт и импорт слоёв PNG | LOD 1–2, растительность, стриминг (этапы 02, 08) |
-| `Game` | `src/sim.rs` | Фиксированный тик, камера, полёт и ходьба по `Ground` | Игрок, задания, события (этап 05) |
-| `Renderer` | `src/renderer/` | Устройство, очередь, ресурсы, проходы, синхронизация, вывод | Счётчики GPU, общий RHI (этап 06) |
+| `Game` | `src/sim/` | Фиксированный тик, камера, полёт и ходьба по `Ground` | Игрок, задания, события (этап 05) |
+| `Renderer` | `src/renderer/` — фасад `Renderer` и модули `device`, `resources`, `frame`, `passes/`, `readback`, `targets`, `terrain`, `water`, `shaders` ([AD-41](#ad-41-рендерер-и-приложение-разбиты-на-модули-проходы--объекты-за-общим-трейтом)) | Устройство, очередь, ресурсы, проходы, синхронизация, вывод | Счётчики GPU, общий RHI (этап 06) |
 | Общие данные | `src/layout.rs`, `shaders/metal/common.h` | Раскладка структур CPU/GPU | — |
 | Описание проходов | `src/frame_graph.rs` | Проходы, ресурсы, барьеры без зависимости от API | Стадия indirect-аргументов (этап 02) |
 | Тестовая сцена | `src/scene.rs` | Куб и два экземпляра; куб же рисует столбики маркеров | Остаётся для самопроверки (клавиша T) |
@@ -135,9 +135,26 @@ sequenceDiagram
 
 ## 4. Модули, структуры и методы
 
-### 4.1. `src/main.rs` — приложение и цикл кадра
+### 4.1. `src/main.rs` и `src/app/` — приложение и цикл кадра
 
-Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы, V/Shift+V — отладочные виды ландшафта, K — тестовая маска мокрого песка, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`, `--wet-test`.
+`src/main.rs` — только точка входа: модули, разбор аргументов, `--export-world`, цикл winit, код выхода. Приложение — `src/app/`:
+
+| Файл | Строк | Ответственность |
+| --- | --- | --- |
+| `app/mod.rs` | 188 | константы (`LIGHT_DIR`, `WORLD_SEED`, `WORLD_TILES`, `DETAIL_TEXTURE_SIZE`, `SKY_COLOR`, `TEST_SCENE_CLEAR`), `SceneMode`, `App` (поля состояния), `App::new`, `set_grab`, `reload_shaders`, `land`, `is_minimized` |
+| `app/args.rs` | 75 | `Args`, `Args::parse`, `load_world` |
+| `app/cameras.rs` | 91 | `trail_start_camera`, `look_camera`, `island_overview_camera`, `terrain_check_camera`, `marker_posts`, `start_camera` |
+| `app/input.rs` | 74 | `tick_input` (оси из клавиш), `on_key_pressed` (команды по клавишам) |
+| `app/frame.rs` | 140 | `water_frame`, `frame` — тики, камера, `FrameUniforms`, `FrameInput`, readback |
+| `app/title.rs` | 79 | `update_title` |
+| `app/setup.rs` | 59 | `create_renderer` — устройство, рендерер, ландшафт, материалы, вода |
+| `app/handler.rs` | 165 | `impl ApplicationHandler for App`: `resumed`, `window_event`, `device_event`, `about_to_wait`, `exiting` |
+| `app/selftest/mod.rs` | 280 | `TestStep`, `SelfTest` (`new`, `check`), `App::selftest_step` |
+| `app/selftest/checks.rs` | 252 | `verify_readback`, `compare_terrain_depth`, `compare_terrain_raw`, `verify_terrain_readback`, `verify_water_probe`, `report_terrain_readback`, `report_readback` |
+
+Элементы ниже описаны по смыслу; файл — по таблице выше.
+
+Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы, V/Shift+V — отладочные виды ландшафта, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`.
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
@@ -220,7 +237,9 @@ sequenceDiagram
 | `grab_cursor` | `fn(&Window, bool)` | Захват: `CursorGrabMode::Locked` (при неудаче `Confined`) и `NSCursor::hide`. Освобождение: `CursorGrabMode::None` и `NSCursor::unhide`. Вызовы `hide`/`unhide` сбалансированы флагом |
 | `CURSOR_HIDDEN` | `static AtomicBool` | Скрыт ли курсор этим модулем |
 
-### 4.3. `src/sim.rs` — фиксированный шаг и камера (`Game`)
+### 4.3. `src/sim/` — фиксированный шаг и камера (`Game`)
+
+Код — `sim/mod.rs`, тесты — `sim/tests.rs`.
 
 Константы: `TICK_DT = 1/60`, `MAX_CATCHUP_TICKS = 5`, `MAX_FRAME_DT = 0.25`, `MOVE_SPEED = 8.0` м/с (полёт), `FAST_MULTIPLIER = 4.0`, `FLY_ACCEL = 40` м/с², `MOUSE_SENSITIVITY = 0.0025` рад/пиксель, `PITCH_LIMIT = 1.55` рад, `NEAR_PLANE_M = 0.05`. Ходьба: `EYE_HEIGHT_M = 1.7`, `MAX_STEP_M = 0.35`, `MAX_SLOPE_DEG = 40`, `WALK_SPEED = 4.0`, `RUN_SPEED = 7.0` м/с, `GROUND_ACCEL = 40`, `GROUND_FRICTION = 28`, `AIR_ACCEL = 6` м/с², `UPHILL_SLOWDOWN = 0.8`, `JUMP_SPEED = 4.2` м/с, `GRAVITY = 9.81`. Только для вида (приватные): `STEP_SMOOTH_TAU = 0.07` с, `STEP_SMOOTH_MIN = 0.08` м, `LAND_DIP_PER_SPEED = 0.025`, `LAND_DIP_MAX = 0.25` м, `BOB_STRIDE_M = 0.8`, `BOB_WALK_M = 0.03`, `BOB_RUN_M = 0.05`.
 
@@ -273,7 +292,25 @@ sequenceDiagram
 | `plan_after(previous, passes, imported) -> Result<FramePlan, GraphError>` | Валидация и барьеры кадра `passes`, перед которым в очереди выполнен кадр `previous` |
 | `plan(passes, imported)` (только тесты) | `plan_after` для кадра, повторяющего тот же список |
 
-### 4.6. `src/renderer/mod.rs` — бэкенд Metal 4
+### 4.6. `src/renderer/` — бэкенд Metal 4
+
+Фасад `Renderer` (`mod.rs`) хранит ресурсы и оркестрирует кадр; остальное — в модулях ([AD-41](#ad-41-рендерер-и-приложение-разбиты-на-модули-проходы--объекты-за-общим-трейтом)):
+
+| Файл | Строк | Ответственность |
+| --- | --- | --- |
+| `mod.rs` | 468 | `Renderer` и публичный API: `new`, `size`, `pipeline_generation`, `frame_index`, `shader_dir`, `plan_summary`, `resize`, `reload_shaders`, `collect_completed`, `take_readbacks`, `wait_idle`, `render`; приватные `retire`, `upload_textures`, `encode_frame` (upload слота, `PassCtx`, цикл по плану с поиском прохода в реестре); `depth_state` |
+| `device.rs` | 103 | `DeviceInfo`, `probe_device`, `start_capture`, `stop_capture` |
+| `resources.rs` | 310 | `label`, `to_mtl_stages`, `as_allocation`, `f16_to_f32`, `shared_buffer`, `buffer_with`, `upload_bytes`, `sampled_texture(_usage)`, `private_texture`, `TextureUpload`, `upload_textures`, `DeferredRelease` (`push`, `collect`) — очередь отложенного освобождения |
+| `frame.rs` | 186 | константы слота и upload, `ResourceId` проходов, `FrameOutcome`, `FrameInput`, `WaterFrame`, `Stats`, `Table` (индекс таблицы аргументов), `FrameSlot` (`new`, `table`), `frame_passes` |
+| `readback.rs` | 111 | `RB_*`, `DEPTH_SAMPLES`, `sample_pixels`, `Readback`, `PendingReadback::decode` |
+| `targets.rs` | 41 | `Targets::new` — HDR и глубина |
+| `terrain.rs` | 145 | `TerrainGpu`, `TerrainTextures`, `Renderer::set_terrain` |
+| `water.rs` | 52 | `WaterGpu`, `Renderer::set_water` |
+| `passes/mod.rs` | 95 | трейт `FramePass` (`name`, `encode`), `PassCtx` (рендерер, слот, upload, цели, drawable, вход, readback, вода), `PassBarrier` (`apply`, `apply_always`), реестр `REGISTRY`, `find`, `size2` |
+| `passes/pattern.rs`, `wet_sand.rs`, `scene.rs`, `readback.rs`, `tonemap.rs` | 34–165 | по проходу: `PatternPass`, `WetSandPass`, `ScenePass` (`draw_terrain`, `draw_cubes`, `draw_water`), `ReadbackPass`, `TonemapPass` |
+| `shaders.rs` | 270 | компиляция MSL и pipeline |
+
+Описание констант и типов ниже сохранено; файл — по таблице.
 
 Константы:
 
@@ -898,6 +935,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** `depth(any)` отключает раннюю проверку глубины для воды; на воду это не влияет — она прозрачна и рисуется последней.
 - **Пересмотреть.** Если полоса прибоя займёт большую часть кадра и станет дорогой — ограничить уточнения расстоянием до камеры.
 
+### AD-41. Рендерер и приложение разбиты на модули; проходы — объекты за общим трейтом
+
+- **Решение.** `src/renderer/mod.rs` (1522 строки) и `src/main.rs` (1324) разделены по ответственности: в рендерере — фасад `Renderer` с прежним API и модули устройства, ресурсов, кадра, readback, целей, ландшафта, воды и проходов; в приложении — `src/app/` (аргументы, камеры, ввод, кадр, заголовок, создание рендерера, события winit, самопроверка и сверки). Проходы кадра — типы с трейтом `FramePass` в реестре; `encode_frame` находит проход по имени из плана `frame_graph` и передаёт ему `PassCtx` и `PassBarrier` (паттерн «Стратегия» вместо большого `match`). Отложенное освобождение — объект `DeferredRelease`, слот кадра — `FrameSlot::new` и `Table` вместо индексов-чисел. Тесты `sim`, `world`, `world::layers` вынесены в отдельные файлы. Поведение не изменилось: тот же вывод самопроверки (20 проверок) и 51 тест.
+- **Почему.** Правило размера файлов (AGENTS.md): оба файла были в красной зоне. Проходы растут с каждым этапом (вода, тени, отсечение на GPU); как объекты они добавляются новым файлом и строкой реестра, не раздувая фасад. Самопроверка и сверки — отдельная подсистема, её удобно читать и расширять отдельно от цикла окна.
+- **Отброшено.** Наследование и иерархии типов — в Rust композиция и трейты. Отдельный объект на каждую отрисовку внутри `scene` — пока три функции в одном файле проще. Динамическая регистрация проходов во время работы — статического реестра достаточно.
+- **Цена.** Поиск прохода по имени (5 сравнений строк за проход, пренебрежимо). Поля `Renderer` видны подмодулям рендерера; `PassCtx` держит ссылку на весь рендерер, а не на узкий набор ресурсов.
+- **Пересмотреть.** Когда проходов станет больше десятка или появится динамический граф — сопоставлять проходы по `enum`, а не по строке, и сузить `PassCtx`.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -908,7 +953,6 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - Время GPU не измеряется: нужны `MTL4CounterHeap` и временные метки по проходам.
 - Ландшафт рисуется целиком без отсечения и LOD: 2,1 млн треугольников за кадр на карте 1024 м (подэтап 02.3).
 - Небо — плоский цвет очистки, в воде — градиент; настоящее небо — 04.1. Вдали на воде заметен повторяющийся узор ряби.
-- `src/renderer/mod.rs` (~1600 строк) и `src/main.rs` (~1400) — красная зона по правилу размера файлов; разбиение — следующий шаг.
 - Освещение ландшафта временное (солнце: Ламберт + GGX, небо), без теней и тумана — до этапа 04.
 - Диагностика выводится в заголовок окна и stderr, текстового оверлея нет.
 - Для подэтапа 02.5 планировщику нужна стадия indirect-аргументов (`compute output → indirect args`).
@@ -938,3 +982,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-08 | 04 | после `dce384d` | Спецификации: этап 04 разбит на подэтапы 04.1 «Небо и время суток» (солнце, луна, звёзды, атмосфера, экспозиция, управление временем), 04.2 «Свет, тени и туман», 04.3 «Погода и осадки», 04.4 «Ночное свечение»; таблица соответствия дополнена. Код не менялся |
 | 2026-11-08 | 02, 04, 08 | `bd4aac5` | Спецификации: 02.3 переписан (frustum, quadtree, CDLOD), новый 02.6 Hi-Z; этап 08 разбит на 08.1–08.6 под мир ~21 × 20 км; CSM в 04.2 с передачей дальних теней в 08.5. Код не менялся |
 | 2026-11-08 | 03.1 | после `bd4aac5` | AD-39, AD-40: модуль `water`, `water.h`, `water.metal`, `GerstnerWave`/`SeaParams`/`WaterLevel` (+5 полей `layout_probe`, 24), upload 8192 Б, проход `wet_sand` и `RES_WETNESS`, таблицы слота 8, `Renderer::set_water`, `WaterFrame`, `WaterGpu`, `water_depth_state`, `sampled_texture_usage`, маска мокрого песка R16Float (тестовая маска, `set_wetness`, клавиша K и `--wet-test` удалены), `Readback.water_probe`, `expand_includes`, `render_pipeline(…, (vs, fs), …, transmit_blend)`, время мира от тиков, виды `water-depth`/`water-dir`/`surf`, `sample_water` в заголовке, самопроверка 20 проверок; правило размера файлов в AGENTS.md |
+| 2026-11-08 | 03.1 | после `a32a1e9` | AD-41: рефакторинг без изменения поведения — `src/renderer/` (`device`, `resources`, `frame`, `readback`, `targets`, `terrain`, `water`, `passes/` с трейтом `FramePass` и реестром), `src/app/` (`args`, `cameras`, `input`, `frame`, `title`, `setup`, `handler`, `selftest/`), `src/main.rs` — точка входа; `sim.rs` → `sim/mod.rs` + `sim/tests.rs`, тесты `world` и `world::layers` в отдельных файлах. Самый большой файл — 496 строк |

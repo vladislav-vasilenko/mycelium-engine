@@ -53,6 +53,69 @@ pub struct TerrainVertex {
     pub material: [u8; 4],
 }
 
+/// Волна Герстнера открытого моря, 32 байта. В MSL — `GerstnerWave`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct GerstnerWave {
+    /// Единичное направление распространения в плоскости XZ.
+    pub dir: [f32; 2],
+    pub wavelength: f32,
+    pub amplitude: f32,
+    /// Доля горизонтального смещения Q (0 — синусоида, 1 — острый гребень).
+    pub steepness: f32,
+    pub phase: f32,
+    /// Угловая частота, рад/с: ω = √(g·k).
+    pub omega: f32,
+    pub _pad: f32,
+}
+
+/// Число волн открытого моря в `SeaParams`.
+pub const SEA_WAVES: usize = 8;
+/// Точки проверки функции волн CPU ↔ GPU.
+pub const WATER_PROBES: usize = 8;
+
+/// Параметры моря и прибоя, 432 байта, выравнивание 16. В MSL — `SeaParams`.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct SeaParams {
+    pub sea_level: f32,
+    pub wave_count: u32,
+    /// Длина и амплитуда береговой волны на глубине, м.
+    pub shore_wavelength: f32,
+    pub shore_amplitude: f32,
+    /// Угловая частота береговой волны (период наката), рад/с.
+    pub shore_omega: f32,
+    /// Высота заплеска на песке и на камне, м.
+    pub swash_sand_m: f32,
+    pub swash_rock_m: f32,
+    /// Время высыхания песка после наката, с.
+    pub dry_time_s: f32,
+    /// Поле берега: точек на сторону и шаг, м.
+    pub field_size: u32,
+    pub field_step_m: f32,
+    /// Шаг времени для маски мокрого песка, с.
+    pub dt: f32,
+    pub _pad: f32,
+    pub waves: [GerstnerWave; SEA_WAVES],
+    /// Точки проверки: (x, z, время, 0).
+    pub probe: [[f32; 4]; WATER_PROBES],
+}
+
+/// Уровень кольцевой сетки воды, 32 байта. В MSL — `WaterLevel`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct WaterLevel {
+    /// Мировые XZ угла уровня, м.
+    pub origin: [f32; 2],
+    /// Шаг сетки уровня, м.
+    pub cell: f32,
+    /// 1 — сшивать внешний край с более грубым уровнем.
+    pub morph_edge: u32,
+    /// Прямоугольник более мелкого уровня (min, max): эту часть рисует он.
+    pub inner_min: [f32; 2],
+    pub inner_max: [f32; 2],
+}
+
 /// Ожидаемые значения, которые ядро `layout_probe` записывает в буфер.
 /// Порядок полей совпадает с порядком записи в MSL.
 pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
@@ -76,10 +139,15 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(TerrainVertex, normal) as u32,
         offset_of!(TerrainVertex, weights) as u32,
         offset_of!(TerrainVertex, material) as u32,
+        size_of::<GerstnerWave>() as u32,
+        size_of::<SeaParams>() as u32,
+        offset_of!(SeaParams, waves) as u32,
+        offset_of!(SeaParams, probe) as u32,
+        size_of::<WaterLevel>() as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 19;
+pub const LAYOUT_PROBE_LEN: usize = 24;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -101,6 +169,11 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "TerrainVertex.normal",
     "TerrainVertex.weights",
     "TerrainVertex.material",
+    "sizeof(GerstnerWave)",
+    "sizeof(SeaParams)",
+    "SeaParams.waves",
+    "SeaParams.probe",
+    "sizeof(WaterLevel)",
 ];
 
 #[cfg(test)]
@@ -113,7 +186,8 @@ mod tests {
         assert_eq!(
             expected_probe(),
             [
-                128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28
+                128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28,
+                32, 432, 48, 304, 32
             ]
         );
     }

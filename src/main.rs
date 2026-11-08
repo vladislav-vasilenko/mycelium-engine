@@ -5,7 +5,7 @@
 //! Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой — на начало тропы),
 //! R — на начало тропы, E/Q — вверх/вниз в полёте,
 //! B — покачивание головы, V/Shift+V — отладочные виды ландшафта,
-//! K — тестовая маска мокрого песка, T — ландшафт/тестовые кубы,
+//! T — ландшафт/тестовые кубы,
 //! Esc — отпустить мышь, ⌘M — свернуть, F5 — перезагрузить MSL,
 //! F9 — readback и сверка с эталоном, F12 — GPU capture одного кадра.
 //!
@@ -15,7 +15,6 @@
 //! `--export-world DIR` — записать слои сгенерированного мира и выйти,
 //! `--camera x,y,z,tx,ty,tz` — старт в полёте с взглядом на точку,
 //! `--view lit|height|slope|biome|substrate|coast|wetness|materials` — вид ландшафта,
-//! `--wet-test` — тестовая маска мокрого песка,
 //! `--capture-frame N` — записать кадр N в `captures/`.
 
 mod frame_graph;
@@ -27,6 +26,7 @@ mod scene;
 mod sim;
 mod terrain_materials;
 mod terrain_mesh;
+mod water;
 mod world;
 
 use std::collections::HashSet;
@@ -78,8 +78,6 @@ struct Args {
     camera: Option<(Vec3, Vec3)>,
     /// Стартовый вид ландшафта.
     view: Option<TerrainView>,
-    /// Включить тестовую маску мокрого песка при старте.
-    wet_test: bool,
 }
 
 impl Args {
@@ -115,7 +113,6 @@ impl Args {
                         );
                     }
                 }
-                "--wet-test" => args.wet_test = true,
                 other => eprintln!("неизвестный аргумент {other}"),
             }
         }
@@ -279,11 +276,13 @@ struct App {
     look: (f32, f32),
     /// Вид ландшафта (клавиша V).
     view_mode: TerrainView,
-    /// Тестовая маска мокрого песка включена (клавиша K).
-    wet_test: bool,
+    /// Море: волны и прибой (03.1), поле берега после загрузки рендерера.
+    sea: water::SeaState,
+    shore: Option<water::ShoreField>,
+    /// Длительность прошлого кадра для маски мокрого песка, с.
+    frame_dt: f32,
     grabbed: bool,
     last_frame: Instant,
-    started: Instant,
     title_timer: Instant,
     frames_since_title: u32,
     last_error: Option<String>,
@@ -348,10 +347,11 @@ impl App {
             modifiers: ModifiersState::empty(),
             look: (0.0, 0.0),
             view_mode: start_view,
-            wet_test: false,
+            sea: water::SeaState::new(WORLD_SEED),
+            shore: None,
+            frame_dt: 0.0,
             grabbed: false,
             last_frame: Instant::now(),
-            started: Instant::now(),
             title_timer: Instant::now(),
             frames_since_title: 0,
             last_error: None,
@@ -423,6 +423,24 @@ impl App {
             None => format!("MSL поколение {}", r.pipeline_generation()),
         };
         let p = self.sim.curr.position;
+        // Вода под игроком — CPU-запрос `sample_water` (та же функция волн, что на GPU).
+        let water_note = match (&self.shore, self.world.sample_ground(p.x, p.z)) {
+            (Some(shore), Some(_)) => {
+                let t = (self.sim.tick as f64 * sim::TICK_DT) as f32;
+                let w = water::sample_water(
+                    shore,
+                    &self.sea.params_for(shore),
+                    glam::Vec2::new(p.x, p.z),
+                    t,
+                );
+                if w.dry {
+                    String::new()
+                } else {
+                    format!(", вода {:.2} м (поверхность {:+.2} м)", w.depth, w.height)
+                }
+            }
+            _ => String::new(),
+        };
         let place = match (self.scene, self.world.sample_ground(p.x, p.z)) {
             (SceneMode::Terrain, Some(g)) => format!(
                 " · {} · тайл ({}, {}) · {:?}{}{} · {:.1} м",
@@ -435,24 +453,15 @@ impl App {
                 g.tile.z,
                 g.substrate,
                 if g.on_trail { ", тропа" } else { "" },
-                if g.wet { ", вода" } else { "" },
+                water_note,
                 g.height
             ),
             (SceneMode::Terrain, None) => " · за картой".into(),
             (SceneMode::Cubes, _) => " · тестовые кубы".into(),
         };
-        let view = match (self.scene, self.view_mode, self.wet_test) {
-            (SceneMode::Cubes, ..) => String::new(),
-            (_, TerrainView::Lit, false) => String::new(),
-            (_, v, wet) => format!(
-                " · вид: {}{}",
-                v.name(),
-                if wet {
-                    ", мокрый песок (тест)"
-                } else {
-                    ""
-                }
-            ),
+        let view = match (self.scene, self.view_mode) {
+            (SceneMode::Cubes, _) | (_, TerrainView::Lit) => String::new(),
+            (_, v) => format!(" · вид: {}", v.name()),
         };
         window.set_title(&format!(
             "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}",
@@ -462,20 +471,19 @@ impl App {
         self.frames_since_title = 0;
     }
 
-    /// Включает или выключает тестовую маску мокрого песка (клавиша K).
-    fn toggle_wet_test(&mut self) {
-        self.wet_test = !self.wet_test;
-        let (size, mask) = if self.wet_test {
-            terrain_materials::wetness_test_mask(&self.world)
-        } else {
-            let size = self.world.size_m().x as u32;
-            (size, vec![0u8; (size * size) as usize])
-        };
-        if let Some(r) = self.renderer.as_mut()
-            && let Err(e) = r.set_wetness(&mask, size)
-        {
-            eprintln!("маска влажности: {e}");
+    /// Вода кадра: параметры моря и кольца сетки вокруг камеры.
+    fn water_frame(&self, camera: Vec3) -> Option<renderer::WaterFrame> {
+        let shore = self.shore.as_ref()?;
+        if self.scene != SceneMode::Terrain {
+            return None;
         }
+        let mut params = self.sea.params_for(shore);
+        params.dt = self.frame_dt;
+        params.probe = water::probe_points(&self.world);
+        Some(renderer::WaterFrame {
+            params,
+            levels: water::water_levels(glam::Vec2::new(camera.x, camera.z)),
+        })
     }
 
     /// Переход в ходьбу. Над сушей игрок встаёт на грунт под камерой; над морем,
@@ -509,6 +517,7 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last_frame).as_secs_f64();
         self.last_frame = now;
+        self.frame_dt = dt.min(sim::MAX_FRAME_DT) as f32;
 
         // Поворот мыши применяется в каждом кадре, без ожидания тика (AD-32).
         self.sim.look(self.look.0, self.look.1);
@@ -525,6 +534,7 @@ impl App {
             (true, SceneMode::Terrain) => terrain_check_camera(&self.world),
             (false, _) => self.sim.interpolated(alpha),
         };
+        let water_frame = self.water_frame(camera.position);
         let Some(r) = self.renderer.as_mut() else {
             return;
         };
@@ -534,7 +544,8 @@ impl App {
         };
         let proj = sim::projection(w as f32 / h as f32);
         let view = camera.view();
-        let time = self.started.elapsed().as_secs_f32();
+        // Время мира от тиков симуляции: волны и накат детерминированы.
+        let time = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
         let uniforms = FrameUniforms {
             view_proj: (proj * view).to_cols_array_2d(),
             camera_pos: camera.position.extend(1.0).to_array(),
@@ -578,6 +589,7 @@ impl App {
             },
             readback,
             capture,
+            water: water_frame,
         });
         if readback && outcome != FrameOutcome::Presented {
             self.readback_requested = true;
@@ -614,6 +626,7 @@ impl App {
             self.selftest = Some(t);
             return;
         }
+        let water_frame = self.water_frame(Vec3::ZERO);
         let r = self.renderer.as_mut().unwrap();
         t.frames_in_step += 1;
         let total_frames = r.frame_index();
@@ -770,6 +783,7 @@ impl App {
             TestStep::TerrainReadback => {
                 if let Some(rb) = readbacks.first() {
                     verify_terrain_readback(&mut t, rb, view, proj, &self.world);
+                    verify_water_probe(&mut t, rb, water_frame, self.shore.as_ref());
                     t.step = TestStep::Done;
                 }
             }
@@ -983,6 +997,37 @@ fn verify_terrain_readback(t: &mut SelfTest, rb: &Readback, view: Mat4, proj: Ma
     );
 }
 
+/// Функция волн на GPU (ядро `water_probe`) совпадает с `water::wave_at` на CPU:
+/// смещённая точка ±2 мм, пена ±0,02.
+fn verify_water_probe(
+    t: &mut SelfTest,
+    rb: &Readback,
+    frame: Option<renderer::WaterFrame>,
+    shore: Option<&water::ShoreField>,
+) {
+    let (Some(frame), Some(shore)) = (frame, shore) else {
+        t.check(false, "вода не загружена".to_string());
+        return;
+    };
+    let (mut worst_pos, mut worst_foam) = (0.0f32, 0.0f32);
+    for (p, got) in frame.params.probe.iter().zip(&rb.water_probe) {
+        let w = water::wave_at(shore, &frame.params, glam::Vec2::new(p[0], p[1]), p[2], 0.0);
+        let d = (w.pos - Vec3::new(got[0], got[1], got[2]))
+            .abs()
+            .max_element();
+        worst_pos = worst_pos.max(d);
+        worst_foam = worst_foam.max((w.foam - got[3]).abs());
+    }
+    t.check(
+        worst_pos < 2e-3 && worst_foam < 0.02,
+        format!(
+            "волны моря: GPU совпадает с CPU в {} точках (макс. {:.2} мм, пена {worst_foam:.3})",
+            frame.params.probe.len(),
+            worst_pos * 1000.0
+        ),
+    );
+}
+
 fn report_terrain_readback(rb: &Readback, view: Mat4, proj: Mat4, world: &World) {
     let (hits, sky, bad, worst) = compare_terrain_depth(rb, view, proj, world, true);
     eprintln!(
@@ -1035,7 +1080,6 @@ impl ApplicationHandler for App {
             let materials = terrain_materials::load(&terrain_materials::source_dir())?;
             let mat_ms = t_mat.elapsed().as_secs_f64() * 1000.0;
             let wet_size = self.world.size_m().x as u32;
-            let dry = vec![0u8; (wet_size * wet_size) as usize];
             r.set_terrain(
                 &terrain,
                 &terrain_mesh::tile_indices(),
@@ -1044,7 +1088,6 @@ impl ApplicationHandler for App {
                     detail_rgba: &detail,
                     detail_size: DETAIL_TEXTURE_SIZE,
                     materials: &materials,
-                    wetness: &dry,
                     wetness_size: wet_size,
                 },
             )?;
@@ -1055,10 +1098,21 @@ impl ApplicationHandler for App {
                 materials.layers,
                 t0.elapsed().as_secs_f64() * 1000.0
             );
-            Ok::<_, String>(r)
+            let t_water = Instant::now();
+            let shore = water::ShoreField::from_world(&self.world);
+            r.set_water(&shore)?;
+            eprintln!(
+                "вода: поле берега {}×{}, {} уровней сетки, готово за {:.0} мс",
+                shore.size,
+                shore.size,
+                water::WATER_LEVELS,
+                t_water.elapsed().as_secs_f64() * 1000.0
+            );
+            Ok::<_, String>((r, shore))
         })();
         match result {
-            Ok(mut r) => {
+            Ok((mut r, shore)) => {
+                self.shore = Some(shore);
                 let size = window.inner_size();
                 r.resize(size.width, size.height, window.scale_factor());
                 eprintln!(
@@ -1068,9 +1122,6 @@ impl ApplicationHandler for App {
                     r.shader_dir().display()
                 );
                 self.renderer = Some(r);
-                if self.args.wet_test {
-                    self.toggle_wet_test();
-                }
             }
             Err(e) => {
                 eprintln!("ОШИБКА: {e}");
@@ -1139,10 +1190,6 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::KeyV => {
                             self.view_mode = self.view_mode.next(self.modifiers.shift_key());
-                            self.update_title(true);
-                        }
-                        KeyCode::KeyK => {
-                            self.toggle_wet_test();
                             self.update_title(true);
                         }
                         KeyCode::KeyB => {

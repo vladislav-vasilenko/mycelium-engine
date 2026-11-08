@@ -18,15 +18,24 @@ use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::frame_graph::{self, FramePlan, PassDecl, PassKind, ResourceId, Stages};
-use crate::layout::{FrameUniforms, InstanceData, LAYOUT_PROBE_LEN, TerrainVertex, Vertex};
+use crate::layout::{
+    FrameUniforms, InstanceData, LAYOUT_PROBE_LEN, SeaParams, TerrainVertex, Vertex, WATER_PROBES,
+    WaterLevel,
+};
 use crate::reference::PATTERN_SIZE;
+use crate::water::{ShoreField, WATER_LEVELS};
 use shaders::{Obj, Pipelines, ShaderError, SourceOverride};
 
 const FRAME_SLOTS: usize = 2;
 const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
-const UPLOAD_BYTES: usize = 4096;
+// Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
+// SeaParams @4096, WaterLevel[] @4608.
+const UPLOAD_BYTES: usize = 8192;
 const INSTANCE_OFFSET: usize = 256;
-const MAX_INSTANCES: usize = (UPLOAD_BYTES - INSTANCE_OFFSET) / size_of::<InstanceData>();
+const INSTANCE_END: usize = 4096;
+const MAX_INSTANCES: usize = (INSTANCE_END - INSTANCE_OFFSET) / size_of::<InstanceData>();
+const SEA_OFFSET: usize = 4096;
+const LEVELS_OFFSET: usize = 4608;
 
 // Ресурсы для планировщика проходов.
 const RES_PATTERN: ResourceId = ResourceId(1);
@@ -34,6 +43,7 @@ const RES_HDR: ResourceId = ResourceId(2);
 const RES_DEPTH: ResourceId = ResourceId(3);
 const RES_DRAWABLE: ResourceId = ResourceId(4);
 const RES_READBACK: ResourceId = ResourceId(5);
+const RES_WETNESS: ResourceId = ResourceId(6);
 
 // Раскладка буфера readback.
 const RB_PATTERN_BYTES: usize = (PATTERN_SIZE * PATTERN_SIZE * 4) as usize;
@@ -54,7 +64,9 @@ pub const DEPTH_SAMPLES: [(f32, f32); 9] = [
 const RB_PROBE_OFFSET: usize = RB_DEPTH_OFFSET + 256;
 /// Пиксели HDR-буфера (RGBA16Float, 8 байт) в тех же точках, что и глубина.
 const RB_HDR_OFFSET: usize = RB_PROBE_OFFSET + 256;
-const RB_BYTES: usize = RB_HDR_OFFSET + 256;
+/// Результаты ядра `water_probe`: `WATER_PROBES` × float4.
+const RB_WATER_OFFSET: usize = RB_HDR_OFFSET + 256;
+const RB_BYTES: usize = RB_WATER_OFFSET + 256;
 
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
@@ -140,6 +152,22 @@ pub struct FrameInput<'a> {
     pub clear_color: [f32; 3],
     pub readback: bool,
     pub capture: Option<PathBuf>,
+    /// Море: параметры и уровни сетки вокруг камеры. `None` — без воды.
+    pub water: Option<WaterFrame>,
+}
+
+/// Вода в кадре (03.1).
+pub struct WaterFrame {
+    pub params: SeaParams,
+    pub levels: [WaterLevel; WATER_LEVELS],
+}
+
+/// Вода на GPU: поле берега и индексы одного уровня кольцевой сетки.
+struct WaterGpu {
+    /// RGBA32Float: высота дна, расстояние до кромки, тип берега.
+    field: Obj<dyn MTLTexture>,
+    indices: Obj<dyn MTLBuffer>,
+    index_count: usize,
 }
 
 /// Ландшафт на GPU: вершины всех тайлов подряд, общие индексы одного тайла,
@@ -154,7 +182,8 @@ struct TerrainGpu {
     albedo: Obj<dyn MTLTexture>,
     /// Массив материалов: RG — нормаль, B — шероховатость.
     normal: Obj<dyn MTLTexture>,
-    /// Маска влажности R8 на всю карту, 1 тексель на метр.
+    /// Маска мокрого песка R16Float на всю карту, 1 тексель на метр;
+    /// пишет ядро `wet_sand_update`, читает шейдер ландшафта.
     wetness: Obj<dyn MTLTexture>,
 }
 
@@ -163,7 +192,7 @@ pub struct TerrainTextures<'a> {
     pub detail_rgba: &'a [u8],
     pub detail_size: u32,
     pub materials: &'a crate::terrain_materials::MaterialArrays,
-    pub wetness: &'a [u8],
+    /// Сторона маски мокрого песка, тексели (1 на метр).
     pub wetness_size: u32,
 }
 
@@ -185,6 +214,8 @@ pub struct Readback {
     pub depth: Vec<(u32, u32, f32)>,
     /// Значения HDR-буфера (до тонмаппинга) в тех же точках.
     pub hdr: Vec<[f32; 4]>,
+    /// Ядро `water_probe`: смещённая точка поверхности и пена в точках `SeaParams.probe`.
+    pub water_probe: [[f32; 4]; WATER_PROBES],
     pub probe: [u32; LAYOUT_PROBE_LEN],
 }
 
@@ -200,8 +231,8 @@ struct PendingReadback {
 struct FrameSlot {
     allocator: Obj<dyn MTL4CommandAllocator>,
     cmd: Obj<dyn MTL4CommandBuffer>,
-    /// pattern, scene, readback, tonemap, terrain.
-    tables: [Obj<dyn MTL4ArgumentTable>; 5],
+    /// pattern, scene, readback, tonemap, terrain, wet sand, water, water probe.
+    tables: [Obj<dyn MTL4ArgumentTable>; 8],
     upload: Obj<dyn MTLBuffer>,
     signal_value: u64,
 }
@@ -258,6 +289,9 @@ pub struct Renderer {
     completed_readbacks: Vec<Readback>,
     shader_dir: PathBuf,
     terrain: Option<TerrainGpu>,
+    water: Option<WaterGpu>,
+    /// Глубина для прозрачной воды: проверка без записи.
+    water_depth_state: Obj<dyn MTLDepthStencilState>,
     pub stats: Stats,
 }
 
@@ -343,6 +377,26 @@ fn sampled_texture(
     mips: bool,
     name: &str,
 ) -> Result<Obj<dyn MTLTexture>, String> {
+    sampled_texture_usage(
+        device,
+        format,
+        size,
+        layers,
+        mips,
+        MTLTextureUsage::ShaderRead,
+        name,
+    )
+}
+
+fn sampled_texture_usage(
+    device: &ProtocolObject<dyn MTLDevice>,
+    format: MTLPixelFormat,
+    size: u32,
+    layers: usize,
+    mips: bool,
+    usage: MTLTextureUsage,
+    name: &str,
+) -> Result<Obj<dyn MTLTexture>, String> {
     let desc = MTLTextureDescriptor::new();
     desc.setTextureType(if layers > 1 {
         MTLTextureType::Type2DArray
@@ -360,7 +414,7 @@ fn sampled_texture(
             1
         });
     }
-    desc.setUsage(MTLTextureUsage::ShaderRead);
+    desc.setUsage(usage);
     desc.setStorageMode(MTLStorageMode::Private);
     let tex = device
         .newTextureWithDescriptor(&desc)
@@ -403,9 +457,18 @@ fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_PATTERN, Stages::DISPATCH)],
         },
         PassDecl {
+            name: "wet_sand",
+            kind: PassKind::Compute,
+            reads: vec![],
+            writes: vec![(RES_WETNESS, Stages::DISPATCH)],
+        },
+        PassDecl {
             name: "scene",
             kind: PassKind::Render,
-            reads: vec![(RES_PATTERN, Stages::FRAGMENT)],
+            reads: vec![
+                (RES_PATTERN, Stages::FRAGMENT),
+                (RES_WETNESS, Stages::FRAGMENT),
+            ],
             writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
         },
     ];
@@ -475,6 +538,13 @@ impl Renderer {
         let depth_state = device
             .newDepthStencilStateWithDescriptor(&ds_desc)
             .ok_or("depth state")?;
+        let water_ds = MTLDepthStencilDescriptor::new();
+        water_ds.setDepthCompareFunction(MTLCompareFunction::GreaterEqual);
+        water_ds.setDepthWriteEnabled(false);
+        water_ds.setLabel(Some(&label("reversed-Z test, no write (water)")));
+        let water_depth_state = device
+            .newDepthStencilStateWithDescriptor(&water_ds)
+            .ok_or("water depth state")?;
 
         let shader_dir = shaders::shader_dir();
         let pipelines = shaders::build_pipelines(&device, &compiler, &shader_dir, 1, None)
@@ -516,6 +586,9 @@ impl Renderer {
                 table("readback")?,
                 table("tonemap")?,
                 table("terrain")?,
+                table("wet sand")?,
+                table("water")?,
+                table("water probe")?,
             ];
             let upload = shared_buffer(&device, UPLOAD_BYTES, &format!("upload slot {i}"));
             residency.addAllocation(as_allocation(&*upload));
@@ -576,6 +649,8 @@ impl Renderer {
             completed_readbacks: Vec::new(),
             shader_dir,
             terrain: None,
+            water: None,
+            water_depth_state,
             stats: Stats::default(),
         })
     }
@@ -749,7 +824,14 @@ impl Renderer {
             let o = RB_PROBE_OFFSET + i * 4;
             *v = u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
         }
+        let water_probe = std::array::from_fn(|i| {
+            std::array::from_fn(|c| {
+                let o = RB_WATER_OFFSET + i * 16 + c * 4;
+                f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap())
+            })
+        });
         Readback {
+            water_probe,
             frame: p.frame,
             pattern_time: p.pattern_time,
             width: p.width,
@@ -807,14 +889,17 @@ impl Renderer {
             true,
             "terrain materials: normal + roughness",
         )?;
-        let wetness = sampled_texture(
+        let wetness = sampled_texture_usage(
             &self.device,
-            MTLPixelFormat::R8Unorm,
+            MTLPixelFormat::R16Float,
             tex.wetness_size,
             1,
             false,
-            "terrain wetness mask",
+            MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+            "wet sand mask",
         )?;
+        // Сухо: половинная точность, ноль — нулевые байты.
+        let dry = vec![0u8; (tex.wetness_size * tex.wetness_size * 2) as usize];
         self.upload_textures(&[
             TextureUpload {
                 texture: &detail,
@@ -836,8 +921,8 @@ impl Renderer {
             },
             TextureUpload {
                 texture: &wetness,
-                data: tex.wetness,
-                pixel_bytes: 1,
+                data: &dry,
+                pixel_bytes: 2,
                 mips: false,
             },
         ])?;
@@ -860,26 +945,35 @@ impl Renderer {
         Ok(())
     }
 
-    /// Заменяет маску влажности ландшафта. Старая текстура освобождается после
-    /// кадров, которые могут её читать.
-    pub fn set_wetness(&mut self, data: &[u8], size: u32) -> Result<(), String> {
-        let wetness = sampled_texture(
+    /// Загружает воду: поле берега (RGBA32Float) и индексы уровня сетки.
+    pub fn set_water(&mut self, field: &ShoreField) -> Result<(), String> {
+        let tex = sampled_texture(
             &self.device,
-            MTLPixelFormat::R8Unorm,
-            size,
+            MTLPixelFormat::RGBA32Float,
+            field.size as u32,
             1,
             false,
-            "terrain wetness mask",
+            "shore field (bed, coast distance, rocky)",
         )?;
         self.upload_textures(&[TextureUpload {
-            texture: &wetness,
-            data,
-            pixel_bytes: 1,
+            texture: &tex,
+            data: bytemuck::cast_slice(&field.data),
+            pixel_bytes: 16,
             mips: false,
         }])?;
-        let terrain = self.terrain.as_mut().ok_or("ландшафт не загружен")?;
-        let old = std::mem::replace(&mut terrain.wetness, wetness);
-        self.retire(vec![old], None);
+        let indices = crate::water::grid_indices();
+        let ibytes: &[u8] = bytemuck::cast_slice(&indices);
+        let ibuf = shared_buffer(&self.device, ibytes.len(), "water grid indices");
+        upload_bytes(&ibuf, 0, ibytes);
+        self.residency.addAllocation(as_allocation(&*ibuf));
+        self.residency.commit();
+        if let Some(old) = self.water.replace(WaterGpu {
+            field: tex,
+            indices: ibuf,
+            index_count: indices.len(),
+        }) {
+            self.retire(vec![old.field], Some(Box::new(old.indices)));
+        }
         Ok(())
     }
 
@@ -1015,7 +1109,15 @@ impl Renderer {
             INSTANCE_OFFSET,
             bytemuck::cast_slice(instances),
         );
+        if let Some(w) = &input.water {
+            upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
+            upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
+        }
         let upload_addr = slot.upload.gpuAddress();
+        let water = match (&input.water, &self.water, &self.terrain) {
+            (Some(_), Some(w), Some(t)) => Some((w, t)),
+            _ => None,
+        };
 
         let plan = &self.plans[usize::from(self.prev_readback)][usize::from(readback)];
         let mut pixels = Vec::new();
@@ -1044,6 +1146,40 @@ impl Renderer {
                         MTLSize {
                             width: PATTERN_SIZE as usize,
                             height: PATTERN_SIZE as usize,
+                            depth: 1,
+                        },
+                        MTLSize {
+                            width: 16,
+                            height: 16,
+                            depth: 1,
+                        },
+                    );
+                    enc.endEncoding();
+                }
+                "wet_sand" => {
+                    let Some((w, t)) = water else { continue };
+                    let enc = slot.cmd.computeCommandEncoder().expect("compute encoder");
+                    enc.setLabel(Some(&label("wet sand update")));
+                    if !barrier.after.is_empty() {
+                        enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
+                            after,
+                            before,
+                            MTL4VisibilityOptions::Device,
+                        );
+                    }
+                    let table = &slot.tables[5];
+                    unsafe {
+                        table.setAddress_atIndex(upload_addr, 1);
+                        table.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
+                        table.setTexture_atIndex(t.wetness.gpuResourceID(), 0);
+                        table.setTexture_atIndex(w.field.gpuResourceID(), 1);
+                    }
+                    enc.setComputePipelineState(&self.pipelines.wet_sand);
+                    enc.setArgumentTable(Some(table));
+                    enc.dispatchThreads_threadsPerThreadgroup(
+                        MTLSize {
+                            width: t.wetness.width(),
+                            height: t.wetness.height(),
                             depth: 1,
                         },
                         MTLSize {
@@ -1154,6 +1290,36 @@ impl Renderer {
                             );
                         }
                     }
+                    if let (Some((w, _)), Some(t)) = (water, &self.terrain) {
+                        // Прозрачная вода после непрозрачной геометрии.
+                        let wtable = &slot.tables[6];
+                        unsafe {
+                            wtable.setAddress_atIndex(upload_addr, 1);
+                            wtable.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
+                            wtable.setAddress_atIndex(upload_addr + LEVELS_OFFSET as u64, 3);
+                            wtable.setTexture_atIndex(w.field.gpuResourceID(), 0);
+                            wtable.setTexture_atIndex(t.detail.gpuResourceID(), 1);
+                        }
+                        enc.pushDebugGroup(&label(&format!("water: {WATER_LEVELS} levels")));
+                        enc.setRenderPipelineState(&self.pipelines.water);
+                        enc.setDepthStencilState(Some(&self.water_depth_state));
+                        enc.setCullMode(MTLCullMode::None);
+                        enc.setArgumentTable_atStages(
+                            wtable,
+                            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+                        );
+                        unsafe {
+                            enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength_instanceCount(
+                                MTLPrimitiveType::Triangle,
+                                w.index_count,
+                                MTLIndexType::UInt16,
+                                w.indices.gpuAddress(),
+                                w.indices.length(),
+                                WATER_LEVELS,
+                            );
+                        }
+                        enc.popDebugGroup();
+                    }
                     enc.endEncoding();
                 }
                 "readback" => {
@@ -1226,6 +1392,31 @@ impl Renderer {
                                 8,
                             );
                         }
+                    }
+                    if let Some((w, _)) = water {
+                        let ptable = &slot.tables[7];
+                        unsafe {
+                            ptable.setAddress_atIndex(
+                                self.readback_buf.gpuAddress() + RB_WATER_OFFSET as u64,
+                                0,
+                            );
+                            ptable.setAddress_atIndex(upload_addr + SEA_OFFSET as u64, 2);
+                            ptable.setTexture_atIndex(w.field.gpuResourceID(), 0);
+                        }
+                        enc.setComputePipelineState(&self.pipelines.water_probe);
+                        enc.setArgumentTable(Some(ptable));
+                        enc.dispatchThreads_threadsPerThreadgroup(
+                            MTLSize {
+                                width: WATER_PROBES,
+                                height: 1,
+                                depth: 1,
+                            },
+                            MTLSize {
+                                width: WATER_PROBES,
+                                height: 1,
+                                depth: 1,
+                            },
+                        );
                     }
                     enc.endEncoding();
                 }

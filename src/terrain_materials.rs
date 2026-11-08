@@ -174,12 +174,18 @@ pub enum TerrainView {
     CoastType = 5,
     Wetness = 6,
     Materials = 7,
+    /// Вода: глубина спокойной воды.
+    WaterDepth = 8,
+    /// Вода: направление к берегу и вес береговой волны.
+    WaterDirection = 9,
+    /// Вода: пена, заплеск, береговая волна.
+    Surf = 10,
     /// HDR = (высота м, уклон градусы, индекс доминирующего биома, тип берега).
     Raw = 15,
 }
 
 impl TerrainView {
-    const CYCLE: [TerrainView; 8] = [
+    const CYCLE: [TerrainView; 11] = [
         TerrainView::Lit,
         TerrainView::Height,
         TerrainView::Slope,
@@ -188,6 +194,9 @@ impl TerrainView {
         TerrainView::CoastType,
         TerrainView::Wetness,
         TerrainView::Materials,
+        TerrainView::WaterDepth,
+        TerrainView::WaterDirection,
+        TerrainView::Surf,
     ];
 
     /// Следующий вид по клавише V (`back` — Shift+V).
@@ -208,6 +217,9 @@ impl TerrainView {
             "coast" => TerrainView::CoastType,
             "wetness" => TerrainView::Wetness,
             "materials" => TerrainView::Materials,
+            "water-depth" => TerrainView::WaterDepth,
+            "water-dir" => TerrainView::WaterDirection,
+            "surf" => TerrainView::Surf,
             _ => return None,
         })
     }
@@ -222,28 +234,12 @@ impl TerrainView {
             TerrainView::CoastType => "тип берега",
             TerrainView::Wetness => "влажность",
             TerrainView::Materials => "слои материалов",
+            TerrainView::WaterDepth => "вода: глубина",
+            TerrainView::WaterDirection => "вода: направление к берегу",
+            TerrainView::Surf => "вода: пена и заплеск",
             TerrainView::Raw => "числа (самопроверка)",
         }
     }
-}
-
-/// Тестовая маска мокрого песка до прибоя 03.1: полоса от кромки воды до 0,7 м
-/// над морем на песчаных участках, под водой — мокро. 1 тексель на метр,
-/// сторона — размер карты. R8, строки по z.
-pub fn wetness_test_mask(world: &crate::world::World) -> (u32, Vec<u8>) {
-    use crate::world::noise::smoothstep;
-    let size = world.size_m().x as usize;
-    let nx = world.tiles_x as usize * (crate::world::TILE_SAMPLES - 1) + 1;
-    let mut out = Vec::with_capacity(size * size);
-    for j in 0..size {
-        for i in 0..size {
-            let f = &world.fields[j * nx + i];
-            let band = 1.0 - smoothstep(0.15, 0.7, f.height);
-            let wet = band * (1.0 - f.rocky);
-            out.push((wet.clamp(0.0, 1.0) * 255.0).round() as u8);
-        }
-    }
-    (size as u32, out)
 }
 
 #[cfg(test)]

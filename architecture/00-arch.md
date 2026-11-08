@@ -3,6 +3,7 @@
 Живой документ: описывает код в том виде, в котором он есть сейчас. Правила обновления — в [AGENTS.md](../AGENTS.md#архитектура).
 
 - Состояние на — 2026-11-07, ревизия `22c3804` и правки после неё
+- Подсистемы — [02-terrain.md](02-terrain.md), [03-water.md](03-water.md)
 - Покрытые этапы — [00. Платформа и архитектура](../specs/00-platform.md) (`completed`), [01. Основа Metal 4](../specs/01-metal-foundation.md) (`partial`), [02. Ландшафт и биомы](../specs/02-terrain-biomes.md) (`partial`): подэтап [02.1](../specs/02-1-terrain-data.md) (`completed`), 02.2–02.5 не начаты; [10. Руки от первого лица](../specs/10-first-person-hands.md) (`partial`, шаг 1 — ассет)
 - Отчёты — [00](../reports/00-platform.md), [01](../reports/01-metal-foundation.md), [02](../reports/02-terrain-biomes.md), [02.1](../reports/02-1-terrain-data.md), [10](../reports/10-first-person-hands.md)
 - Подсистемы — [мир и ландшафт](02-terrain.md)
@@ -130,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `scene` (render) → `readback` (compute, только по запросу) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -159,7 +160,8 @@ sequenceDiagram
 | `verify_terrain_readback(...)`, `report_terrain_readback(...)` | fn | Проверка ландшафта в самопроверке и вывод по F9 |
 | `report_readback(rb, view, proj)` | fn | То же для F9 в обычном режиме, вывод в stderr |
 | `look_camera(from, to)` | fn | Камера для `--camera` |
-| `App::toggle_wet_test()` | fn | Клавиша K: тестовая маска мокрого песка ↔ сухо (`Renderer::set_wetness`) |
+| `App::water_frame(camera)` | fn | `WaterFrame` кадра: `SeaState::params_for`, `dt`, точки проверки, `water_levels` вокруг камеры; `None` вне ландшафта |
+| `verify_water_probe(t, rb, frame, shore)` | fn | Самопроверка: ядро `water_probe` против `water::wave_at`, ±2 мм |
 | `compare_terrain_raw(rb, view, proj, &World)` | fn | Вид `Raw`: высота ±5 см, уклон грани ±2°, доминирующий биом ближайшего узла против CPU |
 | `main()` | fn | При `--export-world` записывает слои и выходит; иначе создаёт `EventLoop` (`ControlFlow::Poll`), запускает `App`, выходит с `exit_code` |
 
@@ -242,11 +244,14 @@ sequenceDiagram
 | `InstanceData` | 80 Б, 16 | `model [[f32;4];4]` @0, `tint [f32;4]` @64 |
 | `Vertex` | 32 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24. В MSL — `packed_float3`, `packed_float3`, `float2` |
 | `TerrainVertex` | 32 Б, 4 | `position [f32;3]` @0 (мировые м), `normal [f32;3]` @12, `weights [u8;4]` @24 (лес, торф, берег, тропа), `material [u8;4]` @28 (субстрат, русло, влажность, тип берега 0 песок … 255 камень). В MSL — `packed_float3`, `packed_float3`, `uchar4`, `uchar4` |
+| `GerstnerWave` | 32 Б, 4 | `dir [f32;2]` @0, `wavelength` @8, `amplitude` @12, `steepness` @16, `phase` @20, `omega` @24, `_pad` @28 |
+| `SeaParams` | 432 Б, 16 | `sea_level` @0, `wave_count u32` @4, `shore_wavelength` @8, `shore_amplitude` @12, `shore_omega` @16, `swash_sand_m` @20, `swash_rock_m` @24, `dry_time_s` @28, `field_size u32` @32, `field_step_m` @36, `dt` @40, `_pad` @44, `waves [GerstnerWave; 8]` @48, `probe [[f32;4]; 8]` @304 |
+| `WaterLevel` | 32 Б, 4 | `origin [f32;2]` @0, `cell` @8, `morph_edge u32` @12, `inner_min [f32;2]` @16, `inner_max [f32;2]` @24 |
 
 | Элемент | Описание |
 | --- | --- |
-| `expected_probe() -> [u32; 19]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
-| `LAYOUT_PROBE_LEN = 19`, `LAYOUT_PROBE_NAMES` | Длина и имена полей для диагностики |
+| `expected_probe() -> [u32; 24]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
+| `LAYOUT_PROBE_LEN = 24`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8` | Длина и имена полей для диагностики |
 
 Изменение любой структуры требует правки `common.h` в той же правке; несовпадение ловят тест `cpu_layout_matches_msl_rules` и самопроверка.
 
@@ -276,10 +281,11 @@ sequenceDiagram
 | --- | --- | --- |
 | `FRAME_SLOTS` | 2 | Кадров в полёте |
 | `SLOT_WAIT_TIMEOUT_MS` | 100 | Таймаут ожидания слота, после — пропуск кадра |
-| `UPLOAD_BYTES` | 4096 | Upload-буфер слота |
-| `INSTANCE_OFFSET` | 256 | Начало экземпляров в upload |
+| `UPLOAD_BYTES` | 8192 | Upload-буфер слота |
+| `INSTANCE_OFFSET`, `INSTANCE_END` | 256, 4096 | Диапазон экземпляров в upload |
 | `MAX_INSTANCES` | 48 | `(4096 − 256) / 80` |
-| `RES_PATTERN … RES_READBACK` | 1…5 | `ResourceId` для планировщика |
+| `SEA_OFFSET`, `LEVELS_OFFSET` | 4096, 4608 | `SeaParams` и `WaterLevel[11]` в upload |
+| `RES_PATTERN … RES_WETNESS` | 1…6 | `ResourceId` для планировщика; 6 — маска мокрого песка |
 | `RB_*`, `DEPTH_SAMPLES` | см. [раздел 6](#раскладка-буферов) | Раскладка readback и 9 точек проверки глубины |
 
 Публичные типы:
@@ -288,8 +294,10 @@ sequenceDiagram
 | --- | --- |
 | `DeviceInfo` | `name`, `os`, `metal4`, `apple_family: Option<u32>`, `raytracing`, `raytracing_from_render: Option<bool>` (`None` в режиме capture). `Display` печатает строку диагностики |
 | `FrameOutcome` | `Presented`, `SkippedZeroSize`, `SkippedNoDrawable`, `SkippedBusySlot` |
-| `FrameInput<'a>` | Снимок для кадра: `uniforms: FrameUniforms`, `instances: &[InstanceData]` (кубы или столбики маркеров), `draw_terrain: bool`, `clear_color: [f32; 3]`, `readback: bool`, `capture: Option<PathBuf>` |
-| `Readback` | `frame`, `pattern_time`, `width`, `height`, `pattern: Vec<u8>` (RGBA8 256 × 256), `depth: Vec<(x, y, f32)>`, `probe: [u32; 17]` |
+| `FrameInput<'a>` | Снимок для кадра: `uniforms: FrameUniforms`, `instances: &[InstanceData]` (кубы или столбики маркеров), `draw_terrain: bool`, `clear_color: [f32; 3]`, `readback: bool`, `capture: Option<PathBuf>`, `water: Option<WaterFrame>` |
+| `WaterFrame` | `params: SeaParams`, `levels: [WaterLevel; 11]` — вода кадра |
+| `TerrainTextures<'a>` | `detail_rgba`, `detail_size`, `materials: &MaterialArrays`, `wetness_size` |
+| `Readback` | `frame`, `pattern_time`, `width`, `height`, `pattern: Vec<u8>` (RGBA8 256 × 256), `depth: Vec<(x, y, f32)>`, `hdr: Vec<[f32; 4]>`, `water_probe: [[f32; 4]; 8]`, `probe: [u32; 24]` |
 | `Stats` | `presented`, `skipped_busy`, `skipped_no_drawable`, `released_deferred`, `cpu_encode_ms` |
 
 Приватные типы:
@@ -297,7 +305,10 @@ sequenceDiagram
 | Тип | Поля и смысл |
 | --- | --- |
 | `PendingReadback` | `signal_value` (значение события, после которого можно читать), `frame`, `pattern_time`, `width`, `height`, `pixels` (точки глубины) |
-| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 5]` (pattern, scene, readback, tonemap, terrain), `upload: MTLBuffer`, `signal_value: u64` |
+| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 8]` (pattern, scene, readback, tonemap, terrain, wet sand, water, water probe), `upload: MTLBuffer`, `signal_value: u64` |
+| `TerrainGpu` | вершины, индексы, `detail`, `albedo`, `normal`, `wetness` (R16Float, read/write) |
+| `WaterGpu` | `field` (RGBA32Float 1025²), `indices`, `index_count` |
+| `TextureUpload` | `texture`, `data`, `pixel_bytes`, `mips` — элемент `upload_textures` |
 | `TerrainGpu` | `vertices` (все тайлы), `indices` (одна сетка 65 × 65), `index_count`, `tile_count`, `detail` (текстура с mip) |
 | `Targets` | `width`, `height`, `hdr` (`RGBA16Float`), `depth` (`Depth32Float`), обе `Private` |
 | `Retired` | `after_value`, `textures` (удаляются из residency set), `_keep_alive: Option<Box<dyn Any>>` (например, старые `Pipelines`) |
@@ -418,8 +429,22 @@ sequenceDiagram
 | `MaterialArrays { size, layers, albedo_height, normal_rough }` | struct | упакованные слои RGBA8: цвет + высота (Displacement); нормаль XY + шероховатость + 255 |
 | `source_dir()` | fn | `Contents/Resources/ambientcg` в бандле или `assets/source/ambientcg` |
 | `load(dir) -> Result<MaterialArrays, String>` | fn | декодирует `Color`, `NormalGL`, `Roughness`, `Displacement` (JPEG, `zune-jpeg`) параллельно по слоям; ошибка называет материал и файл |
-| `TerrainView` | enum `u32` | `Lit` 0, `Height` 1, `Slope` 2, `Biome` 3, `Substrate` 4, `CoastType` 5, `Wetness` 6, `Materials` 7, `Raw` 15 (числа для самопроверки); `next(back)`, `name()`, `parse(name)` |
-| `wetness_test_mask(&World) -> (u32, Vec<u8>)` | fn | тестовая маска R8 1 м/тексель: полоса от кромки до 0,7 м над морем на песчаных участках |
+| `TerrainView` | enum `u32` | `Lit` 0, `Height` 1, `Slope` 2, `Biome` 3, `Substrate` 4, `CoastType` 5, `Wetness` 6, `Materials` 7, `WaterDepth` 8, `WaterDirection` 9, `Surf` 10, `Raw` 15 (числа для самопроверки); `next(back)`, `name()`, `parse(name)` |
+
+### 4.9b. `src/water.rs` — море и прибой
+
+Подробно — [03-water.md](03-water.md).
+
+| Элемент | Вид | Описание |
+| --- | --- | --- |
+| `WATER_LEVELS` = 11, `WATER_GRID_N` = 64, `WATER_CELL0_M` = 0,5, `DRY_TIME_S` = 20 | const | кольцевая сетка и высыхание |
+| `SeaState { params }` | struct | `new(seed)` — 6 волн Герстнера по ветру, береговая волна 30 м / 7 с, заплеск 0,7 / 0,25 м; `params_for(&ShoreField)` — с размером поля |
+| `ShoreField { size, step_m, data }` | struct | `from_world(&World)` — (высота, `coast_distance`, `rocky`, 0) на мировой сетке, параллельно; приватные `bilinear`, `shore_at` |
+| `ShoreSample { bed, coast_d, rocky, dir }`, `WaveOut { pos, foam, swash, shore }`, `WaterSample { height, depth, dry }` | struct | результаты запросов |
+| `wave_at(field, params, base, t, filter_cell) -> WaveOut` | fn | точка поверхности узла сетки (как `water.h`) |
+| `sample_water(field, params, p, t) -> WaterSample` | fn | высота воды над мировой точкой; заголовок окна показывает глубину под игроком |
+| `water_levels(camera) -> [WaterLevel; 11]` | fn | кольца вокруг камеры с привязкой к решётке |
+| `grid_indices()`, `probe_points(&World)` | fn | индексы уровня; 8 точек проверки CPU ↔ GPU |
 
 ### 4.10. Сборка `.app`
 
@@ -454,14 +479,16 @@ sequenceDiagram
 
 ## 5. Шейдеры и привязки
 
-Файлы в `shaders/metal/`. `common.h` подставляется в каждый файл при загрузке.
+Файлы в `shaders/metal/`. Строки `#include "файл.h"` подставляются при загрузке рекурсивно (`expand_includes`): Metal API не знает путей проекта.
 
 | Файл | Функции | Назначение |
 | --- | --- | --- |
-| `common.h` | `FrameUniforms`, `InstanceData`, `Vertex`, `pattern_color` | Общие типы и эталонная функция узора |
+| `common.h` | `FrameUniforms`, `InstanceData`, `Vertex`, `TerrainVertex`, `GerstnerWave`, `SeaParams`, `WaterLevel`, `pattern_color` | Общие типы и эталонная функция узора |
 | `pattern.metal` | `pattern_main` (kernel), `layout_probe` (kernel) | Диагностический узор; запись размеров и смещений структур |
 | `scene.metal` | `scene_vs`, `scene_fs` | Вершины из буфера по `vertex_id`, экземпляры по `instance_id`; ambient + Ламберт с текстурой узора |
 | `terrain.metal` | `terrain_vs`, `terrain_fs`, `sample_layer`, `ramp` | Вершина `instance_id × 4225 + vertex_id`; 5 слоёв материалов ambientCG по весам, типу берега, уклону, тропе, руслу и дну, смешивание по высоте рельефа материала, карты нормалей, мокрый песок по маске, солнце (Ламберт + GGX) и небо; отладочные виды по `view_mode`. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
+| `water.h` | `ShoreSample`, `field_bilinear`, `shore_at`, `alongshore_phase`, `WaveOut`, `wave_at` | Функция волн, общая для отрисовки, маски и проверки. См. [03-water.md](03-water.md) |
+| `water.metal` | `water_vs`, `water_fs`, `wet_sand_update` (kernel), `water_probe` (kernel), `level_point`, `sky_color` | Кольцевая сетка воды, цвет, пена, мокрый песок, проверка CPU ↔ GPU |
 | `tonemap.metal` | `tonemap_vs`, `tonemap_fs` | Полноэкранный треугольник без буфера; экспозиция и ACES (Narkowicz) |
 
 Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 4 буферов и 4 текстур):
@@ -470,7 +497,10 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины ландшафта | upload: `FrameUniforms` | — | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска влажности R8 | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины ландшафта | upload: `FrameUniforms` | — | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
+| `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
+| `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
 | `readback` | `readback_buf` + `RB_PROBE_OFFSET` | — | — | — (копии: узор, глубина и HDR в 9 точках) | compute |
 | `tonemap` | — | upload: `FrameUniforms` | — | `hdr` (sample) | vertex, fragment |
 
@@ -500,8 +530,10 @@ sequenceDiagram
 
 | Буфер | Диапазон | Содержимое |
 | --- | --- | --- |
-| upload слота (4096 Б) | 0..112 | `FrameUniforms` |
+| upload слота (8192 Б) | 0..128 | `FrameUniforms` |
 | | 256..4096 | до 48 `InstanceData` |
+| | 4096..4528 | `SeaParams` |
+| | 4608..4960 | `WaterLevel[11]` |
 | `readback_buf` (262 656 Б) | 0..262 144 | узор RGBA8, строка 1024 Б |
 | | 262 144..262 400 | глубина `f32` в 9 точках `DEPTH_SAMPLES` |
 | | 262 400..262 656 | 13 значений `u32` из `layout_probe` |
@@ -583,13 +615,20 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.1 · Проход по тропе от начала до каменистого берега | Бот в тесте `bot_walks_whole_trail_from_start_to_shore`, брод (AD-33) | Выполнено |
 | 02.1 · Маска типа берега: песчаные бухты и каменистые мысы | `Generator::rocky`, `coast_type.png`, тест `coast_alternates_sand_and_rock` | Выполнено (AD-37) |
 | 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView`, мокрый песок, материалы берега | `terrain_materials.rs`, `Renderer::set_terrain`/`set_wetness`, `terrain.metal`, вид `Raw` в самопроверке | Выполнено (AD-38); 5 слоёв вместо 4 |
-| 02.3 · `TileBounds`, `TileDraw`, индексы 65/33/17 по маске краёв | — | Не начато |
+| 02.3 · Frustum culling, quadtree, CDLOD с морфингом, текстура высот | — | Не начато |
 | 02.4 · `Placement`, группы экземпляров, береговой декор | — | Не начато |
-| 03.1 · Море до горизонта, волны Герстнера, мелководье, накат, мокрый песок, пена | — | Не начато |
+| 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 04.1 · Время суток, солнце, луна, звёзды, атмосфера, свет неба, экспозиция, управление временем | Временный свет в `terrain.metal` (солнце + градиент неба) | Не начато |
 | 04.2–04.4 · Тени и туман, погода и осадки, ночное свечение | — | Не начато |
+| 08.1 · World partition, quadtree мира, стриминг ячеек, NVMe, бюджеты (мир ~21 × 20 км) | — | Не начато |
+| 08.2 · Виртуальное текстурирование | — | Не начато |
+| 08.3 · Кластерная геометрия (Nanite-подобная) | — | Не начато |
+| 08.4 · Тесселяция и displacement вблизи, scattering на лету | — | Не начато |
+| 08.5 · Тени по полям расстояний | — | Не начато |
+| 08.6 · Водосборы, дельты изменений, «Дыхание пустыни» | — | Не начато |
 | 02.5 · Видимые списки, indirect, импосторы | — | Не начато |
+| 02.6 · Hi-Z, двухпроходное отсечение, occlusion queries | — | Не начато |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
 | 10.2–10.5 · glTF и скиннинг, проход `viewmodel`, движение, кожа и волосы | — | Не начато |
 | 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs`, `plan_after` | Выполнено, включая смену состава проходов между кадрами; стадия indirect — в 02 |
@@ -843,6 +882,22 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** 23 МБ JPEG в репозитории, ~0,8 с загрузки при старте (Debug), 2 × 5 × 4 МБ текстур на GPU с mip. Спецификация 02.2 называла 4 слоя — добавлена лесная подстилка. Отладочные виды проходят через тонмаппинг и выглядят светлее.
 - **Пересмотреть.** При скалах и оврагах (триплан), при стриминге этапа 08 (сжатые форматы ASTC/BC), при появлении травы 02.4.
 
+### AD-39. Море: кольцевая сетка, береговая волна по расстоянию до кромки, одна функция на CPU и GPU
+
+- **Решение.** Вода — 11 вложенных колец (64² ячеек, шаг 0,5 м × 2^L) вокруг камеры с привязкой к мировой решётке; стыки — отбрасыванием внутренней части во фрагментном шейдере и сшивкой края. Открытое море — волны Герстнера; у берега — отдельная береговая волна, фаза которой зависит от расстояния до кромки, поэтому фронт параллелен берегу в любом месте острова; обмеление, обрушение и заплеск — аналитически. Функция волн одна (`water.h` ↔ `water.rs`), CPU-запрос `sample_water` совпадает с GPU, это проверяет самопроверка. Вода рисуется в проходе `scene` после непрозрачной геометрии с dual-source смешиванием (`dst × пропускание + цвет`); толщина воды — по высоте дна из поля берега. Мокрый песок — маска в compute.
+- **Почему.** Кольца, привязанные к решётке, не «плывут» и тянутся до горизонта (~32 км) за ~90 тыс. треугольников. Поворачивать волны Герстнера к берегу нельзя без разрыва фазы; волна по линиям равного расстояния даёт параллельный фронт без интегрирования. Единая функция позволяет геймплею (лодка, брод, мокрая одежда) опираться на ту же поверхность. Dual-source даёт поглощение по каналам (бирюза на мелководье) без копии кадра.
+- **Отброшено.** Отдельный проход `water` с чтением глубины сцены — нужна копия глубины или промежуточный буфер; толщина по полю берега дешевле и точна для дна рельефа. Projected grid — вершины «плывут» при движении камеры. FFT-океан — в лаборатории 07, сохранив контракт.
+- **Цена.** Толщина воды над объектами (камни, мусор), которых нет в поле берега, не учитывается. Брызги у камней пока только пена, без частиц. Небо в отражении — градиент до 04.1. Рябь детальной текстуры даёт заметный узор вдали.
+- **Пересмотреть.** При 04.1 (LUT неба в отражении), при объектах в воде (02.4, 03.4), при FFT-лаборатории.
+
+### AD-40. Гладкая кромка воды и мокрого песка — в шейдерах, а не уплотнением сеток
+
+- **Решение.** В полосе прибоя фрагментный шейдер воды ищет пересечение луча взгляда с точной поверхностью (2 уточнения по `wave_at`) и выдаёт глубину `[[depth(any)]]`; сетка там приподнята на 15 см, чтобы треугольники накрывали кромку. Растворение воды начинается на 3 см выше гладкого дна. Маска мокрого песка хранит непрерывное покрытие, переходы растянуты на несколько текселей, шейдер ландшафта берёт `smoothstep`. Подкраска дна по `y < 0` в шейдере ландшафта удалена.
+- **Почему.** На пологом пляже (4,5 %) ошибка высоты в 1 см сдвигает кромку на 20–30 см, поэтому любая линейная интерполяция (вершины воды, треугольники рельефа 1 м, двоичная маска 1 м) рисует ступени с шагом сетки. Попиксельный расчёт нужен только в узкой полосе у берега и не меняет частоту кадров (115–120 кадров/с).
+- **Отброшено.** Уплотнить сетку воды и рельефа у берега — в разы больше вершин и всё равно ступени на своём шаге. Маска 0,25 м — в 16 раз больше памяти и обновлений.
+- **Цена.** `depth(any)` отключает раннюю проверку глубины для воды; на воду это не влияет — она прозрачна и рисуется последней.
+- **Пересмотреть.** Если полоса прибоя займёт большую часть кадра и станет дорогой — ограничить уточнения расстоянием до камеры.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -852,7 +907,8 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - Перезагрузка MSL проверяет наличие точек входа, но не индексы привязок.
 - Время GPU не измеряется: нужны `MTL4CounterHeap` и временные метки по проходам.
 - Ландшафт рисуется целиком без отсечения и LOD: 2,1 млн треугольников за кадр на карте 1024 м (подэтап 02.3).
-- Поверхности воды нет (этап 03): с высоты видны морское дно и квадратный край карты.
+- Небо — плоский цвет очистки, в воде — градиент; настоящее небо — 04.1. Вдали на воде заметен повторяющийся узор ряби.
+- `src/renderer/mod.rs` (~1600 строк) и `src/main.rs` (~1400) — красная зона по правилу размера файлов; разбиение — следующий шаг.
 - Освещение ландшафта временное (солнце: Ламберт + GGX, небо), без теней и тумана — до этапа 04.
 - Диагностика выводится в заголовок окна и stderr, текстового оверлея нет.
 - Для подэтапа 02.5 планировщику нужна стадия indirect-аргументов (`compute output → indirect args`).
@@ -880,3 +936,5 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-08 | 02.1 | после `7d787d0` | AD-37: маска типа берега `Generator::rocky`, `Generator::mouth`, `Fields.rocky`, `Sample.rocky`, `TerrainVertex.material[3]`, `substrate` без параметра x, слой `coast_type.png` (формат слоёв 2), генератор v4; `ROCKY_COAST_X` удалён |
 | 2026-11-08 | 02.2 | после `453a670` | AD-38: модуль `terrain_materials` (ambientCG, `TerrainView`, тестовая маска влажности), `FrameUniforms` 128 Б (`view_mode`, `map_size_m`), `layout_probe` 19 полей, `Renderer::set_terrain(…, &TerrainTextures)`, `set_wetness`, `upload_textures`, `sampled_texture`, readback HDR (`RB_HDR_OFFSET`, `Readback.hdr`, `f16_to_f32`), таблица `terrain` с 4 текстурами, новый `terrain.metal`; аргументы `--camera`, `--view`, `--wet-test`, клавиши V и K; шаг самопроверки вида `Raw` (19 проверок); ambientCG в `.app`. Зависимость `zune-jpeg` |
 | 2026-11-08 | 04 | после `dce384d` | Спецификации: этап 04 разбит на подэтапы 04.1 «Небо и время суток» (солнце, луна, звёзды, атмосфера, экспозиция, управление временем), 04.2 «Свет, тени и туман», 04.3 «Погода и осадки», 04.4 «Ночное свечение»; таблица соответствия дополнена. Код не менялся |
+| 2026-11-08 | 02, 04, 08 | `bd4aac5` | Спецификации: 02.3 переписан (frustum, quadtree, CDLOD), новый 02.6 Hi-Z; этап 08 разбит на 08.1–08.6 под мир ~21 × 20 км; CSM в 04.2 с передачей дальних теней в 08.5. Код не менялся |
+| 2026-11-08 | 03.1 | после `bd4aac5` | AD-39, AD-40: модуль `water`, `water.h`, `water.metal`, `GerstnerWave`/`SeaParams`/`WaterLevel` (+5 полей `layout_probe`, 24), upload 8192 Б, проход `wet_sand` и `RES_WETNESS`, таблицы слота 8, `Renderer::set_water`, `WaterFrame`, `WaterGpu`, `water_depth_state`, `sampled_texture_usage`, маска мокрого песка R16Float (тестовая маска, `set_wetness`, клавиша K и `--wet-test` удалены), `Readback.water_probe`, `expand_includes`, `render_pipeline(…, (vs, fs), …, transmit_blend)`, время мира от тиков, виды `water-depth`/`water-dir`/`surf`, `sample_water` в заголовке, самопроверка 20 проверок; правило размера файлов в AGENTS.md |

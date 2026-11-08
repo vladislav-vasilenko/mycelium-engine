@@ -46,4 +46,11 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[16] = uint((thread char*)&tv.normal - tb);
     out[17] = uint((thread char*)&tv.weights - tb);
     out[18] = uint((thread char*)&tv.material - tb);
+    SeaParams sp;
+    thread char* sb = (thread char*)&sp;
+    out[19] = sizeof(GerstnerWave);
+    out[20] = sizeof(SeaParams);
+    out[21] = uint((thread char*)&sp.waves - sb);
+    out[22] = uint((thread char*)&sp.probe - sb);
+    out[23] = sizeof(WaterLevel);
 }

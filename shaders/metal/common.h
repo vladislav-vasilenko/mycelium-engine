@@ -35,6 +35,47 @@ struct TerrainVertex {
     uchar4 material;  // субстрат, русло, влажность, тип берега (0 песок, 255 камень)
 };
 
+// Волна Герстнера (src/layout.rs, GerstnerWave), 32 байта.
+struct GerstnerWave {
+    float2 dir;
+    float wavelength;
+    float amplitude;
+    float steepness;
+    float phase;
+    float omega;
+    float _pad;
+};
+
+constant uint SEA_WAVES = 8;
+constant uint WATER_PROBES = 8;
+
+// Параметры моря и прибоя (src/layout.rs, SeaParams), 432 байта.
+struct SeaParams {
+    float sea_level;
+    uint wave_count;
+    float shore_wavelength;
+    float shore_amplitude;
+    float shore_omega;
+    float swash_sand_m;
+    float swash_rock_m;
+    float dry_time_s;
+    uint field_size;
+    float field_step_m;
+    float dt;
+    float _pad;
+    GerstnerWave waves[SEA_WAVES];
+    float4 probe[WATER_PROBES];
+};
+
+// Уровень кольцевой сетки воды (src/layout.rs, WaterLevel), 32 байта.
+struct WaterLevel {
+    float2 origin;
+    float cell;
+    uint morph_edge;
+    float2 inner_min;
+    float2 inner_max;
+};
+
 // Точек на сторону тайла LOD 0 (src/world/mod.rs, TILE_SAMPLES).
 constant uint TILE_SAMPLES = 65;
 

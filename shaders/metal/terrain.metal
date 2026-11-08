@@ -104,7 +104,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float rocky = in.material.w;
     float trail = smoothstep(0.1, 0.6, in.weights.w);
     float moist = in.material.z;
-    float wet_mask = wetness_mask.sample(clamp_s, xz / frame.map_size_m).r;
+    // Маска непрерывная: smoothstep даёт гладкую границу мокрого песка.
+    float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(clamp_s, xz / frame.map_size_m).r);
 
     if (frame.view_mode == VIEW_RAW) {
         float3 w = in.weights.xyz;
@@ -178,10 +179,6 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     albedo *= mix(1.0, 0.4, wet);
     rough = mix(rough, 0.08, 0.9 * wet);
 
-    // Под водой — тёмное дно (воду нарисует этап 03.1).
-    if (in.world.y < 0.0) {
-        albedo *= mix(float3(0.6, 0.75, 0.85), float3(0.25, 0.35, 0.5), saturate(-in.world.y / 6.0));
-    }
 
     // Нормаль из карты: касательная +X, бикасательная −Z (v растёт с z, а «вверх» на картинке — к меньшим v).
     float3 t = normalize(float3(1, 0, 0) - n * n.x);

@@ -23,6 +23,10 @@ pub struct Pipelines {
     pub scene: Obj<dyn MTLRenderPipelineState>,
     pub tonemap: Obj<dyn MTLRenderPipelineState>,
     pub terrain: Obj<dyn MTLRenderPipelineState>,
+    /// Вода: dual-source смешивание `dst × пропускание + цвет`.
+    pub water: Obj<dyn MTLRenderPipelineState>,
+    pub wet_sand: Obj<dyn MTLComputePipelineState>,
+    pub water_probe: Obj<dyn MTLComputePipelineState>,
     /// Счётчик поколений для диагностики после перезагрузки.
     pub generation: u32,
 }
@@ -79,13 +83,32 @@ fn read_source(dir: &Path, file: &str, over: SourceOverride) -> Result<String, S
         Some((name, text)) if name == file => text.to_string(),
         _ => std::fs::read_to_string(dir.join(file)).map_err(|e| err("read", e.to_string()))?,
     };
-    let common = std::fs::read_to_string(dir.join("common.h")).map_err(|e| ShaderError {
-        file: "common.h".into(),
-        stage: "read",
-        message: e.to_string(),
-    })?;
-    // Metal API не знает путей проекта, поэтому общий заголовок подставляем сами.
-    Ok(text.replace("#include \"common.h\"", &common))
+    expand_includes(dir, &text, 0)
+}
+
+/// Metal API не знает путей проекта, поэтому `#include "файл.h"` из каталога
+/// шейдеров подставляем сами, рекурсивно и не больше одного раза на файл.
+fn expand_includes(dir: &Path, text: &str, depth: u32) -> Result<String, ShaderError> {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let name = line
+            .trim()
+            .strip_prefix("#include \"")
+            .and_then(|r| r.strip_suffix('"'));
+        match name {
+            Some(name) if depth < 4 => {
+                let inc = std::fs::read_to_string(dir.join(name)).map_err(|e| ShaderError {
+                    file: name.to_string(),
+                    stage: "read",
+                    message: e.to_string(),
+                })?;
+                out.push_str(&expand_includes(dir, &inc, depth + 1)?);
+            }
+            _ => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 fn compile_library(
@@ -156,9 +179,9 @@ fn render_pipeline(
     lib: &ProtocolObject<dyn MTLLibrary>,
     file: &str,
     label: &str,
-    vs: &str,
-    fs: &str,
+    (vs, fs): (&str, &str),
     color_format: MTLPixelFormat,
+    transmit_blend: bool,
 ) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
     require_function(lib, file, vs)?;
     require_function(lib, file, fs)?;
@@ -168,6 +191,16 @@ fn render_pipeline(
     desc.setFragmentFunctionDescriptor(Some(&function(lib, fs)));
     let color = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
     color.setPixelFormat(color_format);
+    if transmit_blend {
+        // Прозрачная вода: результат = цвет (index 0) + dst × пропускание (index 1).
+        color.setBlendingState(MTL4BlendState::Enabled);
+        color.setSourceRGBBlendFactor(MTLBlendFactor::One);
+        color.setDestinationRGBBlendFactor(MTLBlendFactor::Source1Color);
+        color.setRgbBlendOperation(MTLBlendOperation::Add);
+        color.setSourceAlphaBlendFactor(MTLBlendFactor::Zero);
+        color.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
+        color.setAlphaBlendOperation(MTLBlendOperation::Add);
+    }
     compiler
         .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
         .map_err(|e| ShaderError {
@@ -190,6 +223,7 @@ pub fn build_pipelines(
     let scene_lib = compile_library(device, dir, "scene.metal", over)?;
     let tonemap_lib = compile_library(device, dir, "tonemap.metal", over)?;
     let terrain_lib = compile_library(device, dir, "terrain.metal", over)?;
+    let water_lib = compile_library(device, dir, "water.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -198,28 +232,39 @@ pub fn build_pipelines(
             &scene_lib,
             "scene.metal",
             "scene",
-            "scene_vs",
-            "scene_fs",
+            ("scene_vs", "scene_fs"),
             HDR_FORMAT,
+            false,
         )?,
         tonemap: render_pipeline(
             compiler,
             &tonemap_lib,
             "tonemap.metal",
             "tonemap",
-            "tonemap_vs",
-            "tonemap_fs",
+            ("tonemap_vs", "tonemap_fs"),
             DRAWABLE_FORMAT,
+            false,
         )?,
         terrain: render_pipeline(
             compiler,
             &terrain_lib,
             "terrain.metal",
             "terrain",
-            "terrain_vs",
-            "terrain_fs",
+            ("terrain_vs", "terrain_fs"),
             HDR_FORMAT,
+            false,
         )?,
+        water: render_pipeline(
+            compiler,
+            &water_lib,
+            "water.metal",
+            "water",
+            ("water_vs", "water_fs"),
+            HDR_FORMAT,
+            true,
+        )?,
+        wet_sand: compute_pipeline(compiler, &water_lib, "water.metal", "wet_sand_update")?,
+        water_probe: compute_pipeline(compiler, &water_lib, "water.metal", "water_probe")?,
         generation,
     })
 }

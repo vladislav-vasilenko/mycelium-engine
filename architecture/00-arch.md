@@ -669,6 +669,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 08.6 · Водосборы, дельты изменений, «Дыхание пустыни» | — | Не начато |
 | 02.5 · Видимые списки, indirect, импосторы | — | Не начато |
 | 02.6 · Hi-Z, двухпроходное отсечение, occlusion queries | — | Не начато |
+| 02.7 · Импорт Якусимы: данные и лицензии, весь остров 30 м, реки по стоку, пояса, игровая зона 1 м | — | Не начато; рельеф Copernicus проверен вне проекта (503 км², 1927 м) |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
 | 10.2–10.5 · glTF и скиннинг, проход `viewmodel`, движение, кожа и волосы | — | Не начато |
 | 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs`, `plan_after` | Выполнено, включая смену состава проходов между кадрами; стадия indirect — в 02 |
@@ -987,3 +988,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-08 | 03.1 | после `bd4aac5` | AD-39, AD-40: модуль `water`, `water.h`, `water.metal`, `GerstnerWave`/`SeaParams`/`WaterLevel` (+5 полей `layout_probe`, 24), upload 8192 Б, проход `wet_sand` и `RES_WETNESS`, таблицы слота 8, `Renderer::set_water`, `WaterFrame`, `WaterGpu`, `water_depth_state`, `sampled_texture_usage`, маска мокрого песка R16Float (тестовая маска, `set_wetness`, клавиша K и `--wet-test` удалены), `Readback.water_probe`, `expand_includes`, `render_pipeline(…, (vs, fs), …, transmit_blend)`, время мира от тиков, виды `water-depth`/`water-dir`/`surf`, `sample_water` в заголовке, самопроверка 20 проверок; правило размера файлов в AGENTS.md |
 | 2026-11-08 | 03.1 | после `a32a1e9` | AD-41: рефакторинг без изменения поведения — `src/renderer/` (`device`, `resources`, `frame`, `readback`, `targets`, `terrain`, `water`, `passes/` с трейтом `FramePass` и реестром), `src/app/` (`args`, `cameras`, `input`, `frame`, `title`, `setup`, `handler`, `selftest/`), `src/main.rs` — точка входа; `sim.rs` → `sim/mod.rs` + `sim/tests.rs`, тесты `world` и `world::layers` в отдельных файлах. Самый большой файл — 496 строк |
 | 2026-11-08 | 11, 12, 13 | после `4a71665` | Спецификации: 11 «Глобальное освещение», 12 «Звук», 13 «Физика» как ветки; таблица соответствия дополнена. Код не менялся |
+| 2026-11-14 | 02.7 | после `7ae05e0` | Спецификация 02.7 «Импорт реального рельефа: Якусима»: источники и лицензии, два уровня мира (остров 30 м и зона 1 м), сток, пояса, планируемые изменения контракта 02.1. Код не менялся |

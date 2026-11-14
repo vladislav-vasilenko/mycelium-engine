@@ -80,6 +80,9 @@ pub struct Manifest {
     /// Пояса растительности (02.7), необязательный.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<cover::CoverMeta>,
+    /// Крупная детализация (02.9, `tools/geo/macro.py`), необязательная.
+    #[serde(rename = "macro", default, skip_serializing_if = "Option::is_none")]
+    pub macro_detail: Option<cover::CoverMeta>,
     /// Игровая зона ~1 м внутри поля высот (02.7, шаг 5), необязательная.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_zone: Option<fine::HeightZoneMeta>,
@@ -364,6 +367,12 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         geo: world.geo.clone(),
         height_fine: fine::export(dir, &world.heightfield, nx, h_range)?,
         cover: cover::export(dir, &world.cover)?,
+        macro_detail: cover::export_as(
+            dir,
+            &world.macro_detail,
+            "macro.png",
+            "R видимость неба, G кривизна (0,5 ровно), B влажность, A осыпь",
+        )?,
         // Зона пока только импортируется: экспорт пишет поле острова (02.7, шаг 5).
         height_zone: None,
         features,
@@ -515,6 +524,9 @@ pub fn import(dir: &Path) -> Result<World, String> {
     }
     if let Some(meta) = &m.cover {
         world.cover = Some(cover::import(dir, meta)?);
+    }
+    if let Some(meta) = &m.macro_detail {
+        world.macro_detail = Some(cover::import(dir, meta)?);
     }
     if let Some(meta) = &m.height_fine {
         world.heightfield = fine::import(dir, meta, m.height_range_m, world.size_m().x)?;

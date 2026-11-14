@@ -190,10 +190,14 @@ pub struct World {
     pub cover: Option<CoverLayer>,
     /// Игровая зона с рельефом ~1 м внутри поля острова (02.7, шаг 5).
     pub zone: Option<zone::ZoneField>,
+    /// Крупная детализация (`macro.png`, 02.9): видимость неба, кривизна,
+    /// влажность, осыпь — RGBA на сетке поля высот, если есть.
+    pub macro_detail: Option<CoverLayer>,
 }
 
-/// Пояса растительности на квадратной сетке на всю карту: RGBA, сумма 255 на
-/// суше (низинный лес, кедровый лес, якудзаса и луга, гранит и застройка).
+/// Слой RGBA8 на квадратной сетке на всю карту, узел — тексель. Пояса
+/// растительности (`cover.png`): сумма 255 на суше (низинный лес, кедровый
+/// лес, якудзаса и луга, гранит и застройка); тот же тип — у `macro.png`.
 #[derive(Clone, Debug)]
 pub struct CoverLayer {
     pub size: u32,
@@ -332,6 +336,7 @@ impl World {
             fields: grid.fields,
             features: None,
             cover: None,
+            macro_detail: None,
             zone: None,
         };
         world.markers = match markers {

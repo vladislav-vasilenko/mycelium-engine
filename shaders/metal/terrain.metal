@@ -192,6 +192,7 @@ constant uint VIEW_WETNESS = 6;
 constant uint VIEW_MATERIALS = 7;
 constant uint VIEW_CLUSTERS = 11;
 constant uint VIEW_LEVELS = 12;
+constant uint VIEW_MACRO = 14;
 constant uint VIEW_COVER = 13;
 constant uint VIEW_RAW = 15;
 
@@ -204,10 +205,8 @@ struct MatSample {
 
 // Выборка слоя по мировым XZ с подавлением повторов: вторая выборка в
 // повёрнутых и растянутых координатах, доля — из крупного шума.
-inline MatSample sample_layer(texture2d_array<float> albedo, texture2d_array<float> normal,
-                              sampler s, int layer, constant FrameUniforms& frame,
-                              float2 local_xz, float mixk) {
-    float2 uv = pattern_uv(frame, local_xz, MAT_TILE_M[layer]);
+inline MatSample sample_layer_uv(texture2d_array<float> albedo, texture2d_array<float> normal,
+                                 sampler s, int layer, float2 uv, float mixk) {
     float2 uv2 = float2(0.8 * uv.x - 0.6 * uv.y, 0.6 * uv.x + 0.8 * uv.y) * 0.43 + 0.37;
     float4 a = mix(albedo.sample(s, uv, layer), albedo.sample(s, uv2, layer), mixk);
     float4 n = mix(normal.sample(s, uv, layer), normal.sample(s, uv2, layer), mixk);
@@ -216,6 +215,32 @@ inline MatSample sample_layer(texture2d_array<float> albedo, texture2d_array<flo
     m.height = a.a;
     m.nxy = n.rg * 2.0 - 1.0;
     m.rough = n.b;
+    return m;
+}
+
+inline MatSample sample_layer(texture2d_array<float> albedo, texture2d_array<float> normal,
+                              sampler s, int layer, constant FrameUniforms& frame,
+                              float2 local_xz, float mixk) {
+    return sample_layer_uv(albedo, normal, s, layer, pattern_uv(frame, local_xz, MAT_TILE_M[layer]), mixk);
+}
+
+// Стены (02.9): три проекции по осям с весами |n|⁴ — текстура не тянется по
+// склону. Нормаль карты берётся только из верхней проекции.
+inline MatSample sample_layer_triplanar(texture2d_array<float> albedo, texture2d_array<float> normal,
+                                        sampler s, int layer, constant FrameUniforms& frame,
+                                        float3 local, float3 n, float mixk) {
+    float p = MAT_TILE_M[layer];
+    float3 o = fract(frame.cam_hi.xyz / p);
+    float3 w = pow(abs(n), 4.0);
+    w /= w.x + w.y + w.z;
+    MatSample top = sample_layer_uv(albedo, normal, s, layer, o.xz + local.xz / p, mixk);
+    MatSample sx = sample_layer_uv(albedo, normal, s, layer, o.zy + local.zy / p, mixk);
+    MatSample sz = sample_layer_uv(albedo, normal, s, layer, o.xy + local.xy / p, mixk);
+    MatSample m;
+    m.albedo = top.albedo * w.y + sx.albedo * w.x + sz.albedo * w.z;
+    m.height = top.height * w.y + sx.height * w.x + sz.height * w.z;
+    m.rough = top.rough * w.y + sx.rough * w.x + sz.rough * w.z;
+    m.nxy = top.nxy * w.y;
     return m;
 }
 
@@ -236,7 +261,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            device const SkyFrame& skyf [[buffer(9)]],
                            constant ShadowUniforms& shadows [[buffer(12)]],
                            depth2d_array<float> shadow_map [[texture(7)]],
-                           texture3d<float> aerial [[texture(8)]]) {
+                           texture3d<float> aerial [[texture(8)]],
+                           texture2d<float> macro_tex [[texture(9)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -265,6 +291,16 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float moist = in.material.z;
     // Маска непрерывная: smoothstep даёт гладкую границу мокрого песка.
     float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(clamp_s, xz / frame.map_size_m).r);
+    // Крупная детализация (02.9): тексель — узел поля высот острова.
+    float mn = float(macro_tex.get_width());
+    float4 mc = macro_tex.sample(clamp_s, (xz / frame.map_size_m * (mn - 1.0) + 0.5) / mn);
+    float sky_vis = mc.r;
+    float curv = mc.g - 0.5;              // < 0 — впадина, > 0 — гребень
+    float hollow = saturate(-curv * 2.5);
+    float ridge = saturate(curv * 2.5);
+    float damp = mc.b;
+    float scree = mc.a;
+    float north = saturate(-n.z * 1.5);   // склон к северу (ось z — на юг)
 
     if (frame.view_mode == VIEW_RAW) {
         float3 w = in.weights.xyz;
@@ -292,6 +328,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         wl[MAT_SOIL] = in.weights.y * 0.4 + forest_w * cv.w * (1.0 - high);
         wl[MAT_SAND] = in.weights.z * (1.0 - rocky);
         wl[MAT_ROCK] = in.weights.z * rocky + forest_w * cv.w * high;
+        // 02.9: во впадинах, вдоль стока и на северных склонах мох гуще,
+        // на гребнях суше — почва и трава.
+        float mossk = saturate(0.5 * hollow + 0.6 * damp + 0.35 * north);
+        wl[MAT_MOSS] += forest_w * (cv.x + cv.y) * mossk * 0.8;
+        wl[MAT_FOREST] *= 1.0 - 0.5 * mossk;
+        wl[MAT_SOIL] += forest_w * ridge * 0.25 * (cv.x + cv.z);
+        wl[MAT_GRASS] += forest_w * ridge * 0.2 * cv.z;
     } else {
         wl[MAT_FOREST] = in.weights.x * (1.0 - 0.6 * moist);
         wl[MAT_MOSS] = in.weights.x * 0.6 * moist + in.weights.y * 0.6;
@@ -313,7 +356,11 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     over[MAT_ROCK] += 0.7 * river + steep * (1.0 - mossy) + under * rocky + 0.6 * road_px;
     over[MAT_MOSS] += steep * mossy;
     over[MAT_SAND] += 0.3 * river + under * (1.0 - rocky);
-    float cover_sum = trail + road_px + river + steep + under;
+    // Осыпи под обрывами (02.9): камень с почвой, под лесом — реже.
+    float scree_k = scree * (1.0 - 0.7 * mossy) * (1.0 - under);
+    over[MAT_ROCK] += 0.55 * scree_k;
+    over[MAT_SOIL] += 0.45 * scree_k;
+    float cover_sum = trail + road_px + river + steep + under + scree_k;
     float cover = saturate(cover_sum);
     float total = 0.0;
     for (int i = 0; i < MAT_COUNT; ++i) {
@@ -325,10 +372,14 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float mixk = 0.3 + 0.4 * detail.sample(s, pattern_uv(frame, lxz, 41.0)).g;
     MatSample ms[MAT_COUNT];
     float best = -1.0;
+    float wall = smoothstep(35.0, 55.0, slope_deg);
+    float3 local = in.rel + frame.cam_lo.xyz;
     for (int i = 0; i < MAT_COUNT; ++i) {
         wl[i] /= max(total, 1e-4);
         if (wl[i] > 0.01) {
-            ms[i] = sample_layer(mat_albedo, mat_normal, s, i, frame, lxz, mixk);
+            ms[i] = (i == MAT_ROCK && wall > 0.01)
+                ? sample_layer_triplanar(mat_albedo, mat_normal, s, i, frame, local, n, mixk)
+                : sample_layer(mat_albedo, mat_normal, s, i, frame, lxz, mixk);
             best = max(best, wl[i] + 0.5 * ms[i].height);
         }
     }
@@ -356,6 +407,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Крупная вариация тона, чтобы поле не выглядело одной плиткой.
     float macro = detail.sample(s, pattern_uv(frame, lxz, 23.0)).g;
     albedo *= 0.85 + 0.3 * macro;
+    // 02.9: впадины и мокрые ложбины темнее, гребни светлее; осыпи светлые.
+    albedo *= (1.0 + 0.5 * min(curv, 0.0) + 0.2 * max(curv, 0.0)) * (1.0 - 0.3 * damp) * (1.0 + 0.35 * scree_k);
     // Влажная почва торфяника темнее.
     albedo *= 1.0 - 0.3 * moist * in.weights.y;
 
@@ -379,6 +432,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float3 crown = mix(float3(0.050, 0.090, 0.030), float3(0.026, 0.052, 0.030),
                            cv.y / max(cv.x + cv.y, 1e-4));
         crown *= 0.7 + 0.6 * detail.sample(s, pattern_uv(frame, lxz, 31.0)).g;
+        // 02.9: кроны в ложбинах гуще и темнее, на гребнях светлее и желтее.
+        crown *= (1.0 + 0.6 * min(curv, 0.0) * 2.0 + 0.4 * max(curv, 0.0)) * (1.0 - 0.3 * damp);
+        crown = mix(crown, crown * float3(1.15, 1.05, 0.8), ridge * 0.4);
         // Якудзаса вдали — ровная светлая зелень.
         float3 bamboo = float3(0.10, 0.14, 0.05);
         float k_tree = tree * far_k * 0.92;
@@ -409,6 +465,14 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                          : float3(0.1, 0.2, 0.5);
         float shade = 0.35 + 0.65 * saturate(dot(n, -frame.light_dir.xyz));
         return float4(c * shade, 1.0);
+    }
+    if (frame.view_mode == VIEW_MACRO) {
+        // 02.9: синий — впадины, охра — гребни, зелёный — влажность, белый —
+        // осыпь; яркость — видимость неба.
+        float3 c = mix(float3(0.15, 0.25, 0.6), float3(0.9, 0.75, 0.4), saturate(0.5 + curv * 2.0));
+        c = mix(c, float3(0.1, 0.6, 0.2), damp * 0.7);
+        c = mix(c, float3(1.0), scree * 0.8);
+        return float4(c * sky_vis * sky_vis, 1.0);
     }
     if (frame.view_mode == VIEW_CLUSTERS || frame.view_mode == VIEW_LEVELS) {
         // Кластеры — случайный цвет по номеру, уровни — от синего (0) к красному.
@@ -477,8 +541,12 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float spec = D * G * F / (4.0 * nv + 1e-4);
     // Тень от светила (04.2): каскады вокруг камеры и карта всего острова.
     float shadow = shadow_factor(shadows, shadow_map, in.rel, normalize(in.normal), L);
-    float3 sun = sky_sun_term(skyf) * shadow;
-    float3 sky = sky_ambient_term(skyf, N);
+    // Мелкие складки, которые карта теней (21 м на тексель вдали) не ловит,
+    // гасят и часть прямого света (02.9).
+    float3 sun = sky_sun_term(skyf) * shadow * mix(1.0, sky_vis * (1.0 - 0.4 * hollow), 0.6);
+    // Затенение рельефом (02.9): дно ущелий видит мало неба.
+    float occ = sky_vis * sky_vis * sky_vis * (1.0 - 0.6 * hollow);
+    float3 sky = sky_ambient_term(skyf, N) * occ;
     // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
     float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);
     // Блик — физический: BRDF × освещённость (π · «солнце»).

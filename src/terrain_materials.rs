@@ -190,12 +190,14 @@ pub enum TerrainView {
     Levels = 12,
     /// Пояса растительности (02.7): лес низин, кедровый лес, якудзаса, гранит.
     Cover = 13,
+    /// Крупная детализация (02.9): видимость неба, кривизна, влажность, осыпь.
+    Macro = 14,
     /// HDR = (высота над камерой м, уклон градусы, индекс доминирующего биома, тип берега).
     Raw = 15,
 }
 
 impl TerrainView {
-    const CYCLE: [TerrainView; 14] = [
+    const CYCLE: [TerrainView; 15] = [
         TerrainView::Lit,
         TerrainView::Height,
         TerrainView::Slope,
@@ -210,6 +212,7 @@ impl TerrainView {
         TerrainView::Clusters,
         TerrainView::Levels,
         TerrainView::Cover,
+        TerrainView::Macro,
     ];
 
     /// Следующий вид по клавише V (`back` — Shift+V).
@@ -236,6 +239,7 @@ impl TerrainView {
             "clusters" => TerrainView::Clusters,
             "levels" => TerrainView::Levels,
             "cover" => TerrainView::Cover,
+            "macro" => TerrainView::Macro,
             _ => return None,
         })
     }
@@ -256,6 +260,7 @@ impl TerrainView {
             TerrainView::Clusters => "кластеры",
             TerrainView::Levels => "уровни кластеров",
             TerrainView::Cover => "пояса растительности",
+            TerrainView::Macro => "крупная детализация",
             TerrainView::Raw => "числа (самопроверка)",
         }
     }

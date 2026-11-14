@@ -274,3 +274,43 @@ fn heightfield_matches_tiles() {
         }
     }
 }
+
+/// Крупная детализация (02.9): на вершине Мияноура небо открыто и там гребень,
+/// вдоль рек OSM — впадины, влажно и неба меньше, чем на вершине.
+#[test]
+fn yakushima_macro_masks_follow_relief() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/world/yakushima/far");
+    let w = super::layers::import(&dir).expect("мир Якусимы");
+    let m = w.macro_detail.as_ref().expect("macro.png");
+    let size = w.size_m().x;
+    let peak = w
+        .markers
+        .iter()
+        .find(|m| m.name.starts_with("гора"))
+        .unwrap()
+        .position;
+    let pk = m.at(peak.x, peak.z, size);
+    assert!(pk[0] > 0.9, "небо на вершине {pk:?}");
+    assert!(pk[1] > 0.5, "вершина не гребень {pk:?}");
+    let f = w.features.as_ref().unwrap();
+    let (mut n, mut curv, mut damp, mut sky) = (0.0f32, 0.0, 0.0, 0.0);
+    for s in f
+        .segments
+        .iter()
+        .filter(|s| s.kind == super::features::KIND_RIVER)
+    {
+        let (x, z) = ((s.a[0] + s.b[0]) * 0.5, (s.a[1] + s.b[1]) * 0.5);
+        if w.sample_ground(x, z).is_some_and(|g| g.height > 50.0) {
+            let v = m.at(x, z, size);
+            curv += v[1];
+            damp += v[2];
+            sky += v[0];
+            n += 1.0;
+        }
+    }
+    assert!(n > 100.0, "мало отрезков рек: {n}");
+    let (curv, damp, sky) = (curv / n, damp / n, sky / n);
+    assert!(curv < 0.45, "реки не во впадинах: кривизна {curv}");
+    assert!(damp > 0.4, "у рек сухо: {damp}");
+    assert!(sky < pk[0] - 0.03, "у рек неба {sky}, на вершине {}", pk[0]);
+}

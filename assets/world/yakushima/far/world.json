@@ -109,5 +109,10 @@
       "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0",
       "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)"
     ]
+  },
+  "macro": {
+    "file": "macro.png",
+    "size": 4097,
+    "channels": "R видимость неба, G кривизна (0,5 ровно), B влажность, A осыпь"
   }
 }

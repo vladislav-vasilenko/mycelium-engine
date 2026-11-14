@@ -82,7 +82,9 @@ fn aerial_texture(device: &ProtocolObject<dyn MTLDevice>) -> Obj<dyn MTLTexture>
     let tex = device
         .newTextureWithDescriptor(&desc)
         .expect("не удалось создать LUT воздушной перспективы");
-    tex.setLabel(Some(&super::resources::label("sky: aerial perspective LUT (3D)")));
+    tex.setLabel(Some(&super::resources::label(
+        "sky: aerial perspective LUT (3D)",
+    )));
     tex
 }
 

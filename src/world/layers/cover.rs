@@ -34,19 +34,33 @@ pub fn import(dir: &Path, meta: &CoverMeta) -> Result<CoverLayer, String> {
 
 /// Переносит слой при экспорте без изменений: он не выводится из полей сетки.
 pub fn export(dir: &Path, cover: &Option<CoverLayer>) -> Result<Option<CoverMeta>, String> {
-    let Some(c) = cover else { return Ok(None) };
+    export_as(
+        dir,
+        cover,
+        "cover.png",
+        "R низинный лес, G кедровый лес якусуги, B якудзаса и луга, A гранит и застройка",
+    )
+}
+
+/// Любой слой RGBA8 на всю карту (пояса, `macro.png` 02.9) — без изменений.
+pub fn export_as(
+    dir: &Path,
+    layer: &Option<CoverLayer>,
+    file: &str,
+    channels: &str,
+) -> Result<Option<CoverMeta>, String> {
+    let Some(c) = layer else { return Ok(None) };
     let n = c.size as usize;
     write_png(
-        &dir.join("cover.png"),
+        &dir.join(file),
         (n, n),
         png::ColorType::Rgba,
         png::BitDepth::Eight,
         &c.rgba,
     )?;
     Ok(Some(CoverMeta {
-        file: "cover.png".into(),
+        file: file.into(),
         size: c.size,
-        channels: "R низинный лес, G кедровый лес якусуги, B якудзаса и луга, A гранит и застройка"
-            .into(),
+        channels: channels.into(),
     }))
 }

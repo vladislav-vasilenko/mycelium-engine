@@ -83,6 +83,11 @@ impl App {
             weights_rgba: &weights_rgba,
             material_rgba: &material_rgba,
             cover: self.world.cover.as_ref().map(|c| (&c.rgba[..], c.size)),
+            macro_detail: self
+                .world
+                .macro_detail
+                .as_ref()
+                .map(|c| (&c.rgba[..], c.size)),
             zone: self.world.zone.as_ref().map(|z| {
                 let o = z.origin(&self.world.heightfield);
                 (

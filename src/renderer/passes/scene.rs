@@ -106,6 +106,14 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
         table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
+        // Крупная детализация (02.9) — из кластеров; без них — любая текстура
+        // (тайлы без кластеров — только отладка).
+        let macro_tex = ctx
+            .r
+            .clusters
+            .as_ref()
+            .map_or(&terrain.detail, |c| &c.macro_detail);
+        table.setTexture_atIndex(macro_tex.gpuResourceID(), 9);
     }
     enc.pushDebugGroup(&label(&format!("terrain: {} tiles", terrain.tile_count)));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain);
@@ -160,6 +168,7 @@ fn draw_clusters(
         table.setTexture_atIndex(c.weights.gpuResourceID(), 4);
         table.setTexture_atIndex(c.material.gpuResourceID(), 5);
         table.setTexture_atIndex(c.cover.gpuResourceID(), 6);
+        table.setTexture_atIndex(c.macro_detail.gpuResourceID(), 9);
     }
     enc.pushDebugGroup(&label(&format!("terrain: {count} clusters")));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain_clusters);

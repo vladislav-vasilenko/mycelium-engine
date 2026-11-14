@@ -15,9 +15,9 @@ constant float MIE_ABS = 4.40e-3;
 constant float MIE_H = 1.2;
 constant float MIE_G = 0.8;
 constant float3 OZONE_ABS = float3(0.650, 1.881, 0.085) * 1e-3;
-// Влажная дымка нижнего слоя (04.2): субтропический остров, видимость ~70 км.
+// Влажная дымка нижнего слоя (04.2): субтропический остров, видимость ~100 км.
 // Рассеяние как у Ми, высота однородной атмосферы 0,8 км.
-constant float HAZE_SCAT = 0.03;
+constant float HAZE_SCAT = 0.018;
 constant float HAZE_ABS = 0.004;
 constant float HAZE_H = 0.8;
 constant float3 GROUND_ALBEDO = float3(0.1);

@@ -25,6 +25,9 @@ pub(super) struct ClustersGpu {
     pub material: Obj<dyn MTLTexture>,
     /// Пояса растительности RGBA8 (02.7); без слоя — 1 × 1 нулей.
     pub cover: Obj<dyn MTLTexture>,
+    /// Крупная детализация RGBA8 (02.9); без слоя — 1 × 1 нейтральный
+    /// (небо открыто, ровно, сухо, без осыпи).
+    pub macro_detail: Obj<dyn MTLTexture>,
     /// Игровая зона: высоты и параметры (`TerrainZone`); без зоны — заглушки.
     pub zone_heights: Obj<dyn MTLBuffer>,
     pub zone_info: Obj<dyn MTLBuffer>,
@@ -42,6 +45,8 @@ pub struct ClusterData<'a> {
     pub material_rgba: &'a [u8],
     /// Пояса растительности: RGBA8 и сторона, если есть.
     pub cover: Option<(&'a [u8], u32)>,
+    /// Крупная детализация (02.9): RGBA8 и сторона, если есть.
+    pub macro_detail: Option<(&'a [u8], u32)>,
     /// Игровая зона: высоты (n²) и параметры, если есть.
     pub zone: Option<(&'a [f32], crate::layout::TerrainZone)>,
 }
@@ -97,6 +102,16 @@ impl Renderer {
             false,
             "terrain layer: vegetation belts",
         )?;
+        let neutral = [255u8, 128, 0, 0];
+        let (macro_rgba, macro_size) = d.macro_detail.unwrap_or((&neutral, 1));
+        let macro_detail = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm,
+            macro_size,
+            1,
+            false,
+            "terrain layer: macro detail (sky, curvature, moisture, scree)",
+        )?;
         let weights = layer("terrain layer: biome weights")?;
         let material = layer("terrain layer: material")?;
         self.upload_textures(&[
@@ -118,6 +133,12 @@ impl Renderer {
                 pixel_bytes: 4,
                 mips: false,
             },
+            TextureUpload {
+                texture: &macro_detail,
+                data: macro_rgba,
+                pixel_bytes: 4,
+                mips: false,
+            },
         ])?;
         if let Some(old) = self.clusters.replace(ClustersGpu {
             heights,
@@ -127,11 +148,12 @@ impl Renderer {
             weights,
             material,
             cover,
+            macro_detail,
             zone_heights,
             zone_info,
         }) {
             self.retire(
-                vec![old.weights, old.material, old.cover],
+                vec![old.weights, old.material, old.cover, old.macro_detail],
                 Some(Box::new((
                     old.heights,
                     old.clusters,

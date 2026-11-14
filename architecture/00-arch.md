@@ -552,9 +552,18 @@ sequenceDiagram
 | `src/app/shadows.rs` | `CASCADE_RADII_M` = [30, 150, 800], `light_view_proj(center, radius, to_light) -> DMat4` (орто-камера света в f64, центр привязан к сетке текселей в осях света, глубина ±(R + 4000 м)), `shadow_frame(set, camera, map_size_m, to_light, budget, visible, scratch) -> Option<ShadowFrame>` (каскады 0–2 вокруг камеры, 3 — весь остров с центром карты; `vp_rel = vp · translate(камера)`; срез кластеров `View::ortho` с порогом 1 тексель; `None`, если светило под горизонтом) |
 | `src/renderer/shadows.rs` | `CASCADES` = 4, `SHADOW_SIZE` = 2048, `ShadowFrame { uniforms: ShadowUniforms, ranges: [(u32, u32); 4] }`, `ShadowGpu { map (Depth32Float, 2D-массив × 4, Private), depth_state (LessEqual, запись) }`, `ShadowGpu::new` |
 | `passes/shadows.rs` | `ShadowsPass`: на каскад — кодировщик с очисткой слоя (1,0), таблица `shadow` (буферы как у кластеров + `buffer(12)` матрица каскада), конвейер `terrain_shadow` (только вершины), смещение глубины по наклону 1,5 (clamp 0,01), без отсечения граней |
-| `sky.h`, `sky.metal` (04.2) | влажная дымка в `medium_at` (`HAZE_SCAT` 0,03 км⁻¹, `HAZE_ABS`, `HAZE_H` 0,8 км — во всех LUT неба); `AERIAL_SIZE`, `AERIAL_KM` = 40, `aerial_at(lut, frame, rel) -> float4` (экранные uv по `view_proj_rel`, слой ∝ √дальности, доля первого слоя у камеры), `apply_aerial`; ядро `sky_aerial_lut` (солнце и луна, тень планеты, 2 подшага на слой); рельеф — `texture(8)`, вода — `texture(3)`: цвет·T + рассеяние (у воды — в закрываемой доле) |
+| `sky.h`, `sky.metal` (04.2) | влажная дымка в `medium_at` (`HAZE_SCAT` 0,018 км⁻¹, `HAZE_ABS`, `HAZE_H` 0,8 км — во всех LUT неба); `AERIAL_SIZE`, `AERIAL_KM` = 40, `aerial_at(lut, frame, rel) -> float4` (экранные uv по `view_proj_rel`, слой ∝ √дальности, доля первого слоя у камеры), `apply_aerial`; ядро `sky_aerial_lut` (солнце и луна, тень планеты, 2 подшага на слой); рельеф — `texture(8)`, вода — `texture(3)`: цвет·T + рассеяние (у воды — в закрываемой доле) |
 | `terrain_clusters/select.rs` | `View.ortho`, `View::ortho(view_proj, texels_per_m, threshold_texels)`: ошибка в текселях без деления на расстояние, плоскости из строк орто-матрицы (ближняя z ≥ 0, дальняя z ≤ w); обход иерархии отсекает узлы по сфере (`sphere_visible`) |
 | `shaders/metal/terrain.metal`, `sky.h` | `node_position` (общая позиция и нормаль узла для кластеров и теней), `terrain_shadow_vs`; `shadow_factor(sh, map, rel, n, to_light)`: каскад по расстоянию до камеры, смещение по нормали (1,5–3,5 текселя) и к свету (0,5), PCF 3 × 3 по `sample_compare` с билинейной фильтрацией; множитель солнечного члена в `terrain_fs` |
+
+### 4.9h. Крупная детализация рельефа (02.9)
+
+| Файл | Элементы |
+| --- | --- |
+| `tools/geo/macro.py` | `macro.png` RGBA8 на сетке `height_fine` (4097², 7,5 м): R — видимость неба (16 азимутов до 2 км, косинусно-взвешенная, относительно касательной плоскости), G — кривизна (лапласиан гаусса 15 и 60 м, 0,5 — ровно), B — влажность (log₂ водосбора `flow.png`), A — осыпь (до 60 м ниже склонов круче 45°, на склоне положе 35°); запись `world.json → macro` |
+| `src/world/` | `World.macro_detail: Option<CoverLayer>` (тот же тип, что пояса: `size`, `rgba`, `at`); `LayersMeta.macro_detail` (ключ `macro`); `cover::export_as(dir, layer, file, channels)` |
+| `renderer/terrain_clusters.rs` | `ClusterData.macro_detail`, `ClustersGpu.macro_detail` (без слоя — 1 × 1 нейтральный: небо открыто, ровно, сухо) |
+| `terrain.metal` | `texture(9)` таблицы `terrain` (оба пути; у тайлов без кластеров — любая текстура); в `terrain_fs`: мох во впадинах, вдоль стока и на северных склонах, суше на гребнях; осыпи (камень + почва) поверх; тон по кривизне и влажности; кроны вдали темнее в ложбинах; затенение света неба `sky_vis³ · (1 − 0,6 · впадина)` и части солнца; `sample_layer_uv`, `sample_layer_triplanar` (камень на склонах круче 35–55°); вид `VIEW_MACRO` = 14 |
 
 ### 4.10. Сборка `.app`
 
@@ -609,7 +618,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые, `buffer(10)` высоты зоны, `buffer(11)` `TerrainZone`; `buffer(12)` `ShadowUniforms`; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса, `texture(7)` карта теней (`depth2d_array`), `texture(8)` воздушная перспектива (`texture3d`) | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые, `buffer(10)` высоты зоны, `buffer(11)` `TerrainZone`; `buffer(12)` `ShadowUniforms`; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса, `texture(7)` карта теней (`depth2d_array`), `texture(8)` воздушная перспектива (`texture3d`), `texture(9)` крупная детализация (02.9) | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
 | `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
@@ -742,6 +751,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 04.1 · Время суток, солнце, луна, звёзды, атмосфера, свет неба, экспозиция, управление временем | `src/sky/`, `app/sky.rs`, `renderer/sky.rs`, `sky_lut`, `exposure`, `sky.metal`, `stars.bin` | Частично (AD-51): нет текстуры луны, консоли, GPU-замера |
+| 02.9 · Крупная детализация: маски, свет, цвет, стены | `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `texture(9)`, `sample_layer_triplanar`, вид `macro` | Частично (AD-55): стохастическая выборка плиток не сделана; GPU-замер не снят |
 | 04.2 · п. 1 прямой свет солнца или луны | `sky_sun_term` (04.1), Ламберт + GGX в `terrain_fs` | Выполнено в 04.1 |
 | 04.2 · п. 2 каскадные тени | `app/shadows.rs`, `renderer/shadows.rs`, `passes/shadows.rs`, `View::ortho`, `terrain_shadow_vs`, `shadow_factor` | Частично (AD-53): тени от рельефа; отклонение — каскады 30/150/800 м + весь остров вместо конца на 300–500 м; тени на воде и руках — нет |
 | 04.2 · п. 3 туман по высоте и воздушная перспектива | влажная дымка в `medium_at`, `sky_aerial_lut`, `aerial_at`/`apply_aerial` в рельефе и воде | Выполнено (AD-54); утренний туман в долинах — с погодой 04.3 |
@@ -1150,6 +1160,15 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Нет теней рельефа в дымке (нет световых лучей в ущельях); разрешение 32 × 32 по экрану достаточно для плавной дымки, но не для резких краёв тумана; дымка постоянна — утренний туман в долинах и облака у вершин придут с погодой 04.3.
 - **Пересмотреть.** На 04.3 (плотность дымки и туман долин от погоды, пересчёт статических LUT при её смене) и для объёмного света в лесу.
 
+
+### AD-55. Крупная детализация рельефа — маски, запечённые офлайн по полю высот
+
+- **Решение.** `tools/geo/macro.py` один раз считает по полю 7,5 м видимость неба (горизонт по 16 азимутам до 2 км относительно касательной плоскости), кривизну, влажность по водосбору и осыпи и пишет `macro.png` RGBA8 4097². Шейдер рельефа берёт маску во фрагменте (детализация не теряется на грубых кластерах вдали) и меняет ею долю мха, почвы и травы, тон, цвет крон и свет неба. Камень на стенах круче 35–55° — трёхпроекционно.
+- **Почему.** Изменчивость на 50–500 м и тёмные складки дают объём сверху сильнее, чем мелкая текстура; маски следуют реальному стоку (тест: реки OSM во впадинах и влажно). Офлайн — 50 с на Python, без стоимости в кадре, кроме одной выборки.
+- **Отброшено.** Расчёт на GPU при загрузке — нет PNG в репозитории, но труднее проверить и отладить; маски в вершинном шейдере — на грубых кластерах (сотни метров между вершинами) пропали бы. Экранное SSAO — не видит за краем кадра и шумит на рельефе.
+- **Цена.** +22 МБ PNG; маска живёт на сетке 7,5 м — внутри зоны 1 м мельче не становится; ручные коэффициенты смешивания.
+- **Пересмотреть.** При стриминге 08.1 (маски по тайлам) и с лесом 02.4: те же маски — условия роста.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1206,3 +1225,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.7 | после `f7657b1` | AD-52: игровая зона Сиратани ~1 м — `tools/geo/zone.py`, `gsi.mosaic(keep)`, `height_zone.png`, `world/zone.rs` (`ZoneField`, `combined_mesh`, `CombinedMesh`), `World.zone`, `fine::import_zone`, `terrain_clusters::build_world`/`build_mesh`, ключ кэша `world_key` (версия 2), `TerrainZone` (раскладка 43 поля), высоты зоны в вершинном шейдере кластеров |
 | 2026-11-14 | 04.2 | после `5d2a75e` | AD-53: каскадные тени — `app/shadows.rs`, `renderer/shadows.rs` (`ShadowGpu`, `ShadowFrame`, `CASCADES`, `SHADOW_SIZE`), проход `shadows` и ресурс `RES_SHADOW`, таблица `shadow` (14 таблиц), конвейер `terrain_shadow` (`depth_only_pipeline`), `ShadowUniforms` (304 Б, раскладка 45 полей) в upload @12800 (upload 13 312 Б), `FrameInput.shadows`/`shadow_clusters`, `View::ortho`, отсечение узлов иерархии по сфере, `node_position`, `terrain_shadow_vs`, `shadow_factor`; `buffer(12)` и `texture(7)` таблицы `terrain` |
 | 2026-11-15 | 04.2 | после `26f3618` | AD-54: воздушная перспектива — `SkyGpu.aerial` (3D LUT 32³), `AERIAL_SIZE`, ядро и конвейер `sky_aerial_lut` в `sky_lut`, `aerial_at`/`apply_aerial`, влажная дымка в `medium_at`; рельеф `texture(8)`, вода `texture(3)`; таблицы аргументов до 16 текстур |
+| 2026-11-15 | 02.9 | после `24f8b5a` | AD-55: `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `LayersMeta.macro_detail`, `cover::export_as`, `ClusterData`/`ClustersGpu.macro_detail`, `texture(9)` таблицы `terrain`, маски в `terrain_fs`, `sample_layer_uv`/`sample_layer_triplanar`, `TerrainView::Macro` (14, `--view macro`); дымка `HAZE_SCAT` 0,018 |

@@ -108,3 +108,12 @@ struct HandsUniforms {
 };
 
 constant uint SKIN_PROBES = 8;
+
+// Отрезок объекта карты (src/layout.rs, FeatureSegment), 32 байта.
+struct FeatureSegment {
+    float2 a;
+    float2 b;
+    float half_width;
+    uint kind;          // 0 тропа, 1 река, 2 дорога
+    float2 _pad;
+};

@@ -88,12 +88,12 @@ flowchart LR
 | `BiomeWeights { forest, peat, shore }` | struct | нормированные веса |
 | `Sample` | struct | `height`, `normal`, `moisture`, `temperature`, `substrate`, `weights`, `trail`, `river`, `rocky` (в `TerrainVertex.material[3]`) |
 | `Tile` | struct | `id`, `world_seed`, `generator_version`, `samples` (65 × 65, строки по z); `at(i, j)` |
-| `GroundSample` | struct | `height`, `normal` (треугольника LOD 0), `substrate`, `on_trail`, `wet` (русло или ниже моря), `tile` |
+| `GroundSample` | struct | `height`, `normal` (треугольника LOD 0), `substrate`, `on_trail` (у мира с объектами — внутри полосы тропы или дороги), `wet` (русло или река из объектов, или ниже моря), `tile` |
 | `Ground` | trait | `sample_ground(x, z) -> Option<GroundSample>`; `None` за картой. Реализуют `World` и тестовые поверхности |
 | `MarkerKind` (serde), `Marker { name: String, kind, position }` | enum, struct | авторские точки маршрута |
 | `FieldGrid { nx, nz, step_m, fields }` | struct | поля `Fields` на мировой сетке `nx × nz` (1025 × 1025 для первой карты), строки по z; `FieldGrid::generate(&Generator, tiles_x, tiles_z)` — параллельно по строкам |
 | `DerivedOverrides { weights, substrate }` | struct | `Option<Vec<…>>` по точкам мировой сетки: ручные слои вместо вычисленных |
-| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `step_m` (шаг сетки, м), `geo: Option<GeoRef>`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers`, `fields` (сетка, из которой собран мир; нужна экспорту масок торфяника и берега) |
+| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `step_m` (шаг сетки, м), `geo: Option<GeoRef>`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers`, `fields` (сетка, из которой собран мир; нужна экспорту масок торфяника и берега), `features: Option<FeatureSet>` (тропы, реки, дороги из `features.json`) |
 | `World::generate(seed, tiles_x, tiles_z)` | fn | `FieldGrid::generate`, затем `from_grid` без замен |
 | `World::from_grid(seed, Generator, FieldGrid, &DerivedOverrides, Option<Vec<Marker>>)` | fn | 1) нормали центральными разностями по сетке; 2) веса и субстрат из полей или из `overrides`; 3) нарезка на тайлы с общими граничными точками; 4) маркеры: переданные получают высоту грунта, иначе расставляются по сплайнам генератора |
 | `World::tile(id)`, `tile_size_m()`, `tile_origin(id)`, `size_m()`, `marker(kind)` | fn | доступ; размер тайла = 64 × `step_m` |
@@ -102,7 +102,19 @@ flowchart LR
 
 Треугольники ячейки (i, j): a = (i, j), b = (i+1, j), c = (i+1, j+1), d = (i, j+1), диагональ a–c, обход CCW сверху. Этот же разбор использует `terrain_mesh::tile_indices`, поэтому столкновения совпадают с отрисовкой LOD 0.
 
-### 3.4. `src/world/layers.rs` — слои карты
+### 3.3a. `src/world/features.rs` — объекты карты уже шага сетки
+
+Тропы, дороги и реки из OSM как отрезки; отрисовка и ходьба считают точное расстояние до отрезков ([AD-45](00-arch.md#ad-45-тропы-и-реки-векторами-с-точным-расстоянием-в-шейдере-а-не-полем-расстояний-в-текстуре)).
+
+| Элемент | Вид | Описание |
+| --- | --- | --- |
+| `FEATURE_CELL_M` = 32, `FEATURE_MARGIN_M` = 6, `KIND_TRAIL` = 0, `KIND_RIVER` = 1, `KIND_ROAD` = 2, `FAR` = 1000 | const | ячейка списков, запас вокруг полосы, виды |
+| `FeaturesMeta { file }` | struct (serde) | `features` в `world.json` |
+| `FeatureSample { trail_m, river_m, road_m }` | struct | расстояние до края ближайшей полосы каждого вида (< 0 — внутри); дальше запаса — `FAR` |
+| `FeatureSet { json, segments, cells_n, cells, list }` | struct | отрезки `FeatureSegment`, ячейки `[начало, число]` по строкам z, списки индексов; `json` — исходник для экспорта |
+| `FeatureSet::empty(map_size_m)`, `from_json(text, map_size_m)`, `sample(x, z)`, `max_per_cell()` | fn | пустой набор для генератора; разбор и раскладка (полуширина по виду OSM: тропа 0,8 м, `footway` 1,0, `track` 1,4, дороги 1,8–3,5, река — половина ширины по водосбору); точное расстояние, тот же расчёт, что `features.h` |
+
+
 
 Каталог слоёв: `world.json` и PNG размером `nx × nz` (1025 × 1025), пиксель (i, j) — точка мировой сетки x = i, z = j ([AD-34](00-arch.md#ad-34-слои-карты-в-png-источники-и-ручные-замены)).
 
@@ -116,15 +128,17 @@ flowchart LR
 | `biome.png` | RGB 8 бит | замена, если указан в `overrides` | лес, торф, берег; сумма каналов ровно 255 |
 | `substrate.png` | серый 8 бит | замена, если указан в `overrides` | индекс `Substrate` × 60 |
 | `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
+| `features.json` | JSON | источник, необязательный | реки (имя, вид, ширина, линия), тропы, дороги, болота, точки (вершины, водопады, приюты, криптомерии) в мировых метрах; ODbL |
+| `flow.png` | серый 16 бит | только данные для 03.2 | log₂ площади водосбора в клетках × 2048 (мир Якусимы) |
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
 | `FORMAT_VERSION` = 3, `COAST_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json`; приватная `height_range(&World)` — диапазон высот по данным, округлённый до 10 м | const, fn | параметры формата |
 | `GeoRef { center_lat, center_lon, center_world_m, projection, sources }` | struct (serde) | привязка мира к Земле в `world.json` (`geo`) и `World.geo` |
-| `Manifest` | struct (serde) | `format`, `seed`, `generator_version`, `tiles_x`, `tiles_z`, `sample_step_m`, `size_samples`, `height_range_m`, `temperature_range_c`, `substrate_codes`, `overrides` (`biome`, `substrate`), `exported_checksum`, `markers` |
+| `Manifest` | struct (serde) | `format`, `seed`, `generator_version`, `tiles_x`, `tiles_z`, `sample_step_m`, `size_samples`, `height_range_m`, `temperature_range_c`, `substrate_codes`, `overrides` (`biome`, `substrate`), `exported_checksum`, `markers`, `coast_distance_range_m`, `geo`, `features` |
 | `MarkerEntry { name, kind, x, z }` | struct (serde) | маркер в `world.json`; высота при импорте берётся с грунта |
 | `export(&World, dir) -> Result<Manifest, String>` | fn | пишет все слои и `world.json` (`overrides` пустой) |
-| `import(dir) -> Result<World, String>` | fn | читает `world.json`, проверяет формат, размер, число каналов и 16 бит у высоты; поля из источников, замены из `overrides`; сплайны `Generator` — из seed; затем `World::from_grid` |
+| `import(dir) -> Result<World, String>` | fn | читает `world.json`, проверяет формат, размер, число каналов и 16 бит у высоты; поля из источников, замены из `overrides`; сплайны `Generator` — из seed; затем `World::from_grid`; `features.json` → `World.features` (приватная `import_features`). Экспорт переносит `features.json` без изменений |
 | `preview(&World, (nx, nz)) -> Vec<u8>` | fn | RGB-карта сверху (бывший тест `dump_map`) |
 | приватные `encode_weights`, `decode_weights` | fn | веса ↔ три байта с суммой 255 (метод наибольших остатков), чтобы повторный экспорт давал те же байты |
 | приватные `read_png`, `write_png`, `Image` | fn, struct | PNG 8/16 бит, палитра разворачивается, лишние каналы допускаются |
@@ -151,7 +165,8 @@ flowchart LR
 | Вызов | в проходе `scene` до кубов: `drawIndexedPrimitives(instanceCount: 144)`; группа отладки `terrain: 144 tiles` |
 | Вершинный шейдер | `vertices[instance_id * 4225 + vertex_id]`, позиция в мире, `view_proj` |
 | Фрагментный шейдер | доли слоёв: лес → подстилка и мох (по влажности почвы), торф → мох и почва, берег → песок или камень (по `rocky`), поверх — тропа (почва), русло (камень + песок), склон > ~13° (камень), дно (песок или камень); смешивание по высоте материала с порогом 0,18; повтор слоя 2–4 м + вторая выборка в повёрнутых координатах ×0,43; карта нормалей (касательная +X, бикасательная −Z); мокрый песок: альбедо × 0,4, шероховатость → 0,08 по маске × впитывание слоя; затемнение дна ниже моря; солнце 1,15 (Ламберт + GGX) + небо. Отладочные виды: высота с горизонталями через 5 м, уклон (пурпур > 40°), веса биомов, субстрат, тип берега, влажность, слои материалов; `Raw` — числа для самопроверки |
-| Привязки | таблица `terrain` в слоте: `buffer(0)` вершины, `buffer(1)` `FrameUniforms`, `texture(0)` детальная текстура, `texture(1)` альбедо + высота, `texture(2)` нормаль + шероховатость, `texture(3)` маска влажности |
+| Объекты карты | `features.h`: `feature_distances(p, map_size_m, segs, cells, list)` — ячейка 32 м, цикл по её отрезкам (у Якусимы до 41), расстояние до края полосы. Тропа — почва, дорога — камень с почвой, берег русла 1,5 м — камень и песок, вода в русле до 03.2 — цвет: мокрое дно сквозь воду, отражение неба по Френелю горизонтальной нормали с рябью, блик. Край сглажен на пиксель (`px` по производным позиции относительно камеры) |
+| Привязки | таблица `terrain` в слоте: `buffer(0)` вершины, `buffer(1)` `FrameUniforms`, `buffer(2)` `FeatureSegment[]`, `buffer(3)` ячейки `uint2`, `buffer(4)` списки; `texture(0)` детальная текстура, `texture(1)` альбедо + высота, `texture(2)` нормаль + шероховатость, `texture(3)` маска влажности. У карты без объектов — пустые ячейки и по одному нулевому элементу (буфер Metal не бывает пустым) |
 
 Отсечения и LOD пока нет: рисуются все 2 097 152 треугольника карты 1024 м. 120 кадров/с при 2560 × 1440 на M3 Max (Debug) с материалами 02.2, CPU-кодирование кадра 0,1–0,2 мс.
 
@@ -196,3 +211,4 @@ flowchart LR
 | 2026-11-08 | 02.2 | после `453a670` | Материалы ambientCG, смешивание по высоте, мокрый песок по маске, отладочные виды ([AD-38](00-arch.md#ad-38-материалы-ландшафта-фотосканы-ambientcg-в-двух-массивах-смешивание-по-высоте)) |
 | 2026-11-08 | 03.1 | после `bd4aac5` | Маска влажности — живая маска мокрого песка R16Float из 03.1; подкраска дна ниже моря удалена (цвет под водой даёт вода) |
 | 2026-11-14 | 02.7 | после `3932e70` | Шаг сетки — параметр мира (`World.step_m`, `FieldGrid.step_m`, `tile_origin`, `tile_size_m`; `TILE_SIZE_M` и `TileId::origin` удалены), `Fields.coast_d`, слой `coast_distance.png` и `GeoRef`, формат слоёв 3, диапазон высот по данным ([AD-42](00-arch.md#ad-42-реальный-рельеф-скрипт-python-шаг-сетки-мира-и-георазметка)) |
+| 2026-11-14 | 02.7 | после `c05863c` | Модуль `world/features.rs` (`FeatureSet`, отрезки по ячейкам 32 м), `World.features`, `features.json` в слоях, `on_trail`/`wet` по объектам, `features.h` и попиксельные тропы, дороги, русла в `terrain.metal` ([AD-45](00-arch.md#ad-45-тропы-и-реки-векторами-с-точным-расстоянием-в-шейдере-а-не-полем-расстояний-в-текстуре)) |

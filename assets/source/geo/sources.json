@@ -1,11 +1,19 @@
 {
-  "comment": "Исходные данные реального рельефа (02.7). Файлы кэша — assets/source/geo/cache/, вне git. Скачивание и проверка: tools/geo/yakushima.py fetch.",
+  "comment": "Исходные данные реального рельефа (02.7). Файлы кэша — assets/source/geo/cache/, вне git. Скачивание и проверка: tools/geo/yakushima.py fetch. Снимок OSM (Overpass) меняется со временем: при новом скачивании SHA-256 не совпадёт — обновите snapshot и sha256 осознанно.",
   "files": [
     {
       "file": "Copernicus_DSM_COG_10_N30_00_E130_00_DEM.tif",
       "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N30_00_E130_00_DEM/Copernicus_DSM_COG_10_N30_00_E130_00_DEM.tif",
       "sha256": "1cbf46e3cdf7c2e5cafb5bd6cb80b50cb2602fe63903062d413c2cd5ee85545e",
       "attribution": "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
+    },
+    {
+      "file": "osm_yakushima.json",
+      "url": "https://overpass-api.de/api/interpreter",
+      "query": "tools/geo/osm_yakushima.overpassql",
+      "snapshot": "2026-11-14",
+      "sha256": "14dd666c7d488ee3fdafcebb5fbcd8933bdc51f633144ea9640158a8a016588d",
+      "attribution": "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0"
     }
   ]
 }

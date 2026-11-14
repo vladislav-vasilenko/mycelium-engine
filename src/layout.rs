@@ -143,6 +143,19 @@ pub struct HandsUniforms {
     pub _pad: [u32; 2],
 }
 
+/// Отрезок объекта карты (тропа, река, дорога), 32 байта (02.7).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct FeatureSegment {
+    pub a: [f32; 2],
+    pub b: [f32; 2],
+    /// Полуширина полосы, м.
+    pub half_width: f32,
+    /// 0 — тропа, 1 — река, 2 — дорога.
+    pub kind: u32,
+    pub _pad: [f32; 2],
+}
+
 /// Сколько вершин рук проверяет ядро `skin_probe`: вершины `i × (n / SKIN_PROBES)`.
 pub const SKIN_PROBES: usize = 8;
 
@@ -181,10 +194,13 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(SkinnedVertex, weights) as u32,
         size_of::<HandsUniforms>() as u32,
         offset_of!(HandsUniforms, vertex_count) as u32,
+        size_of::<FeatureSegment>() as u32,
+        offset_of!(FeatureSegment, half_width) as u32,
+        offset_of!(FeatureSegment, kind) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 31;
+pub const LAYOUT_PROBE_LEN: usize = 34;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -218,6 +234,9 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "SkinnedVertex.weights",
     "sizeof(HandsUniforms)",
     "HandsUniforms.vertex_count",
+    "sizeof(FeatureSegment)",
+    "FeatureSegment.half_width",
+    "FeatureSegment.kind",
 ];
 
 #[cfg(test)]
@@ -231,7 +250,7 @@ mod tests {
             expected_probe(),
             [
                 128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28,
-                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128
+                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20
             ]
         );
     }

@@ -1,4 +1,5 @@
 #include "common.h"
+#include "features.h"
 
 // Ландшафт LOD 0: все тайлы одним instanced draw. Номер экземпляра — номер
 // тайла, вершины тайла лежат подряд по TILE_SAMPLES² штук.
@@ -94,7 +95,10 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            texture2d<float> detail [[texture(0)]],
                            texture2d_array<float> mat_albedo [[texture(1)]],
                            texture2d_array<float> mat_normal [[texture(2)]],
-                           texture2d<float> wetness_mask [[texture(3)]]) {
+                           texture2d<float> wetness_mask [[texture(3)]],
+                           device const FeatureSegment* feat_segs [[buffer(2)]],
+                           device const uint2* feat_cells [[buffer(3)]],
+                           device const uint* feat_list [[buffer(4)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -106,7 +110,18 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float slope_deg = acos(clamp(face.y, -1.0, 1.0)) * (180.0 / M_PI_F);
 
     float rocky = in.material.w;
-    float trail = smoothstep(0.1, 0.6, in.weights.w);
+    // Тропы, дороги и реки уже шага сетки — попиксельно по точному расстоянию
+    // до отрезков. `px` — метров на пиксель: край сглажен на пиксель при любой
+    // дальности, а полоса уже пикселя гаснет по покрытию, а не мерцает.
+    FeatureDist fd = feature_distances(xz, frame.map_size_m, feat_segs, feat_cells, feat_list);
+    float px = max(length(dfdx(in.rel)), length(dfdy(in.rel)));
+    float wobble = (detail.sample(s, xz / 9.0).g - 0.5) * 0.4;
+    float trail_px = 1.0 - smoothstep(-px, px + 0.2, fd.trail + wobble);
+    float road_px = 1.0 - smoothstep(-px, px + 0.1, fd.road);
+    // Камни берега русла и вода в русле (до 03.2 вода — только цвет).
+    float bank = 1.0 - smoothstep(0.0, 1.5 + px, fd.river + wobble);
+    float stream = 1.0 - smoothstep(-px, px, fd.river + 0.4);
+    float trail = max(smoothstep(0.1, 0.6, in.weights.w), trail_px);
     float moist = in.material.z;
     // Маска непрерывная: smoothstep даёт гладкую границу мокрого песка.
     float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(clamp_s, xz / frame.map_size_m).r);
@@ -128,17 +143,18 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     wl[MAT_ROCK] = in.weights.z * rocky;
     // Поверх: тропа — почва, русло — камень с песком, крутые склоны и дно у
     // каменистого берега — камень, остальное дно — песок.
-    float river = in.material.y;
+    float river = max(in.material.y, bank);
     float steep = smoothstep(0.22, 0.42, slope);
     float under = smoothstep(0.0, -0.6, in.world.y);
     float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    over[MAT_SOIL] += trail;
-    over[MAT_ROCK] += 0.5 * river + steep + under * rocky;
-    over[MAT_SAND] += 0.5 * river + under * (1.0 - rocky);
-    float cover = saturate(trail + river + steep + under);
+    over[MAT_SOIL] += trail + 0.4 * road_px;
+    over[MAT_ROCK] += 0.7 * river + steep + under * rocky + 0.6 * road_px;
+    over[MAT_SAND] += 0.3 * river + under * (1.0 - rocky);
+    float cover_sum = trail + road_px + river + steep + under;
+    float cover = saturate(cover_sum);
     float total = 0.0;
     for (int i = 0; i < MAT_COUNT; ++i) {
-        wl[i] = mix(wl[i], over[i] / max(trail + river + steep + under, 1e-4), cover);
+        wl[i] = mix(wl[i], over[i] / max(cover_sum, 1e-4), cover);
         total += wl[i];
     }
 
@@ -249,5 +265,20 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     const float3 sun = float3(1.15, 1.1, 1.0);
     float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
     float3 color = albedo * (sun * nl + sky) + sun * spec;
+    // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
+    if (stream > 0.0) {
+        // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:
+        // отражение — по нормали воды (вверх) с рябью от детальной текстуры.
+        float2 rip = (detail.sample(s, xz / 3.0 + frame.time * 0.05).rg - 0.5) * 0.25;
+        float3 Nw = normalize(float3(rip.x, 1.0, rip.y));
+        float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(Nw, V)), 5.0);
+        float3 sky_refl = float3(0.30, 0.42, 0.62) * 0.7;
+        // Сквозь мелкую воду видно мокрое дно.
+        float3 bed = albedo * 0.35 * (sun * nl + sky);
+        float3 Hw = normalize(L + V);
+        float glint = pow(saturate(dot(Nw, Hw)), 400.0) * 3.0;
+        float3 water = mix(bed * float3(0.7, 0.9, 0.9), sky_refl, fres) + sun * glint;
+        color = mix(color, water, stream * 0.9);
+    }
     return float4(color, 1.0);
 }

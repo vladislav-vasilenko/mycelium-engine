@@ -30,38 +30,47 @@
     {
       "name": "Сиратани Унсуикё, начало тропы",
       "kind": "TrailStart",
-      "x": 17764.02,
-      "z": 10482.24
+      "x": 19795.9,
+      "z": 9996.64
     },
     {
       "name": "Дзёмон-суги",
       "kind": "Viewpoint",
-      "x": 16004.28,
-      "z": 12743.75
+      "x": 16023.51,
+      "z": 12481.38
     },
     {
-      "name": "гора Миянoура, 1936 м",
+      "name": "гора Миянoура",
       "kind": "Viewpoint",
-      "x": 13407.94,
-      "z": 15238.06
+      "x": 13360.47,
+      "z": 15236.33
+    },
+    {
+      "name": "болото Ханоэго",
+      "kind": "Viewpoint",
+      "x": 13984.98,
+      "z": 17845.16
     },
     {
       "name": "устье реки Анбо",
       "kind": "RiverMouth",
-      "x": 28101.28,
-      "z": 18286.65
+      "x": 27900.0,
+      "z": 17790.0
     },
     {
-      "name": "пляж Нагата Инакахама",
+      "name": "пляж Нагата Инакахама (приблизительно)",
       "kind": "ShoreEnd",
-      "x": 6734.39,
-      "z": 6424.84
+      "x": 6930.0,
+      "z": 6630.0
     }
   ],
   "coast_distance_range_m": [
     -4000.0,
     4000.0
   ],
+  "features": {
+    "file": "features.json"
+  },
   "geo": {
     "center_lat": 30.335,
     "center_lon": 130.525,
@@ -71,7 +80,8 @@
     ],
     "projection": "local tangent plane WGS84: x — восток, z — юг, метры",
     "sources": [
-      "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
+      "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+      "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0"
     ]
   }
 }

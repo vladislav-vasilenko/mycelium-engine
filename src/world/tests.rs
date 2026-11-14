@@ -201,3 +201,42 @@ fn coast_alternates_sand_and_rock() {
     assert!(g.rocky(g.cape_center) > 0.9, "мыс в конце тропы каменистый");
     assert!(g.rocky(g.mouth) < 0.1, "пляж у устья песчаный");
 }
+
+/// Мир Якусимы из слоёв: объекты OSM загружены, начало тропы — на дороге к
+/// ущелью Сиратани на 600–700 м, устье Анбо у реки, Дзёмон-суги в лесу на ~1300 м.
+#[test]
+fn yakushima_layers_have_trails_and_rivers() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/world/yakushima/far");
+    let w = super::layers::import(&dir).expect("мир Якусимы");
+    let f = w.features.as_ref().expect("features.json");
+    assert!(f.segments.len() > 10_000);
+    let start = w
+        .marker(MarkerKind::TrailStart)
+        .expect("начало тропы")
+        .position;
+    let g = w.sample_ground(start.x, start.z).unwrap();
+    assert!(g.on_trail, "начало тропы не на дороге или тропе");
+    assert!(
+        (600.0..720.0).contains(&g.height),
+        "высота начала {}",
+        g.height
+    );
+    let mouth = w.marker(MarkerKind::RiverMouth).unwrap().position;
+    // Расстояние известно только рядом с полосами: ищем воду реки в 40 м.
+    let near_river = (-8..=8).any(|i| {
+        (-8..=8).any(|j| {
+            f.sample(mouth.x + i as f32 * 5.0, mouth.z + j as f32 * 5.0)
+                .river_m
+                < 0.0
+        })
+    });
+    assert!(near_river, "устье дальше 40 м от реки");
+    let jomon = w
+        .markers
+        .iter()
+        .find(|m| m.name == "Дзёмон-суги")
+        .unwrap()
+        .position;
+    let h = w.sample_ground(jomon.x, jomon.z).unwrap().height;
+    assert!((1250.0..1380.0).contains(&h), "Дзёмон-суги на {h} м");
+}

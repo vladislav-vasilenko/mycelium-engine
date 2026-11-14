@@ -121,8 +121,8 @@ impl FrameSlot {
         cmd.setLabel(Some(&label(&format!("frame slot {index}"))));
         let table = |name: &str| -> Result<Obj<dyn MTL4ArgumentTable>, String> {
             let d = MTL4ArgumentTableDescriptor::new();
-            d.setMaxBufferBindCount(4);
-            d.setMaxTextureBindCount(4);
+            d.setMaxBufferBindCount(8);
+            d.setMaxTextureBindCount(8);
             d.setLabel(Some(&label(&format!("{name} args, slot {index}"))));
             device
                 .newArgumentTableWithDescriptor_error(&d)

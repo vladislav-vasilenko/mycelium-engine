@@ -77,6 +77,9 @@ pub struct Manifest {
     /// Привязка к Земле для мира из реальных данных (02.7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo: Option<GeoRef>,
+    /// Слой объектов уже шага сетки (02.7), необязательный.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<super::features::FeaturesMeta>,
 }
 
 /// Привязка мира к географическим координатам.
@@ -315,6 +318,16 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         &preview(world, size),
     )?;
 
+    // Объекты карты переносятся как есть: они не выводятся из полей сетки.
+    let features = match &world.features {
+        Some(f) => {
+            std::fs::write(dir.join("features.json"), &f.json).map_err(|e| e.to_string())?;
+            Some(super::features::FeaturesMeta {
+                file: "features.json".into(),
+            })
+        }
+        None => None,
+    };
     let manifest = Manifest {
         format: FORMAT_VERSION,
         seed: world.seed,
@@ -340,6 +353,7 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
             .collect(),
         coast_distance_range_m: COAST_RANGE_M,
         geo: world.geo.clone(),
+        features,
     };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(MANIFEST), json + "\n").map_err(|e| e.to_string())?;
@@ -483,7 +497,22 @@ pub fn import(dir: &Path) -> Result<World, String> {
     };
     let mut world = World::from_grid(m.seed, generator, grid, &overrides, Some(markers));
     world.geo = m.geo;
+    if let Some(meta) = &m.features {
+        world.features = Some(import_features(dir, meta, world.size_m().x)?);
+    }
     Ok(world)
+}
+
+/// `features.json`: векторы троп, рек и дорог (02.7).
+fn import_features(
+    dir: &Path,
+    meta: &super::features::FeaturesMeta,
+    map_size_m: f32,
+) -> Result<super::features::FeatureSet, String> {
+    let path = dir.join(&meta.file);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    super::features::FeatureSet::from_json(&text, map_size_m)
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Цветная карта сверху: вода, тропа, субстрат, отмывка рельефа, маркеры.

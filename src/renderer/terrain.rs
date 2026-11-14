@@ -25,6 +25,17 @@ pub(super) struct TerrainGpu {
     /// Маска мокрого песка R16Float на всю карту, 1 тексель на метр;
     /// пишет ядро `wet_sand_update`, читает шейдер ландшафта.
     pub wetness: Obj<dyn MTLTexture>,
+    /// Объекты карты (02.7): отрезки, ячейки (начало, число), списки индексов.
+    pub feat_segments: Obj<dyn MTLBuffer>,
+    pub feat_cells: Obj<dyn MTLBuffer>,
+    pub feat_list: Obj<dyn MTLBuffer>,
+}
+
+/// Объекты карты для шейдера ландшафта: отрезки по ячейкам `FEATURE_CELL_M`.
+pub struct FeatureBuffers<'a> {
+    pub segments: &'a [crate::layout::FeatureSegment],
+    pub cells: &'a [[u32; 2]],
+    pub list: &'a [u32],
 }
 
 /// Текстуры ландшафта для `Renderer::set_terrain`.
@@ -34,6 +45,8 @@ pub struct TerrainTextures<'a> {
     pub materials: &'a crate::terrain_materials::MaterialArrays,
     /// Сторона маски мокрого песка, тексели (1 на метр).
     pub wetness_size: u32,
+    /// Тропы, реки и дороги; у карты без объектов — пустые ячейки.
+    pub features: FeatureBuffers<'a>,
 }
 
 impl Renderer {
@@ -96,6 +109,41 @@ impl Renderer {
             MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
             "wet sand mask",
         )?;
+        // Буфер Metal не бывает пустым: пустые списки дополняются одним нулём.
+        let f = &tex.features;
+        let one_seg = [crate::layout::FeatureSegment::default()];
+        let segs = if f.segments.is_empty() {
+            &one_seg[..]
+        } else {
+            f.segments
+        };
+        let list = if f.list.is_empty() {
+            &[0u32][..]
+        } else {
+            f.list
+        };
+        let feat_segments = buffer_with(
+            &self.device,
+            bytemuck::cast_slice(segs),
+            "terrain feature segments",
+        );
+        let feat_cells = buffer_with(
+            &self.device,
+            bytemuck::cast_slice(f.cells),
+            "terrain feature cells",
+        );
+        let feat_list = buffer_with(
+            &self.device,
+            bytemuck::cast_slice(list),
+            "terrain feature lists",
+        );
+        for a in [
+            as_allocation(&*feat_segments),
+            as_allocation(&*feat_cells),
+            as_allocation(&*feat_list),
+        ] {
+            self.residency.addAllocation(a);
+        }
         // Сухо: половинная точность, ноль — нулевые байты.
         let dry = vec![0u8; (tex.wetness_size * tex.wetness_size * 2) as usize];
         self.upload_textures(&[
@@ -134,10 +182,19 @@ impl Renderer {
             albedo,
             normal,
             wetness,
+            feat_segments,
+            feat_cells,
+            feat_list,
         }) {
             self.retire(
                 vec![old.detail, old.albedo, old.normal, old.wetness],
-                Some(Box::new((old.vertices, old.indices))),
+                Some(Box::new((
+                    old.vertices,
+                    old.indices,
+                    old.feat_segments,
+                    old.feat_cells,
+                    old.feat_list,
+                ))),
             );
         }
         Ok(())

@@ -91,6 +91,9 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
         table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
         table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
+        table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
+        table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
+        table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
     }
     enc.pushDebugGroup(&label(&format!("terrain: {} tiles", terrain.tile_count)));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain);

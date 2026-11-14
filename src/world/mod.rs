@@ -8,6 +8,7 @@
 //! Треугольники ячейки: диагональ из (i, j) в (i+1, j+1),
 //! треугольники (a, c, b) и (a, d, c) с обходом CCW сверху.
 
+pub mod features;
 pub mod generator;
 pub mod layers;
 pub mod noise;
@@ -178,6 +179,8 @@ pub struct World {
     /// Поля мировой сетки, из которых собраны тайлы. Нужны экспорту слоёв:
     /// маски торфяника и берега есть только здесь, а не в `Sample`.
     pub fields: Vec<Fields>,
+    /// Тропы, дороги и реки уже шага сетки (`features.json`), если есть.
+    pub features: Option<features::FeatureSet>,
 }
 
 impl World {
@@ -290,6 +293,7 @@ impl World {
             tiles,
             markers: Vec::new(),
             fields: grid.fields,
+            features: None,
         };
         world.markers = match markers {
             Some(mut m) => {
@@ -413,12 +417,20 @@ impl Ground for World {
             (local.x.round() as usize).min(TILE_SAMPLES - 1),
             (local.y.round() as usize).min(TILE_SAMPLES - 1),
         );
+        // Слой объектов точнее сетки: тропа и русло — по расстоянию до них.
+        let (on_trail, in_river) = match &self.features {
+            Some(f) => {
+                let s = f.sample(x, z);
+                (s.trail_m < 0.0 || s.road_m < 0.0, s.river_m < 0.0)
+            }
+            None => (near.trail > 0.5, near.river > 0.5),
+        };
         Some(GroundSample {
             height,
             normal,
             substrate: near.substrate,
-            on_trail: near.trail > 0.5,
-            wet: near.river > 0.5 || height < SEA_LEVEL,
+            on_trail,
+            wet: in_river || height < SEA_LEVEL,
             tile: id,
         })
     }

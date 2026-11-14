@@ -64,4 +64,9 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[28] = uint((thread char*)&sv.weights - svb);
     out[29] = sizeof(HandsUniforms);
     out[30] = uint((thread char*)&hu.vertex_count - hub);
+    FeatureSegment fs;
+    thread char* fsb = (thread char*)&fs;
+    out[31] = sizeof(FeatureSegment);
+    out[32] = uint((thread char*)&fs.half_width - fsb);
+    out[33] = uint((thread char*)&fs.kind - fsb);
 }

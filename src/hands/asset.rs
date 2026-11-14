@@ -225,12 +225,16 @@ fn load_albedo(doc: &gltf::Document, blob: &[u8]) -> Result<(Vec<u8>, u32), Stri
     let rgba = match channels {
         4 => buf,
         3 => buf
-            .as_chunks::<3>().0.iter()
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2], 255])
             .collect(),
         1 => buf.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         2 => buf
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[0], p[0], p[1]])
             .collect(),
         _ => return Err(format!("{channels} каналов в текстуре")),

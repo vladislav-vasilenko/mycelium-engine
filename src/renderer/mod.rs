@@ -37,7 +37,7 @@ pub use device::{DeviceInfo, probe_device};
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
-pub use terrain::TerrainTextures;
+pub use terrain::{FeatureBuffers, TerrainTextures};
 
 use crate::frame_graph::{self, FramePlan};
 use crate::layout::Vertex;

@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -27,6 +28,9 @@ import numpy as np
 import tifffile
 from PIL import Image
 from scipy import ndimage
+
+import hydrology
+import osm
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCES = ROOT / "assets/source/geo/sources.json"
@@ -48,14 +52,11 @@ WORLD_SEED = 0x5A4B  # для процедурных частей движка (
 GENERATOR_VERSION = 4
 FORMAT_VERSION = 3
 
-# Места маршрута — приблизительные координаты (уточняются по OSM на шаге 5).
-MARKERS = [
-    ("Сиратани Унсуикё, начало тропы", "TrailStart", 30.3790, 130.5500),
-    ("Дзёмон-суги", "Viewpoint", 30.3586, 130.5317),
-    ("гора Миянoура, 1936 м", "Viewpoint", 30.3361, 130.5047),
-    ("устье реки Анбо", "RiverMouth", 30.3086, 130.6575),
-    ("пляж Нагата Инакахама", "ShoreEnd", 30.4156, 130.4353),
-]
+# Пляж Нагата Инакахама: в OSM нет точки — приблизительные координаты.
+NAGATA_BEACH = (30.4156, 130.4353)
+# Русло начинается с площади водосбора 0,25 км².
+CHANNEL_MIN_KM2 = 0.25
+OSM_FILE = "osm_yakushima.json"
 
 
 def meters_per_degree(lat):
@@ -95,7 +96,16 @@ def fetch():
         path = CACHE / s["file"]
         if not path.exists():
             print(f"скачиваю {s['url']}")
-            urllib.request.urlretrieve(s["url"], path)
+            if "query" in s:
+                # Overpass: запрос из файла, общий User-Agent без личных данных.
+                body = urllib.parse.urlencode({"data": (ROOT / s["query"]).read_text()})
+                req = urllib.request.Request(
+                    s["url"], body.encode(), {"User-Agent": "mycelium-engine-geo/0.1"}
+                )
+                with urllib.request.urlopen(req, timeout=300) as r:
+                    path.write_bytes(r.read())
+            else:
+                urllib.request.urlretrieve(s["url"], path)
         digest = sha256(path)
         if digest != s["sha256"]:
             sys.exit(f"{path.name}: SHA-256 {digest}, ожидалось {s['sha256']}")
@@ -177,13 +187,24 @@ def build_far():
     temperature = 20.0 - 0.006 * hp
     coast = 1.0 - smoothstep(0.0, 45.0, np.maximum(coast_d, 0.0))
 
+    feats = osm.load(CACHE / OSM_FILE, geo_to_world)
+    acc, _channels, river_widths = build_hydrology(height, land, feats)
+    OUT_FAR.mkdir(parents=True, exist_ok=True)
+    write_features(feats, river_widths)
+    flow = np.clip(np.round(np.log2(np.maximum(acc, 1.0)) * 2048.0), 0, 65535)
+    write_png16(OUT_FAR / "flow.png", flow)
+
     lo = math.floor(height.min() / 10.0) * 10.0 - 10.0
     hi = math.ceil(height.max() / 10.0) * 10.0 + 10.0
-    OUT_FAR.mkdir(parents=True, exist_ok=True)
     write_png16(OUT_FAR / "height.png", quantize(height, lo, hi, 65535))
     write_png16(OUT_FAR / "coast_distance.png", quantize(coast_d, *COAST_RANGE_M, 65535))
     zero = np.zeros_like(height)
-    masks = np.stack([zero, zero, zero], -1)  # тропа, русло, торфяник — шаги 3 и 5
+    # Тропы и реки уже текселя сетки рисуются попиксельно по features.png;
+    # здесь — только русла по стоку (для 03.2) и болота.
+    peat = wetland_mask(feats, NODES)
+    # Русло в masks.png — признак «мокро» для ходьбы на сетке 30 м: его не
+    # ставим, реки идут через features.png; русла по стоку — в flow.png.
+    masks = np.stack([zero, zero, peat * 255.0], -1)
     write_png8(OUT_FAR / "masks.png", masks)
     climate = np.stack(
         [
@@ -196,10 +217,7 @@ def build_far():
     write_png8(OUT_FAR / "climate.png", climate)
     write_png8(OUT_FAR / "coast_type.png", quantize(rocky, 0, 1, 255))
 
-    markers = []
-    for name, kind, mlat, mlon in MARKERS:
-        x, z = geo_to_world(mlat, mlon)
-        markers.append({"name": name, "kind": kind, "x": round(x, 2), "z": round(z, 2)})
+    markers = osm_markers(feats, height, coast_d)
     sources = json.loads(SOURCES.read_text())
     manifest = {
         "format": FORMAT_VERSION,
@@ -216,6 +234,7 @@ def build_far():
         "exported_checksum": "",
         "markers": markers,
         "coast_distance_range_m": list(COAST_RANGE_M),
+        "features": {"file": "features.json"},
         "geo": {
             "center_lat": CENTER_LAT,
             "center_lon": CENTER_LON,
@@ -241,7 +260,129 @@ def build_far():
     )
     print(f"высоты слоя {lo:.0f}…{hi:.0f} м, дно до {height.min():.0f} м")
     for m in markers:
-        print(f"маркер {m['name']}: ({m['x']:.0f}, {m['z']:.0f}) м")
+        h = bilinear(height, m["x"], m["z"])
+        print(f"маркер {m['name']}: ({m['x']:.0f}, {m['z']:.0f}) м, высота {h:.0f} м")
+
+
+def bilinear(grid, x, z):
+    fx, fz = x / STEP_M, z / STEP_M
+    i = int(np.clip(np.floor(fx), 0, NODES - 2))
+    j = int(np.clip(np.floor(fz), 0, NODES - 2))
+    tx, tz = fx - i, fz - j
+    a = grid[j, i] * (1 - tx) + grid[j, i + 1] * tx
+    b = grid[j + 1, i] * (1 - tx) + grid[j + 1, i + 1] * tx
+    return a * (1 - tz) + b * tz
+
+
+def build_hydrology(height, land, feats):
+    """Сток по рельефу и сверка с реками OSM. Русла — по рельефу с врезанными
+    руслами OSM (stream burning); сверка — без врезки, честно по рельефу."""
+    min_cells = CHANNEL_MIN_KM2 * 1e6 / (STEP_M * STEP_M)
+    named = [p for _, k, p in feats.rivers if k == "river"]
+    pts = osm.sample_lines(named, 10.0)
+    ii = np.clip(np.round(pts[:, 0] / STEP_M).astype(int), 0, NODES - 1)
+    jj = np.clip(np.round(pts[:, 1] / STEP_M).astype(int), 0, NODES - 1)
+    on_land = land[jj, ii]
+
+    def match(acc):
+        ch = land & (acc >= min_cells)
+        d = ndimage.distance_transform_edt(~ch) * STEP_M
+        return (d[jj, ii][on_land] <= 60.0).mean(), ch
+
+    depth0, _, acc0 = hydrology.flow(height, land, STEP_M)
+    m0, _ = match(acc0)
+    burn = np.zeros_like(land)
+    wpts = osm.sample_lines([p for _, _, p in feats.rivers], STEP_M / 3)
+    bi = np.clip(np.round(wpts[:, 0] / STEP_M).astype(int), 0, NODES - 1)
+    bj = np.clip(np.round(wpts[:, 1] / STEP_M).astype(int), 0, NODES - 1)
+    burn[bj, bi] = True
+    _, _, acc = hydrology.flow(height, land & True, STEP_M, burn=burn & land)
+    m1, ch = match(acc)
+    pits = land & (depth0 > 1.0)
+    lab, n_pits = ndimage.label(pits)
+    print(
+        f"сток: русел {ch.sum()} клеток (водосбор ≥ {CHANNEL_MIN_KM2} км²); реки OSM в 60 м "
+        f"от русел: {100 * m0:.0f} % по рельефу, {100 * m1:.0f} % с врезкой OSM; "
+        f"впадин глубже 1 м: {n_pits}"
+    )
+    # Ширина каждой реки OSM — по наибольшему водосбору у её узлов.
+    acc_max = ndimage.maximum_filter(acc, size=3)
+    widths = []
+    for _, kind, p in feats.rivers:
+        q = np.asarray(p)
+        i = np.clip(np.round(q[:, 0] / STEP_M).astype(int), 0, NODES - 1)
+        j = np.clip(np.round(q[:, 1] / STEP_M).astype(int), 0, NODES - 1)
+        area = acc_max[j, i].max() * STEP_M * STEP_M
+        w = float(hydrology.river_width_m(area))
+        widths.append(w if kind == "river" else min(w, 4.0))
+    return acc, ch.astype(np.float64), widths
+
+
+def write_features(feats, river_widths):
+    """features.json — векторы троп, рек и дорог; движок рисует их по точному
+    расстоянию до отрезков (поле расстояний в текстуре ломается на самой линии)."""
+    (OUT_FAR / "features.json").write_text(
+        json.dumps(osm.to_json(feats, river_widths), ensure_ascii=False, separators=(",", ":"))
+        + "\n"
+    )
+
+    def km(lines):
+        return sum(np.linalg.norm(np.diff(np.asarray(p), axis=0), axis=1).sum() for p in lines) / 1000
+
+    print(
+        f"OSM: рек {len(feats.rivers)} ({km([p for _, _, p in feats.rivers]):.0f} км), "
+        f"троп {len(feats.trails)} ({km([p for _, _, p in feats.trails]):.0f} км), "
+        f"дорог {len(feats.roads)} ({km([p for _, _, p in feats.roads]):.0f} км), "
+        f"точек {len(feats.points)}"
+    )
+
+
+def wetland_mask(feats, n):
+    """Болота OSM (Ханоэго) → маска торфяника на сетке мира."""
+    from PIL import ImageDraw
+
+    img = Image.new("L", (n, n), 0)
+    draw = ImageDraw.Draw(img)
+    for _, outline in feats.wetlands:
+        draw.polygon([(x / STEP_M, z / STEP_M) for x, z in outline], fill=255)
+    return np.asarray(img, dtype=np.float64) / 255.0
+
+
+def snap_to_shore(x, z, coast_d, lo=8.0, hi=40.0):
+    """Ближайший узел суши в полосе `lo…hi` м от кромки."""
+    js, is_ = np.nonzero((coast_d >= lo) & (coast_d <= hi))
+    k = np.argmin((is_ * STEP_M - x) ** 2 + (js * STEP_M - z) ** 2)
+    return is_[k] * STEP_M, js[k] * STEP_M
+
+
+def osm_markers(feats, height, coast_d):
+    """Места маршрута по OSM; пляж Нагата — приблизительно (нет точки в OSM).
+    Устье и пляж переносятся на ближайший берег: точки OSM лежат на кромке."""
+
+    def point(kind, name):
+        return next((x, z) for k, n, x, z in feats.points if k == kind and n == name)
+
+    def line_end(lines, name, highest):
+        ends = [pt for n, _, p in lines if n == name for pt in (p[0], p[-1])]
+        key = lambda e: bilinear(height, *e)  # noqa: E731
+        return max(ends, key=key) if highest else min(ends, key=key)
+
+    hanaego = next(p for n, p in feats.wetlands if n == "花之江河")
+    places = [
+        ("Сиратани Унсуикё, начало тропы", "TrailStart",
+         line_end(feats.roads, "白谷雲水峡宮之浦線", True)),
+        ("Дзёмон-суги", "Viewpoint", point("tree", "縄文杉")),
+        ("гора Миянoура", "Viewpoint", point("peak", "宮之浦岳")),
+        ("болото Ханоэго", "Viewpoint", tuple(np.mean(np.asarray(hanaego), axis=0))),
+        ("устье реки Анбо", "RiverMouth",
+         snap_to_shore(*line_end(feats.rivers, "安房川", False), coast_d)),
+        ("пляж Нагата Инакахама (приблизительно)", "ShoreEnd",
+         snap_to_shore(*geo_to_world(*NAGATA_BEACH), coast_d)),
+    ]  # fmt: skip
+    return [
+        {"name": n, "kind": k, "x": round(float(x), 2), "z": round(float(z), 2)}
+        for n, k, (x, z) in places
+    ]
 
 
 if __name__ == "__main__":

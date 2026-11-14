@@ -28,6 +28,8 @@ impl App {
         let materials = terrain_materials::load(&terrain_materials::source_dir())?;
         let mat_ms = t_mat.elapsed().as_secs_f64() * 1000.0;
         // Маска мокрого песка — тексель на шаг сетки (1 м у генератора, 30 м у острова).
+        let empty = crate::world::features::FeatureSet::empty(self.world.size_m().x);
+        let features = self.world.features.as_ref().unwrap_or(&empty);
         let wet_size = (self.world.tiles_x as u32) * (crate::world::TILE_SAMPLES as u32 - 1);
         r.set_terrain(
             &terrain,
@@ -38,8 +40,21 @@ impl App {
                 detail_size: DETAIL_TEXTURE_SIZE,
                 materials: &materials,
                 wetness_size: wet_size,
+                features: renderer::FeatureBuffers {
+                    segments: &features.segments,
+                    cells: &features.cells,
+                    list: &features.list,
+                },
             },
         )?;
+        if !features.segments.is_empty() {
+            eprintln!(
+                "объекты карты: {} отрезков, ячеек {}², до {} отрезков в ячейке",
+                features.segments.len(),
+                features.cells_n,
+                features.max_per_cell()
+            );
+        }
         eprintln!(
             "ландшафт: {} вершин, {} треугольников, материалов {} (JPEG за {mat_ms:.0} мс), загружен за {:.0} мс",
             terrain.len(),

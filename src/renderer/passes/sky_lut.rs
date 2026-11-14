@@ -10,7 +10,9 @@ use objc2_metal::*;
 use super::{FramePass, PassBarrier, PassCtx, size2};
 use crate::renderer::frame::{SKY_OFFSET, Table};
 use crate::renderer::resources::label;
-use crate::renderer::sky::{AMBIENT_THREADS, MULTISCATTER_SIZE, SKYVIEW_SIZE, TRANSMITTANCE_SIZE};
+use crate::renderer::sky::{
+    AERIAL_SIZE, AMBIENT_THREADS, MULTISCATTER_SIZE, SKYVIEW_SIZE, TRANSMITTANCE_SIZE,
+};
 
 pub(in crate::renderer) struct SkyLutPass;
 
@@ -74,6 +76,11 @@ impl FramePass for SkyLutPass {
         enc.setComputePipelineState(&p.sky_view_moon);
         enc.setArgumentTable(Some(table));
         enc.dispatchThreads_threadsPerThreadgroup(size(SKYVIEW_SIZE), size2(16, 8));
+        // Воздушная перспектива: поток на столбец, слои по дальности внутри.
+        unsafe { table.setTexture_atIndex(sky.aerial.gpuResourceID(), 0) };
+        enc.setComputePipelineState(&p.sky_aerial);
+        enc.setArgumentTable(Some(table));
+        enc.dispatchThreads_threadsPerThreadgroup(size((AERIAL_SIZE, AERIAL_SIZE)), size2(8, 8));
         between_dispatches(&*enc);
         unsafe {
             table.setTexture_atIndex(sky.skyview.gpuResourceID(), 0);

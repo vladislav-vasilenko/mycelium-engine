@@ -235,7 +235,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            device const uint* feat_list [[buffer(4)]],
                            device const SkyFrame& skyf [[buffer(9)]],
                            constant ShadowUniforms& shadows [[buffer(12)]],
-                           depth2d_array<float> shadow_map [[texture(7)]]) {
+                           depth2d_array<float> shadow_map [[texture(7)]],
+                           texture3d<float> aerial [[texture(8)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -502,6 +503,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         // глаз — дымкой толщи.
         color *= exp(-UW_ABSORB * max(-in.world.y, 0.0));
         color = underwater_fog(color, length(in.rel), frame.underwater_m, underwater_light(skyf));
+    } else {
+        // Воздушная перспектива и дымка (04.2): дальние склоны уходят в цвет неба.
+        color = apply_aerial(aerial, frame, in.rel, color);
     }
     return float4(color * frame.pre_exposure, 1.0);
 }

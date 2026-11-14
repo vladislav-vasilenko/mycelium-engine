@@ -102,6 +102,7 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
+        table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
         table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
@@ -149,6 +150,7 @@ fn draw_clusters(
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
+        table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
         table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);
         table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
@@ -244,6 +246,7 @@ fn draw_water(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
         table.setAddress_atIndex(ctx.upload_addr + SKY_OFFSET as u64, 5);
         table.setTexture_atIndex(ctx.r.sky.skyview.gpuResourceID(), 2);
+        table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 3);
     }
     enc.pushDebugGroup(&label(&format!("water: {WATER_LEVELS} levels")));
     enc.setRenderPipelineState(&ctx.r.pipelines.water);

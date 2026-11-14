@@ -15,6 +15,11 @@ constant float MIE_ABS = 4.40e-3;
 constant float MIE_H = 1.2;
 constant float MIE_G = 0.8;
 constant float3 OZONE_ABS = float3(0.650, 1.881, 0.085) * 1e-3;
+// Влажная дымка нижнего слоя (04.2): субтропический остров, видимость ~70 км.
+// Рассеяние как у Ми, высота однородной атмосферы 0,8 км.
+constant float HAZE_SCAT = 0.03;
+constant float HAZE_ABS = 0.004;
+constant float HAZE_H = 0.8;
 constant float3 GROUND_ALBEDO = float3(0.1);
 // Спектр солнца у верхней границы — слегка жёлтый.
 constant float3 SUN_TINT = float3(1.0, 0.97, 0.92);
@@ -49,12 +54,13 @@ struct Medium {
 inline Medium medium_at(float h_km) {
     float r = exp(-h_km / RAYLEIGH_H);
     float m = exp(-h_km / MIE_H);
+    float hz = exp(-h_km / HAZE_H);
     float o = max(0.0, 1.0 - abs(h_km - 25.0) / 15.0);
     Medium s;
     s.rayleigh = RAYLEIGH_SCAT * r;
-    s.mie = MIE_SCAT * m;
+    s.mie = MIE_SCAT * m + HAZE_SCAT * hz;
     s.scattering = s.rayleigh + s.mie;
-    s.extinction = s.scattering + MIE_ABS * m + OZONE_ABS * o;
+    s.extinction = s.scattering + MIE_ABS * m + HAZE_ABS * hz + OZONE_ABS * o;
     return s;
 }
 
@@ -202,6 +208,31 @@ inline float3 sky_ambient_term(device const SkyFrame& f, float3 n) {
 inline float underwater_light(device const SkyFrame& f) {
     float3 e = sky_sun_term(f) * max(f.light_dir.y, 0.0) + sky_ambient_term(f, float3(0, 1, 0));
     return dot(e, float3(0.2126, 0.7152, 0.0722)) / 0.42;
+}
+
+// Воздушная перспектива (04.2): LUT 32 × 32 по экрану × 32 слоя по дальности
+// до AERIAL_KM, слои гуще у камеры (дальность ∝ квадрату номера слоя).
+// rgb — рассеянный к глазу свет (доли E☉, как небо), a — пропускание.
+constant uint AERIAL_SIZE = 32;
+constant float AERIAL_KM = 40.0;
+
+// Свет точки `rel` (относительно камеры) после пути до глаза: цвет·T + L.
+inline float4 aerial_at(texture3d<float> lut, constant FrameUniforms& frame, float3 rel) {
+    float4 clip = frame.view_proj_rel * float4(rel, 1.0);
+    float2 uv = clip.xy / clip.w * float2(0.5, -0.5) + 0.5;
+    float w = sqrt(length(rel) * 0.001 / AERIAL_KM);
+    float n = float(AERIAL_SIZE);
+    constexpr sampler s(filter::linear, address::clamp_to_edge);
+    float4 a = lut.sample(s, float3(uv, max(w - 0.5 / n, 0.5 / n)));
+    // Ближе первого слоя — доля его вклада.
+    float fade = saturate(w * n);
+    return float4(a.rgb * fade, mix(1.0, a.a, fade));
+}
+
+inline float3 apply_aerial(texture3d<float> lut, constant FrameUniforms& frame, float3 rel,
+                           float3 color) {
+    float4 a = aerial_at(lut, frame, rel);
+    return color * a.a + a.rgb;
 }
 
 // Каскадные тени (04.2): выбор каскада по расстоянию, смещение по нормали на

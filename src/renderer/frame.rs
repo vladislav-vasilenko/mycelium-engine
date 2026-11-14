@@ -150,7 +150,7 @@ impl FrameSlot {
         let table = |name: &str| -> Result<Obj<dyn MTL4ArgumentTable>, String> {
             let d = MTL4ArgumentTableDescriptor::new();
             d.setMaxBufferBindCount(16);
-            d.setMaxTextureBindCount(8);
+            d.setMaxTextureBindCount(16);
             d.setLabel(Some(&label(&format!("{name} args, slot {index}"))));
             device
                 .newArgumentTableWithDescriptor_error(&d)

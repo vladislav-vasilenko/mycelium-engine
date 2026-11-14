@@ -12,6 +12,8 @@ use super::shaders::Obj;
 pub const TRANSMITTANCE_SIZE: (u32, u32) = (256, 64);
 pub const MULTISCATTER_SIZE: (u32, u32) = (32, 32);
 pub const SKYVIEW_SIZE: (u32, u32) = (192, 108);
+/// LUT воздушной перспективы (04.2): 32 × 32 по экрану × 32 слоя (`AERIAL_SIZE` в `sky.h`).
+pub const AERIAL_SIZE: u32 = 32;
 /// `SkyFrame` в `sky.h`: 12 × float4.
 pub const SKY_FRAME_BYTES: usize = 12 * 16;
 /// Потоков в группе ядра `sky_ambient` (`AMBIENT_THREADS` в `sky.metal`).
@@ -23,6 +25,8 @@ pub(super) struct SkyGpu {
     pub skyview: Obj<dyn MTLTexture>,
     /// Вид неба, освещённого луной (та же атмосфера, другое светило).
     pub skyview_moon: Obj<dyn MTLTexture>,
+    /// Воздушная перспектива (04.2): рассеяние и пропускание вдоль пикселя, 3D.
+    pub aerial: Obj<dyn MTLTexture>,
     /// Свет неба (SH), главное светило и экспозиция кадра — пишет `sky_ambient`.
     pub frame: Obj<dyn MTLBuffer>,
     /// Экспозиция между кадрами (адаптация глаза).
@@ -47,6 +51,7 @@ impl SkyGpu {
             multiscatter: tex(MULTISCATTER_SIZE, "sky: multiple scattering LUT"),
             skyview: tex(SKYVIEW_SIZE, "sky: sky-view LUT"),
             skyview_moon: tex(SKYVIEW_SIZE, "sky: sky-view LUT (moon)"),
+            aerial: aerial_texture(device),
             frame: shared_buffer(device, SKY_FRAME_BYTES, "sky: frame (SH, light, exposure)"),
             state: shared_buffer(device, 16, "sky: exposure state"),
             static_ready: AtomicBool::new(false),
@@ -56,10 +61,29 @@ impl SkyGpu {
         residency.addAllocation(as_allocation(&*s.multiscatter));
         residency.addAllocation(as_allocation(&*s.skyview));
         residency.addAllocation(as_allocation(&*s.skyview_moon));
+        residency.addAllocation(as_allocation(&*s.aerial));
         residency.addAllocation(as_allocation(&*s.frame));
         residency.addAllocation(as_allocation(&*s.state));
         s
     }
+}
+
+fn aerial_texture(device: &ProtocolObject<dyn MTLDevice>) -> Obj<dyn MTLTexture> {
+    let desc = MTLTextureDescriptor::new();
+    desc.setTextureType(MTLTextureType::Type3D);
+    desc.setPixelFormat(MTLPixelFormat::RGBA16Float);
+    unsafe {
+        desc.setWidth(AERIAL_SIZE as usize);
+        desc.setHeight(AERIAL_SIZE as usize);
+        desc.setDepth(AERIAL_SIZE as usize);
+    }
+    desc.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+    desc.setStorageMode(MTLStorageMode::Private);
+    let tex = device
+        .newTextureWithDescriptor(&desc)
+        .expect("не удалось создать LUT воздушной перспективы");
+    tex.setLabel(Some(&super::resources::label("sky: aerial perspective LUT (3D)")));
+    tex
 }
 
 impl super::Renderer {

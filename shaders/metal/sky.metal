@@ -145,6 +145,60 @@ kernel void sky_view_lut_moon(texture2d<float, access::write> out [[texture(0)]]
     sky_view(out, transmittance, multiscatter, frame.camera_pos.y, normalize(sky.moon_dir.xyz), gid);
 }
 
+// Воздушная перспектива (04.2): поток на столбец LUT идёт от камеры вдоль
+// пикселя и пишет накопленные рассеяние и пропускание на границе каждого слоя.
+// Свет — солнце и луна, как в небе; тени рельефа в объёме не учитываются.
+kernel void sky_aerial_lut(texture3d<float, access::write> out [[texture(0)]],
+                           texture2d<float> transmittance [[texture(1)]],
+                           texture2d<float> multiscatter [[texture(2)]],
+                           constant FrameUniforms& frame [[buffer(1)]],
+                           constant SkyInputs& sky [[buffer(2)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    if (any(gid >= uint2(AERIAL_SIZE))) {
+        return;
+    }
+    float2 uv = (float2(gid) + 0.5) / float(AERIAL_SIZE);
+    float4 p = sky.inv_view_proj_rel * float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
+    float3 dir = normalize(p.xyz / p.w);
+    float3 cam = atmosphere_camera(frame.camera_pos.y);
+    float E = sky.params.w;
+    float3 lights[2] = {normalize(sky.sun_dir.xyz), normalize(sky.moon_dir.xyz)};
+    float3 power[2] = {E * SUN_TINT, float3(E * MOON_K * sky.moon_dir.w)};
+    float pr[2], pm[2];
+    for (int k = 0; k < 2; ++k) {
+        float c = dot(dir, lights[k]);
+        pr[k] = phase_rayleigh(c);
+        pm[k] = phase_mie(c);
+    }
+    float3 T = 1.0;
+    float3 L = 0.0;
+    float t0 = 0.0;
+    const int SUB = 2;
+    for (uint slice = 0; slice < AERIAL_SIZE; ++slice) {
+        float w = float(slice + 1) / float(AERIAL_SIZE);
+        float t1 = AERIAL_KM * w * w;
+        float dt = (t1 - t0) / SUB;
+        for (int j = 0; j < SUB; ++j) {
+            float3 q = cam + dir * (t0 + (float(j) + 0.5) * dt);
+            float r = max(length(q), PLANET_R + 0.001);
+            q = normalize(q) * r;
+            Medium m = medium_at(r - PLANET_R);
+            float3 step_t = exp(-m.extinction * dt);
+            float3 s = 0.0;
+            for (int k = 0; k < 2; ++k) {
+                float shadow = ray_sphere(q, lights[k], PLANET_R) > 0.0 ? 0.0 : 1.0;
+                float3 t_l = sample_transmittance(transmittance, q, lights[k]);
+                float3 ms = sample_multiscatter(multiscatter, q, lights[k]);
+                s += power[k] * ((m.rayleigh * pr[k] + m.mie * pm[k]) * t_l * shadow + m.scattering * ms);
+            }
+            L += T * (s - s * step_t) / max(m.extinction, 1e-6);
+            T *= step_t;
+        }
+        t0 = t1;
+        out.write(float4(L, dot(T, float3(1.0 / 3.0))), uint3(gid, slice));
+    }
+}
+
 // --- Свет неба (SH), главное светило и экспозиция: одна группа потоков. -----
 constant uint AMBIENT_THREADS = 64;
 constant uint AMBIENT_SAMPLES = 64 * 32;

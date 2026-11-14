@@ -106,7 +106,8 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
                            texture2d<float> detail [[texture(1)]],
                            device const SkyFrame& skyf [[buffer(4)]],
                            constant SkyInputs& skyin [[buffer(5)]],
-                           texture2d<float> skyview [[texture(2)]]) {
+                           texture2d<float> skyview [[texture(2)]],
+                           texture3d<float> aerial [[texture(3)]]) {
     // Небо 04.1: отражение — из LUT вида неба, свет — от светила с пропусканием.
     float3 sky_cam = atmosphere_camera(frame.camera_pos.y);
     float3 sky_sun = normalize(skyin.sun_dir.xyz);
@@ -247,6 +248,10 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     float3 water = refl * F + SKY_PI * sun * spec + inscatter * (1.0 - F);
     float3 col = mix(water, foam_col, foam) * thin;
     float3 tr = mix(float3(1.0), T * (1.0 - F) * (1.0 - foam), thin);
+    // Воздушная перспектива (04.2): свет воды ослаблен, дымка добавлена в той
+    // доле, которую вода закрывает (сквозь прозрачную воду дымка уже у дна).
+    float4 air = aerial_at(aerial, frame, world - frame.camera_pos.xyz);
+    col = col * air.a + air.rgb * (1.0 - dot(tr, float3(1.0 / 3.0)));
     o.color = float4(col * frame.pre_exposure, 1.0);
     o.transmit = float4(tr, 1.0);
     return o;

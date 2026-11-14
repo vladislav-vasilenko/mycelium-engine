@@ -47,6 +47,8 @@ pub struct Pipelines {
     pub sky_multiscatter: Obj<dyn MTLComputePipelineState>,
     pub sky_view: Obj<dyn MTLComputePipelineState>,
     pub sky_view_moon: Obj<dyn MTLComputePipelineState>,
+    /// LUT воздушной перспективы (04.2).
+    pub sky_aerial: Obj<dyn MTLComputePipelineState>,
     pub sky_ambient: Obj<dyn MTLComputePipelineState>,
     pub sky: Obj<dyn MTLRenderPipelineState>,
     pub exposure_meter: Obj<dyn MTLComputePipelineState>,
@@ -358,6 +360,7 @@ pub fn build_pipelines(
         )?,
         sky_view: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut")?,
         sky_view_moon: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut_moon")?,
+        sky_aerial: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_aerial_lut")?,
         sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
         exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
         terrain_shadow: depth_only_pipeline(

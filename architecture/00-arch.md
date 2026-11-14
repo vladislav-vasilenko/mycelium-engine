@@ -260,7 +260,7 @@ sequenceDiagram
 
 | Структура | Размер, выравнивание | Поля и смещения |
 | --- | --- | --- |
-| `FrameUniforms` | 240 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108, `view_mode u32` @112 (`TerrainView`), `map_size_m f32` @116, `grid_nx u32` @120, `grid_step_m f32` @124 (поле высот кластерного рельефа), `underwater_m f32` @128 (глубина глаз под водой, 0 — над водой), `_pad [f32;3]` @132 (в MSL — `float[3]`, не `float3`), `view_proj_rel [[f32;4];4]` @144 (проекция × поворот вида без сдвига), `cam_hi [f32;4]` @208 (камера, округлённая вниз до 256 м), `cam_lo [f32;4]` @224 (остаток) — AD-49 |
+| `FrameUniforms` | 240 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108, `view_mode u32` @112 (`TerrainView`), `map_size_m f32` @116, `grid_nx u32` @120, `grid_step_m f32` @124 (поле высот кластерного рельефа), `underwater_m f32` @128 (глубина глаз под водой, 0 — над водой), `canopy_eye f32` @132 (доля леса у глаз — тень полога на руках), `_pad [f32;2]` @136 (в MSL — `float[2]`), `view_proj_rel [[f32;4];4]` @144 (проекция × поворот вида без сдвига), `cam_hi [f32;4]` @208 (камера, округлённая вниз до 256 м), `cam_lo [f32;4]` @224 (остаток) — AD-49 |
 | `InstanceData` | 80 Б, 16 | `model [[f32;4];4]` @0, `tint [f32;4]` @64 |
 | `Vertex` | 32 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24. В MSL — `packed_float3`, `packed_float3`, `float2` |
 | `TerrainVertex` | 32 Б, 4 | `position [f32;3]` @0 (мировые м), `normal [f32;3]` @12, `weights [u8;4]` @24 (лес, торф, берег, тропа), `material [u8;4]` @28 (субстрат, русло, влажность, тип берега 0 песок … 255 камень). В MSL — `packed_float3`, `packed_float3`, `uchar4`, `uchar4` |
@@ -311,7 +311,7 @@ sequenceDiagram
 | `targets.rs` | 41 | `Targets::new` — HDR и глубина |
 | `terrain.rs` | 145 | `TerrainGpu`, `TerrainTextures`, `Renderer::set_terrain` |
 | `water.rs` | 52 | `WaterGpu`, `Renderer::set_water` |
-| `terrain_clusters.rs` | 99 | `MAX_VISIBLE_CLUSTERS` = 2¹⁸, `CLUSTER_VERTEX_COUNT` = 384, `ClustersGpu` (поле высот, кластеры, вершины, треугольники, слои весов и материала RGBA8), `ClusterData`, `Renderer::set_terrain_clusters` |
+| `terrain_clusters.rs` | 117 | `MAX_VISIBLE_CLUSTERS` = 2¹⁸, `CLUSTER_VERTEX_COUNT` = 384, `ClustersGpu` (поле высот, кластеры, вершины, треугольники, слои весов, материала и поясов RGBA8), `ClusterData`, `Renderer::set_terrain_clusters` |
 | `hands.rs` | 72 | `MAX_JOINTS` = 64, `HandsGpu` (вершины, индексы, `index_count`, альбедо кожи sRGB с mip), `HandsFrame { uniforms, palette }`, `Renderer::set_hands(vertices, indices, albedo, size)` |
 | `passes/mod.rs` | 97 | трейт `FramePass` (`name`, `encode`), `PassCtx` (рендерер, слот, upload, цели, drawable, вход, readback, вода), `PassBarrier` (`apply`, `apply_always`), реестр `REGISTRY`, `find`, `size2` |
 | `passes/pattern.rs`, `wet_sand.rs`, `scene.rs`, `readback.rs`, `viewmodel.rs`, `tonemap.rs` | 38–165 | по проходу: `PatternPass`, `WetSandPass`, `ScenePass` (`draw_terrain`, `draw_cubes`, `draw_water`), `ReadbackPass` (с ядрами `water_probe` и `skin_probe`), `ViewmodelPass` (HDR — загрузка, глубина — очистка в 0, обход против часовой, без отсечения граней), `TonemapPass` |
@@ -502,6 +502,7 @@ sequenceDiagram
 | `yakushima.py fetch` | скачивает источники из `assets/source/geo/sources.json` в `assets/source/geo/cache/` и сверяет SHA-256 |
 | `osm_yakushima.overpassql`, `osm.py` | запрос Overpass (реки, ручьи, водопады, дороги и тропы, вершины, деревья, приюты, болота, водоёмы) и разбор в мировые метры: `Features` (реки, тропы, дороги, болота, точки), `segments`, `sample_lines`, `to_json` |
 | `gsi.py` | разбор JPGIS GML GSI: `parse_gml` (охват, размер, начало, значения после запятой; −9999 — нет данных), `iter_tiles(archive, kind)` по вложенным zip, `mosaic(archives, kind, bbox, step″)` — мозаика широта × долгота, строка 0 — север. `yakushima.py`: `load_gsi` (DEM5A 0,2″, кэш `.npy` по именам и размерам архивов), `sample_gsi` (среднее по окну ≈ шагу мира без NaN, затем билинейно), `compare_dem` (Copernicus − GSI по поясам) |
+| `cover.py` | пояса растительности: `load_fractions` (доли групп классов ESA WorldCover в окне 30 м), `belts` (низинный лес, кедровый лес якусуги, якудзаса и луга, гранит и застройка по покрову и высоте с шумом ±80 м, граница леса 1500–1750 м), `encode` (RGBA с суммой 255), `report`; `yakushima.py` пишет `cover.png` 2049² × 15 м (`write_cover`) |
 | `hydrology.py` | сток: `fill` (priority flood с подъёмом 1 мм), `d8`, `accumulate`, `flow` (с врезкой известных русел), `channel_segments`, `river_width_m` (1,5 м + 3,5 м × √км²) |
 | `yakushima.py far` | дальний рельеф всего острова: сетка 1025², шаг 30 м; высоты — грунт GSI DEM5A, за охватом GSI — Copernicus; локальная касательная проекция WGS84 (центр 30,335° с. ш., 130,525° в. д.); суша — связная область у центра; знаковое расстояние до кромки (EDT); дно — процедурный шельф до −250 м до батиметрии GEBCO; тип берега по уклону; влажность и температура по высоте; маркеры мест по OSM (конец дороги к Сиратани, Дзёмон-суги, Миянoура, Ханоэго, устье Анбо — на ближайший берег; пляж Нагата — приблизительно); сток по рельефу со сверкой с реками OSM и по рельефу с врезкой OSM; ширина рек по водосбору; болота OSM в маску торфяника; слои формата 3, `features.json`, `flow.png` и `world.json` с `geo` и `features` в `assets/world/yakushima/far/`. Повторный запуск даёт те же файлы |
 
@@ -581,7 +582,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые; `texture(4)` веса, `texture(5)` материал | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
 | `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
@@ -726,7 +727,8 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.8 · Растения: конвейер Blender, LOD, импосторы, ветер, шейдер листвы | — | Не начато |
 | 02.7 · Импорт Якусимы: данные и лицензии, весь остров 30 м | `tools/geo/yakushima.py`, `assets/world/yakushima/far/`, `World.step_m`, `coast_distance.png`, `GeoRef` | Частично (AD-42, AD-43): Copernicus, дно процедурное |
 | 02.7 · Реки по стоку, тропы и места по OSM | `tools/geo/{osm,hydrology}.py`, `features.json`, `flow.png`, `world/features.rs`, `features.h` | Частично (AD-45): сток и сверка готовы, вода в руслах — цвет до 03.2, водопады — только точки OSM |
-| 02.7 · Пояса растительности, игровая зона 1 м (GSI DEM1A) | — | Не начато |
+| 02.7 · Пояса растительности и покров | `tools/geo/cover.py`, `cover.png`, `layers/cover.rs`, `World.cover`, слой `Grass004`, пояса и полог в `terrain.metal`, вид «пояса» | Выполнено (AD-50) |
+| 02.7 · Игровая зона 1 м (GSI DEM1A) | — | Не начато |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
 | 10.2 · glTF и скиннинг, сверка GPU ↔ CPU | `src/hands/{asset,skeleton}.rs`, `hands.metal` (`skin`, `skin_probe`), `SkinnedVertex` в `layout_probe` | Выполнено (AD-44) |
 | 10.3 · Проход `viewmodel` | `ViewmodelPass`, `hands::projection` (60°, 1 см), `frame_passes` | Выполнено; стоимость в GPU capture не замерена |
@@ -1071,6 +1073,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Ещё 96 байт в `FrameUniforms`; при переходе камеры в соседнюю клетку 256 м узоры сдвигаются на ~0,001 периода (незаметно). Мировые координаты на CPU остаются f32: шаг позиции игрока в 28 км ~2 мм.
 - **Пересмотреть.** 08.1 — большие миры из многих карт: floating origin для симуляции.
 
+### AD-50. Пояса растительности слоем покрова; полог леса — подмена до деревьев
+
+- **Решение.** Импорт сводит покров ESA WorldCover (10 м) и высоту в четыре пояса (`cover.png`, RGBA, 15 м): низинный лес, кедровый лес якусуги, якудзаса и луга, гранит и застройка. Шейдер рельефа делит вес «лес» по поясам между опадом, мхом, травой (новый слой `Grass004`), гранитом и почвой; крутые склоны в лесу замшелые. Пока нет деревьев (02.4), полог подменяется: вдали (80–450 м) под лесом рисуется цвет крон с пятнами, вблизи — тень полога (пятна солнца, приглушённое зелёное небо); руки темнеют по доле леса у глаз (`canopy_eye`).
+- **Почему.** Весь остров был одного жёлто-зелёного цвета; пояса по реальному покрову сразу дают узнаваемую Якусиму сверху. Без подмены полога лес сверху выглядит бурым опадом, а пол леса — ярким газоном.
+- **Отброшено.** Расширение `BiomeWeights` до пяти поясов во всей цепочке генератора и слоёв (`biome.png` с суммой 255) — затрагивает первую карту и формат; отдельный необязательный слой проще и обратно совместим. Классы WorldCover напрямую как материалы — нет деления леса по высоте.
+- **Цена.** Подмена полога исчезнет с деревьями 02.4 (её нужно будет убрать); пояса только у кластерного пути (тайлы — старое правило); граница поясов — шум по высоте, а не данные о видах деревьев.
+- **Пересмотреть.** 02.4 — деревья по поясам, убрать подмену полога; 04.2 — настоящие тени вместо пятен солнца.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1122,3 +1132,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.3 | после `e05965e` | AD-47: `world/heightfield.rs` (`World.heightfield`, ходьба по нему), `layers/fine.rs` (`height_fine.png`), `terrain_clusters/` (`build`, `select`, `cache`), `renderer/terrain_clusters.rs`, `terrain_cluster_vs`, виды «кластеры» и «уровни», `TerrainCluster` (раскладка 36 полей), `FrameUniforms.grid_nx/grid_step_m`, буфер видимых кластеров слота, таблицы до 16 буферов, клавиша L и `--tiles`; зависимость `meshopt` 0.7 |
 | 2026-11-14 | 03.1 | после `e5c815d` | AD-48: подводный вид — `FrameUniforms.underwater_m` (144 Б, раскладка 37 полей), `underwater_fog` и константы толщи в `common.h`, дымка в `terrain.metal` и `hands.metal`, поверхность снизу с окном Снелла в `water.metal`, цвет очистки толщи; `--at` (`marker_camera`) |
 | 2026-11-14 | 02.3 | после `67a33c4` | AD-49: рендеринг относительно камеры — `FrameUniforms.view_proj_rel/cam_hi/cam_lo` (240 Б, раскладка 39 полей), `camera_relative`, `clip_from_world`, `pattern_uv` в `common.h`; рельеф, вода, кубы; тест `camera_relative_projection_does_not_jitter_far_from_origin` |
+| 2026-11-14 | 02.7 | после `79d0ca5` | AD-50: пояса растительности — `tools/geo/cover.py`, `cover.png`, `layers/cover.rs`, `World.cover` (`CoverLayer::at`), текстура поясов `texture(6)`, шестой материал `Grass004`, пояса, полог вдали и тень полога в `terrain.metal`, `FrameUniforms.canopy_eye` и тень на руках, вид «пояса», `--at view` |

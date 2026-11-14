@@ -239,6 +239,23 @@ fn yakushima_layers_have_trails_and_rivers() {
         .position;
     let h = w.sample_ground(jomon.x, jomon.z).unwrap().height;
     assert!((1250.0..1380.0).contains(&h), "Дзёмон-суги на {h} м");
+    // Пояса (02.7, шаг 4): у Дзёмон-суги — кедровый лес, на вершине Миянoура —
+    // якудзаса или гранит, в 300 м от устья Анбо — низинный лес или застройка.
+    let c = w.cover.as_ref().expect("cover.png");
+    let size = w.size_m().x;
+    let at = |p: glam::Vec3| c.at(p.x, p.z, size);
+    let j = at(jomon);
+    assert!(j[1] > 0.5, "у Дзёмон-суги пояса {j:?}");
+    let peak = w
+        .markers
+        .iter()
+        .find(|m| m.name.starts_with("гора"))
+        .unwrap()
+        .position;
+    let pk = at(peak);
+    assert!(pk[2] + pk[3] > 0.5, "на вершине пояса {pk:?}");
+    let low = at(mouth + glam::Vec3::new(-300.0, 0.0, 0.0));
+    assert!(low[0] + low[3] > 0.5, "у устья пояса {low:?}");
 }
 
 /// Поле высот генератора совпадает с сеткой тайлов: те же высоты и нормали

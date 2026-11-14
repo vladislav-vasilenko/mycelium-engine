@@ -12,5 +12,6 @@
 | 2 почва | `Ground082S` | https://ambientcg.com/view?id=Ground082S | `d5d1b714dd6e6a118a514c5f8f62da67d525298dea166f908e8086c7274d6f8e` |
 | 3 мох | `Moss002` | https://ambientcg.com/view?id=Moss002 | `727d4e3134f604837c2e11aa3bf12417a022d3c668a6d7339efa572fdbb056bb` |
 | 4 лесная подстилка | `Ground037` | https://ambientcg.com/view?id=Ground037 | `4e69db2b7251b1736fa70fe6fe4ab80d64bd220117dd5dd4c7caaead51c2574e` |
+| 5 трава (якудзаса, луга) | `Grass004` | https://ambientcg.com/view?id=Grass004 | `4b63495f459db8481f4d5144e4e9069345c81cf898cc71f2216f5dd3bb344469` (скачано 2026-11-14) |
 
 Движок читает JPEG при запуске (`src/terrain_materials.rs`) и собирает два массива текстур: альбедо с высотой и нормали с шероховатостью.

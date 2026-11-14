@@ -8,6 +8,12 @@
       "attribution": "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
     },
     {
+      "file": "ESA_WorldCover_10m_2021_v200_N30E129_Map.tif",
+      "url": "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_N30E129_Map.tif",
+      "sha256": "2a97fc8e71ebaecf5179c217db7dbf203c792b440a8779ce37b2fe0d0696c4d5",
+      "attribution": "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium, CC BY 4.0"
+    },
+    {
       "file": "osm_yakushima.json",
       "url": "https://overpass-api.de/api/interpreter",
       "query": "tools/geo/osm_yakushima.overpassql",

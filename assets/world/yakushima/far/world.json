@@ -76,6 +76,11 @@
     "size": 4097,
     "step_m": 7.5
   },
+  "cover": {
+    "file": "cover.png",
+    "size": 2049,
+    "channels": "R низинный лес, G кедровый лес якусуги, B якудзаса и луга, A гранит и застройка"
+  },
   "geo": {
     "center_lat": 30.335,
     "center_lon": 130.525,
@@ -86,6 +91,7 @@
     "projection": "local tangent plane WGS84: x — восток, z — юг, метры",
     "sources": [
       "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+      "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium, CC BY 4.0",
       "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0",
       "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)"
     ]

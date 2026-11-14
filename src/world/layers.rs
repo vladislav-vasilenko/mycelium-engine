@@ -77,6 +77,9 @@ pub struct Manifest {
     /// Привязка к Земле для мира из реальных данных (02.7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo: Option<GeoRef>,
+    /// Пояса растительности (02.7), необязательный.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover: Option<cover::CoverMeta>,
     /// Поле высот мельче сетки слоёв (02.3), необязательное.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_fine: Option<fine::HeightFineMeta>,
@@ -357,6 +360,7 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         coast_distance_range_m: COAST_RANGE_M,
         geo: world.geo.clone(),
         height_fine: fine::export(dir, &world.heightfield, nx, h_range)?,
+        cover: cover::export(dir, &world.cover)?,
         features,
     };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -504,6 +508,9 @@ pub fn import(dir: &Path) -> Result<World, String> {
     if let Some(meta) = &m.features {
         world.features = Some(import_features(dir, meta, world.size_m().x)?);
     }
+    if let Some(meta) = &m.cover {
+        world.cover = Some(cover::import(dir, meta)?);
+    }
     if let Some(meta) = &m.height_fine {
         world.heightfield = fine::import(dir, meta, m.height_range_m, world.size_m().x)?;
     }
@@ -571,6 +578,7 @@ pub fn preview(world: &World, (nx, nz): (usize, usize)) -> Vec<u8> {
     rgb
 }
 
+mod cover;
 mod fine;
 #[cfg(test)]
 mod tests;

@@ -111,7 +111,11 @@ impl App {
             grid_nx: self.world.heightfield.nx as u32,
             grid_step_m: self.world.heightfield.step_m,
             underwater_m,
-            _pad: [0.0; 3],
+            canopy_eye: self.world.cover.as_ref().map_or(0.0, |c| {
+                let w = c.at(camera.position.x, camera.position.z, self.world.size_m().x);
+                w[0] + w[1]
+            }),
+            _pad: [0.0; 2],
             // Относительно камеры (AD-49): поворот вида без сдвига, камера =
             // крупная часть (кратна 256 м) + остаток.
             view_proj_rel: {

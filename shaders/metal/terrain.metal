@@ -17,6 +17,7 @@ struct TerrainVaryings {
     float3 normal;
     float4 weights;   // лес, торф, берег, тропа
     float4 material;  // субстрат (индекс), русло, влажность почвы, тип берега
+    float4 cover;     // пояса (02.7): низинный лес, кедровый лес, якудзаса, гранит
     uint cluster [[flat]];  // номер кластера (02.3), 0 — тайлы уровня 0
     uint depth [[flat]];    // уровень иерархии кластера
 };
@@ -34,6 +35,7 @@ vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
     out.weights = float4(v.weights) / 255.0;
     out.material = float4(float(v.material.x), float(v.material.y) / 255.0,
                           float(v.material.z) / 255.0, float(v.material.w) / 255.0);
+    out.cover = 0.0;
     out.cluster = 0;
     out.depth = 0;
     return out;
@@ -51,7 +53,8 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
                                           device const uint* cluster_triangles [[buffer(7)]],
                                           device const uint* visible [[buffer(8)]],
                                           texture2d<float> layer_weights [[texture(4)]],
-                                          texture2d<float> layer_material [[texture(5)]]) {
+                                          texture2d<float> layer_material [[texture(5)]],
+                                          texture2d<float> layer_cover [[texture(6)]]) {
     uint cid = visible[iid];
     TerrainCluster c = clusters[cid];
     uint tri = vid / 3;
@@ -66,6 +69,7 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
         out.normal = float3(0, 1, 0);
         out.weights = 0.0;
         out.material = 0.0;
+        out.cover = 0.0;
         return out;
     }
     uint packed = cluster_triangles[c.triangle_offset + tri];
@@ -98,6 +102,8 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
     uint w = layer_material.get_width();
     uint2 near = uint2(clamp(world.xz / frame.map_size_m * float(w - 1) + 0.5, 0.0, float(w - 1)));
     out.material = float4(round(layer_material.read(near).x * 255.0), m.y, m.z, m.w);
+    float cn = float(layer_cover.get_width());
+    out.cover = layer_cover.sample(ls, (world.xz / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
     return out;
 }
 
@@ -107,15 +113,16 @@ constant int MAT_SAND = 1;
 constant int MAT_SOIL = 2;
 constant int MAT_MOSS = 3;
 constant int MAT_FOREST = 4;
-constant int MAT_COUNT = 5;
+constant int MAT_GRASS = 5;
+constant int MAT_COUNT = 6;
 // Размер повтора слоя на земле, м.
-constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0};
+constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0, 2.0};
 // Насколько слой темнеет и блестит от влаги (песок впитывает и блестит сильнее камня).
-constant float MAT_POROSITY[MAT_COUNT] = {0.25, 1.0, 0.7, 0.4, 0.5};
+constant float MAT_POROSITY[MAT_COUNT] = {0.25, 1.0, 0.7, 0.4, 0.5, 0.4};
 // Цвета слоёв в отладочном виде «слои материалов».
 constant float3 MAT_DEBUG[MAT_COUNT] = {
     float3(0.45, 0.45, 0.48), float3(0.95, 0.85, 0.45), float3(0.45, 0.28, 0.12),
-    float3(0.15, 0.65, 0.15), float3(0.45, 0.55, 0.15)};
+    float3(0.15, 0.65, 0.15), float3(0.45, 0.55, 0.15), float3(0.6, 0.9, 0.3)};
 
 // Виды: src/terrain_materials.rs, TerrainView.
 constant uint VIEW_LIT = 0;
@@ -128,6 +135,7 @@ constant uint VIEW_WETNESS = 6;
 constant uint VIEW_MATERIALS = 7;
 constant uint VIEW_CLUSTERS = 11;
 constant uint VIEW_LEVELS = 12;
+constant uint VIEW_COVER = 13;
 constant uint VIEW_RAW = 15;
 
 struct MatSample {
@@ -207,19 +215,42 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
 
     // Доли слоёв до смешивания по высоте.
     float wl[MAT_COUNT];
-    wl[MAT_FOREST] = in.weights.x * (1.0 - 0.6 * moist);
-    wl[MAT_MOSS] = in.weights.x * 0.6 * moist + in.weights.y * 0.6;
-    wl[MAT_SOIL] = in.weights.y * 0.4;
-    wl[MAT_SAND] = in.weights.z * (1.0 - rocky);
-    wl[MAT_ROCK] = in.weights.z * rocky;
+    float forest_w = in.weights.x;
+    float4 cv = in.cover;
+    float cv_sum = cv.x + cv.y + cv.z + cv.w;
+    bool belts = cv_sum > 0.05;
+    cv = belts ? cv / cv_sum : float4(0.0);
+    if (belts) {
+        // Пояса Якусимы (02.7): низинный лес — опад с пятнами мха, кедровый —
+        // сплошной мох, якудзаса и луга — трава, голое — гранит в горах и
+        // почва с гравием внизу.
+        float high = smoothstep(800.0, 1300.0, in.world.y);
+        wl[MAT_FOREST] = forest_w * (cv.x * 0.75 + cv.y * 0.45);
+        wl[MAT_MOSS] = forest_w * (cv.x * 0.25 * (0.4 + moist) + cv.y * 0.55) + in.weights.y * 0.6;
+        wl[MAT_GRASS] = forest_w * cv.z;
+        wl[MAT_SOIL] = in.weights.y * 0.4 + forest_w * cv.w * (1.0 - high);
+        wl[MAT_SAND] = in.weights.z * (1.0 - rocky);
+        wl[MAT_ROCK] = in.weights.z * rocky + forest_w * cv.w * high;
+    } else {
+        wl[MAT_FOREST] = in.weights.x * (1.0 - 0.6 * moist);
+        wl[MAT_MOSS] = in.weights.x * 0.6 * moist + in.weights.y * 0.6;
+        wl[MAT_SOIL] = in.weights.y * 0.4;
+        wl[MAT_SAND] = in.weights.z * (1.0 - rocky);
+        wl[MAT_ROCK] = in.weights.z * rocky;
+        wl[MAT_GRASS] = 0.0;
+    }
     // Поверх: тропа — почва, русло — камень с песком, крутые склоны и дно у
     // каменистого берега — камень, остальное дно — песок.
     float river = max(in.material.y, bank);
     float steep = smoothstep(0.22, 0.42, slope);
     float under = smoothstep(0.0, -0.6, in.world.y);
-    float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     over[MAT_SOIL] += trail + 0.4 * road_px;
-    over[MAT_ROCK] += 0.7 * river + steep + under * rocky + 0.6 * road_px;
+    // В лесных поясах крутые склоны и выходы камня замшелые (Якусима — один из
+    // самых влажных лесов Японии): часть «крутого камня» отдаётся мху.
+    float mossy = belts ? 0.65 * (cv.x * 0.5 + cv.y) * forest_w : 0.0;
+    over[MAT_ROCK] += 0.7 * river + steep * (1.0 - mossy) + under * rocky + 0.6 * road_px;
+    over[MAT_MOSS] += steep * mossy;
     over[MAT_SAND] += 0.3 * river + under * (1.0 - rocky);
     float cover_sum = trail + road_px + river + steep + under;
     float cover = saturate(cover_sum);
@@ -267,6 +298,36 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Влажная почва торфяника темнее.
     albedo *= 1.0 - 0.3 * moist * in.weights.y;
 
+    // Тень полога вблизи (до деревьев 02.4): под лесом прямое солнце доходит
+    // пятнами, рассеянный свет приглушён — пол леса не выглядит газоном.
+    float canopy_shade = 0.0;
+    float sun_flecks = 1.0;
+    if (belts) {
+        float near_k = 1.0 - smoothstep(80.0, 450.0, length(in.rel));
+        canopy_shade = (cv.x + cv.y) * forest_w * near_k;
+        float fleck = detail.sample(s, pattern_uv(frame, lxz, 6.0)).r * 0.6
+                    + detail.sample(s, pattern_uv(frame, lxz, 2.3)).g * 0.4;
+        sun_flecks = mix(1.0, smoothstep(0.55, 0.75, fleck) * 0.6 + 0.08, canopy_shade);
+    }
+
+    // Полог леса вдали (до деревьев 02.4): с 80–450 м под лесом виден не опад,
+    // а кроны — тёмная зелень с пятнами крон; у кедрового пояса темнее и синее.
+    if (belts) {
+        float tree = (cv.x + cv.y) * forest_w * (1.0 - steep * 0.7);
+        float far_k = smoothstep(80.0, 450.0, length(in.rel));
+        float3 crown = mix(float3(0.050, 0.090, 0.030), float3(0.026, 0.052, 0.030),
+                           cv.y / max(cv.x + cv.y, 1e-4));
+        crown *= 0.7 + 0.6 * detail.sample(s, pattern_uv(frame, lxz, 31.0)).g;
+        // Якудзаса вдали — ровная светлая зелень.
+        float3 bamboo = float3(0.10, 0.14, 0.05);
+        float k_tree = tree * far_k * 0.92;
+        float k_bamboo = cv.z * forest_w * far_k * 0.6;
+        albedo = mix(albedo, crown, k_tree);
+        albedo = mix(albedo, bamboo, k_bamboo * (1.0 - k_tree));
+        rough = mix(rough, 0.85, k_tree);
+        nxy *= 1.0 - k_tree;
+    }
+
     // Мокрый песок: темнее, глаже, с бликом.
     float wet = saturate(wet_mask * porosity);
     albedo *= mix(1.0, 0.4, wet);
@@ -279,6 +340,15 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
     float3 N = normalize(t * nxy.x + b * nxy.y + n * nz);
 
+    if (frame.view_mode == VIEW_COVER) {
+        // Пояса: салатовый — низинный лес, тёмно-зелёный — кедровый лес,
+        // жёлтый — якудзаса и луга, серый — гранит и застройка; синий — нет слоя.
+        float3 c = belts ? cv.x * float3(0.45, 0.80, 0.25) + cv.y * float3(0.03, 0.28, 0.10)
+                           + cv.z * float3(0.95, 0.80, 0.20) + cv.w * float3(0.50, 0.50, 0.50)
+                         : float3(0.1, 0.2, 0.5);
+        float shade = 0.35 + 0.65 * saturate(dot(n, -frame.light_dir.xyz));
+        return float4(c * shade, 1.0);
+    }
     if (frame.view_mode == VIEW_CLUSTERS || frame.view_mode == VIEW_LEVELS) {
         // Кластеры — случайный цвет по номеру, уровни — от синего (0) к красному.
         uint hsh = in.cluster * 2654435761u;
@@ -345,7 +415,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float spec = D * G * F / (4.0 * nv + 1e-4);
     const float3 sun = float3(1.15, 1.1, 1.0);
     float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
-    float3 color = albedo * (sun * nl + sky) + sun * spec;
+    // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
+    float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);
+    float3 color = albedo * (sun * nl * sun_flecks + sky_c) + sun * spec * sun_flecks;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:

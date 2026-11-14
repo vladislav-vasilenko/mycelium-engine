@@ -25,7 +25,7 @@ pub struct MaterialLayer {
 
 /// Порядок слоёв = индекс в массиве текстур = `MAT_*` в MSL. Размер повтора
 /// каждого слоя на земле — `MAT_TILE_M` в `terrain.metal`.
-pub const LAYERS: [MaterialLayer; 5] = [
+pub const LAYERS: [MaterialLayer; 6] = [
     MaterialLayer {
         id: "Rock062",
         role: "камень",
@@ -45,6 +45,10 @@ pub const LAYERS: [MaterialLayer; 5] = [
     MaterialLayer {
         id: "Ground037",
         role: "лесная подстилка",
+    },
+    MaterialLayer {
+        id: "Grass004",
+        role: "трава",
     },
 ];
 
@@ -184,12 +188,14 @@ pub enum TerrainView {
     Clusters = 11,
     /// Уровень иерархии кластера: синий — исходная сетка, красный — грубый.
     Levels = 12,
+    /// Пояса растительности (02.7): лес низин, кедровый лес, якудзаса, гранит.
+    Cover = 13,
     /// HDR = (высота над камерой м, уклон градусы, индекс доминирующего биома, тип берега).
     Raw = 15,
 }
 
 impl TerrainView {
-    const CYCLE: [TerrainView; 13] = [
+    const CYCLE: [TerrainView; 14] = [
         TerrainView::Lit,
         TerrainView::Height,
         TerrainView::Slope,
@@ -203,6 +209,7 @@ impl TerrainView {
         TerrainView::Surf,
         TerrainView::Clusters,
         TerrainView::Levels,
+        TerrainView::Cover,
     ];
 
     /// Следующий вид по клавише V (`back` — Shift+V).
@@ -228,6 +235,7 @@ impl TerrainView {
             "surf" => TerrainView::Surf,
             "clusters" => TerrainView::Clusters,
             "levels" => TerrainView::Levels,
+            "cover" => TerrainView::Cover,
             _ => return None,
         })
     }
@@ -247,6 +255,7 @@ impl TerrainView {
             TerrainView::Surf => "вода: пена и заплеск",
             TerrainView::Clusters => "кластеры",
             TerrainView::Levels => "уровни кластеров",
+            TerrainView::Cover => "пояса растительности",
             TerrainView::Raw => "числа (самопроверка)",
         }
     }

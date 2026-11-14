@@ -29,6 +29,7 @@ import tifffile
 from PIL import Image
 from scipy import ndimage
 
+import cover
 import gsi
 import hydrology
 import osm
@@ -309,6 +310,11 @@ def build_far():
         "coast_distance_range_m": list(COAST_RANGE_M),
         "features": {"file": "features.json"},
         "height_fine": {"file": "height_fine.png", "size": FINE_NODES, "step_m": FINE_STEP_M},
+        "cover": {
+            "file": "cover.png",
+            "size": COVER_NODES,
+            "channels": "R низинный лес, G кедровый лес якусуги, B якудзаса и луга, A гранит и застройка",
+        },
         "geo": {
             "center_lat": CENTER_LAT,
             "center_lon": CENTER_LON,
@@ -436,10 +442,30 @@ def write_fine(mosaic, coarse, coarse_land, lo, hi):
     land = np.isfinite(g) & (g > 0.0) & ndimage.binary_dilation(island, iterations=4)
     fine = np.where(land, g, np.minimum(base, -0.3))
     write_png16(OUT_FAR / "height_fine.png", quantize(fine, lo, hi, 65535))
+    write_cover(fine, land)
     print(
         f"поле 7,5 м: {FINE_NODES}², суша {land.sum() * FINE_STEP_M**2 / 1e6:.1f} км², "
         f"высшая точка {fine.max():.0f} м"
     )
+
+
+# Пояса растительности (02.7, шаг 4): 2049² × 15 м — каждый второй узел поля 7,5 м.
+COVER_NODES = 2049
+WORLDCOVER = "ESA_WorldCover_10m_2021_v200_N30E129_Map.tif"
+
+
+def write_cover(fine, fine_land):
+    stride = (FINE_NODES - 1) // (COVER_NODES - 1)
+    h = fine[::stride, ::stride]
+    land = fine_land[::stride, ::stride]
+    step = FINE_STEP_M * stride
+    idx = np.arange(COVER_NODES) * step
+    xs, zs = np.meshgrid(idx, idx)
+    lat, lon = world_to_geo(xs, zs)
+    frac, origin = cover.load_fractions(CACHE / WORLDCOVER, GSI_BBOX)
+    w = cover.belts(frac, origin, lat, lon, h, land)
+    cover.write(OUT_FAR / "cover.png", w)
+    cover.report(w, land, step * step)
 
 
 def snap_to_shore(x, z, coast_d, lo=8.0, hi=40.0):

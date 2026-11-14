@@ -82,6 +82,7 @@ impl App {
             layer_size,
             weights_rgba: &weights_rgba,
             material_rgba: &material_rgba,
+            cover: self.world.cover.as_ref().map(|c| (&c.rgba[..], c.size)),
         })?;
         eprintln!(
             "кластеры рельефа: {} кластеров, {} групп, {} уровней, {} треугольников (уровень 0 — {}), {:.1} МБ, {} за {:.0} мс",

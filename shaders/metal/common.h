@@ -16,7 +16,8 @@ struct FrameUniforms {
     uint grid_nx;          // поле высот кластерного рельефа: узлов по x
     float grid_step_m;     // и шаг, м
     float underwater_m;    // глубина глаз под водой, 0 — над водой
-    float _pad_uw[3];      // не float3: тот выравнивается по 16 и раздул бы структуру
+    float canopy_eye;      // доля леса у глаз 0…1: тень полога на руках
+    float _pad_uw[2];      // не float2/float3: выравнивание раздуло бы структуру
     float4x4 view_proj_rel; // проекция × поворот вида без сдвига (AD-49)
     float4 cam_hi;         // камера = cam_hi + cam_lo; cam_hi кратна 256 м
     float4 cam_lo;

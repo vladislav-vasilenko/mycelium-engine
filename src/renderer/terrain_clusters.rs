@@ -23,6 +23,8 @@ pub(super) struct ClustersGpu {
     /// (субстрат, русло, влажность, тип берега), RGBA8.
     pub weights: Obj<dyn MTLTexture>,
     pub material: Obj<dyn MTLTexture>,
+    /// Пояса растительности RGBA8 (02.7); без слоя — 1 × 1 нулей.
+    pub cover: Obj<dyn MTLTexture>,
 }
 
 /// Данные кластерного рельефа для `Renderer::set_terrain_clusters`.
@@ -35,6 +37,8 @@ pub struct ClusterData<'a> {
     pub layer_size: u32,
     pub weights_rgba: &'a [u8],
     pub material_rgba: &'a [u8],
+    /// Пояса растительности: RGBA8 и сторона, если есть.
+    pub cover: Option<(&'a [u8], u32)>,
 }
 
 impl Renderer {
@@ -60,6 +64,16 @@ impl Renderer {
                 name,
             )
         };
+        let none = [0u8; 4];
+        let (cover_rgba, cover_size) = d.cover.unwrap_or((&none, 1));
+        let cover = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm,
+            cover_size,
+            1,
+            false,
+            "terrain layer: vegetation belts",
+        )?;
         let weights = layer("terrain layer: biome weights")?;
         let material = layer("terrain layer: material")?;
         self.upload_textures(&[
@@ -75,6 +89,12 @@ impl Renderer {
                 pixel_bytes: 4,
                 mips: false,
             },
+            TextureUpload {
+                texture: &cover,
+                data: cover_rgba,
+                pixel_bytes: 4,
+                mips: false,
+            },
         ])?;
         if let Some(old) = self.clusters.replace(ClustersGpu {
             heights,
@@ -83,9 +103,10 @@ impl Renderer {
             triangles,
             weights,
             material,
+            cover,
         }) {
             self.retire(
-                vec![old.weights, old.material],
+                vec![old.weights, old.material, old.cover],
                 Some(Box::new((
                     old.heights,
                     old.clusters,

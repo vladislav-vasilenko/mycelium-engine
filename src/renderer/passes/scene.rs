@@ -146,6 +146,7 @@ fn draw_clusters(
         table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
         table.setTexture_atIndex(c.weights.gpuResourceID(), 4);
         table.setTexture_atIndex(c.material.gpuResourceID(), 5);
+        table.setTexture_atIndex(c.cover.gpuResourceID(), 6);
     }
     enc.pushDebugGroup(&label(&format!("terrain: {count} clusters")));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain_clusters);

@@ -68,8 +68,11 @@ impl Args {
                         Some("trail") => Some(MarkerKind::TrailStart),
                         Some("mouth") => Some(MarkerKind::RiverMouth),
                         Some("beach") => Some(MarkerKind::ShoreEnd),
+                        Some("view") => Some(MarkerKind::Viewpoint),
                         _ => {
-                            eprintln!("--at: trail, mouth, beach");
+                            eprintln!(
+                                "--at: trail, mouth, beach, view (первая смотровая точка: у Якусимы — Дзёмон-суги)"
+                            );
                             None
                         }
                     };

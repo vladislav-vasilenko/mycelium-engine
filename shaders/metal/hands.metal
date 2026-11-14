@@ -69,7 +69,11 @@ fragment float4 hands_fs(HandsOut in [[stage_in]],
     float spec = 0.08 * pow(saturate(dot(N, H)), 24.0) * saturate(dot(N, L));
     const float3 sun = float3(1.15, 1.1, 1.0);
     float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
-    float3 color = albedo * (sun * (wrap + scatter) + sky) + sun * spec;
+    // Под пологом леса (02.7): прямого солнца мало, небо зеленее и тусклее.
+    float shade = frame.canopy_eye;
+    float3 sun_k = sun * mix(1.0, 0.22, shade);
+    sky *= mix(float3(1.0), float3(0.45, 0.55, 0.40), shade);
+    float3 color = albedo * (sun_k * (wrap + scatter) + sky) + sun_k * spec;
     if (frame.underwater_m > 0.0) {
         color *= exp(-UW_ABSORB * frame.underwater_m);
         color = underwater_fog(color, 0.4, frame.underwater_m);

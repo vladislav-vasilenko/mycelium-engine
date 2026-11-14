@@ -185,6 +185,30 @@ pub struct World {
     pub heightfield: heightfield::HeightField,
     /// Тропы, дороги и реки уже шага сетки (`features.json`), если есть.
     pub features: Option<features::FeatureSet>,
+    /// Пояса растительности (`cover.png`), если есть (02.7).
+    pub cover: Option<CoverLayer>,
+}
+
+/// Пояса растительности на квадратной сетке на всю карту: RGBA, сумма 255 на
+/// суше (низинный лес, кедровый лес, якудзаса и луга, гранит и застройка).
+#[derive(Clone, Debug)]
+pub struct CoverLayer {
+    pub size: u32,
+    pub rgba: Vec<u8>,
+}
+
+impl CoverLayer {
+    /// Веса поясов в ближайшем узле (0…1); за картой — нули.
+    pub fn at(&self, x: f32, z: f32, map_size_m: f32) -> [f32; 4] {
+        let n = self.size as f32;
+        let i = (x / map_size_m * (n - 1.0)).round();
+        let j = (z / map_size_m * (n - 1.0)).round();
+        if !(0.0..n).contains(&i) || !(0.0..n).contains(&j) {
+            return [0.0; 4];
+        }
+        let k = (j as usize * self.size as usize + i as usize) * 4;
+        std::array::from_fn(|c| self.rgba[k + c] as f32 / 255.0)
+    }
 }
 
 impl World {
@@ -304,6 +328,7 @@ impl World {
             ),
             fields: grid.fields,
             features: None,
+            cover: None,
         };
         world.markers = match markers {
             Some(mut m) => {

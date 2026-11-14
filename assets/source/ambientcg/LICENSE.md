@@ -22,3 +22,12 @@
 | --- | --- | --- | --- |
 | кора криптомерии якусуги (подкрашивается в шейдере) | `Bark012` | https://ambientcg.com/view?id=Bark012 | `6e26e4c24fe53cf564909b371afbfc84041d9077f39bf8eb4ae16951df1c4763` |
 | кора широколиственных деревьев | `Bark007` | https://ambientcg.com/view?id=Bark007 | `a376a5208e7e9cb20475805042aee6c7d9fd1d5bcd8f80f38f75bea6e063c6f4` |
+
+Переходные слои рельефа (02.2, итерация 3), скачано 2026-11-15, наборы `*_2K-JPG.zip`, карты как у основных слоёв:
+
+| Слой движка | Материал | Страница | SHA-256 архива |
+| --- | --- | --- | --- |
+| 6 тёмный опад | `Ground023` | https://ambientcg.com/view?id=Ground023 | `aaea0162927a2442098e823304bc268fa53b3a26ddb3630a142573e78948bd4c` |
+| 7 листовой опад (2048 × 1024, движок складывает вдвое) | `Ground078` | https://ambientcg.com/view?id=Ground078 | `f0b7f313a5d504c085e95c5d655914b6ce430de146ab056dd7caeeaaef44abe2` |
+| 8 щебень | `Ground081` | https://ambientcg.com/view?id=Ground081 | `c61058354610a23dbb1b0a2a456001fab1ccb0ad592fdcc9a566f88b850ec7b1` |
+| 9 мшистый камень | `Rock064` | https://ambientcg.com/view?id=Rock064 | `225f88f2e8bfdac834027c497115f1f7bb82653a53e904987fa6b071fda94d9c` |

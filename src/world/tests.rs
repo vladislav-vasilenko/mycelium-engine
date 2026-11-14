@@ -324,15 +324,20 @@ fn yakushima_trails_are_benches() {
     let o = z.origin(&w.heightfield);
     let f = w.features.as_ref().unwrap();
     let (mut n, mut flat) = (0, 0);
-    for s in f.segments.iter().filter(|s| s.kind == super::features::KIND_TRAIL) {
+    for s in f
+        .segments
+        .iter()
+        .filter(|s| s.kind == super::features::KIND_TRAIL)
+    {
         let a = glam::Vec2::from(s.a) - o;
         let b = glam::Vec2::from(s.b) - o;
         let m = (a + b) * 0.5;
         let along = (b - a).normalize_or_zero();
         let perp = glam::Vec2::new(-along.y, along.x) * (s.half_width * 0.8);
-        let (Some((h1, _)), Some((h2, _))) =
-            (z.grid.sample(m.x + perp.x, m.y + perp.y), z.grid.sample(m.x - perp.x, m.y - perp.y))
-        else {
+        let (Some((h1, _)), Some((h2, _))) = (
+            z.grid.sample(m.x + perp.x, m.y + perp.y),
+            z.grid.sample(m.x - perp.x, m.y - perp.y),
+        ) else {
             continue;
         };
         n += 1;

@@ -26,7 +26,7 @@ pub struct MaterialLayer {
 
 /// Порядок слоёв = индекс в массиве текстур = `MAT_*` в MSL. Размер повтора
 /// каждого слоя на земле — `MAT_TILE_M` в `terrain.metal`.
-pub const LAYERS: [MaterialLayer; 6] = [
+pub const LAYERS: [MaterialLayer; 10] = [
     MaterialLayer {
         id: "Rock062",
         role: "камень",
@@ -50,6 +50,23 @@ pub const LAYERS: [MaterialLayer; 6] = [
     MaterialLayer {
         id: "Grass004",
         role: "трава",
+    },
+    // Переходные слои (02.2, итерация 3): между мхом, почвой и камнем.
+    MaterialLayer {
+        id: "Ground023",
+        role: "тёмный опад с веточками",
+    },
+    MaterialLayer {
+        id: "Ground078",
+        role: "листовой опад",
+    },
+    MaterialLayer {
+        id: "Ground081",
+        role: "щебень",
+    },
+    MaterialLayer {
+        id: "Rock064",
+        role: "мшистый камень",
     },
 ];
 
@@ -90,18 +107,25 @@ fn decode(path: &Path, channels: usize) -> Result<Vec<u8>, String> {
         ZCursor::new(data),
         DecoderOptions::default().jpeg_set_out_colorspace(cs),
     );
-    let pixels = dec
+    let mut pixels = dec
         .decode()
         .map_err(|e| format!("{}: {e:?}", path.display()))?;
     let info = dec
         .info()
         .ok_or_else(|| format!("{}: нет заголовка", path.display()))?;
-    if (info.width as usize, info.height as usize) != (MATERIAL_SIZE, MATERIAL_SIZE) {
+    let (w, mut h) = (info.width as usize, info.height as usize);
+    // Бесшовный скан 2 : 1 (например, Ground078) — дважды по вертикали: квадрат
+    // с теми же пропорциями на земле.
+    if w == MATERIAL_SIZE && h * 2 == MATERIAL_SIZE {
+        pixels.extend_from_within(..);
+        h *= 2;
+    }
+    if (w, h) != (MATERIAL_SIZE, MATERIAL_SIZE) {
         return Err(format!(
             "{}: размер {}×{}, нужно {MATERIAL_SIZE}×{MATERIAL_SIZE}",
             path.display(),
-            info.width,
-            info.height
+            w,
+            h
         ));
     }
     if pixels.len() != MATERIAL_SIZE * MATERIAL_SIZE * channels {

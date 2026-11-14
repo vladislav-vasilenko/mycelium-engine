@@ -1,5 +1,6 @@
 #include "common.h"
 #include "water.h"
+#include "sky.h"
 
 // Море и прибой (подэтап 03.1). Кольцевая сетка вокруг камеры: экземпляр —
 // уровень, вершина — узел сетки (N + 1)². Цвет воды по толщине до дна из поля
@@ -96,17 +97,24 @@ struct WaterOut {
 };
 
 
-// Временное небо до 04.1: градиент от горизонта к зениту.
-inline float3 sky_color(float3 dir) {
-    float up = saturate(dir.y);
-    return mix(float3(0.50, 0.60, 0.74), float3(0.18, 0.32, 0.60), sqrt(up));
-}
+
 
 fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
                            constant FrameUniforms& frame [[buffer(1)]],
                            constant SeaParams& sp [[buffer(2)]],
                            texture2d<float> field [[texture(0)]],
-                           texture2d<float> detail [[texture(1)]]) {
+                           texture2d<float> detail [[texture(1)]],
+                           device const SkyFrame& skyf [[buffer(4)]],
+                           constant SkyInputs& skyin [[buffer(5)]],
+                           texture2d<float> skyview [[texture(2)]]) {
+    // Небо 04.1: отражение — из LUT вида неба, свет — от светила с пропусканием.
+    float3 sky_cam = atmosphere_camera(frame.camera_pos.y);
+    float3 sky_sun = normalize(skyin.sun_dir.xyz);
+    float sky_e = skyin.params.w;
+    auto sky_color = [&](float3 dir) {
+        dir.y = max(dir.y, 0.01);
+        return sample_skyview(skyview, sky_cam, normalize(dir), sky_sun) * sky_e;
+    };
     // Внутреннюю часть уровня рисует более мелкий уровень.
     if (all(in.base > in.inner_min) && all(in.base < in.inner_max)) {
         discard_fragment();
@@ -173,13 +181,14 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
         float3 Rf = refract(I, Nd, 1.33);
         float3 c;
         if (dot(Rf, Rf) < 1e-6) {
-            c = UW_COLOR * 0.6;
+            c = UW_COLOR * 0.6 * underwater_light(skyf);
         } else {
             float F = 0.02 + 0.98 * pow(1.0 - saturate(dot(-I, Nd)), 5.0);
-            c = sky_color(Rf) * (1.0 - F) * 1.3 + UW_COLOR * F;
+            c = sky_color(Rf) * (1.0 - F) + UW_COLOR * underwater_light(skyf) * F;
         }
-        c = underwater_fog(c, length(world - frame.camera_pos.xyz), frame.underwater_m);
-        o.color = float4(c, 1.0);
+        c = underwater_fog(c, length(world - frame.camera_pos.xyz), frame.underwater_m,
+                           underwater_light(skyf));
+        o.color = float4(c * frame.pre_exposure, 1.0);
         o.transmit = float4(0.0);
         return o;
     }
@@ -196,14 +205,16 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     float3 refl = sky_color(R);
 
     // Блик солнца (GGX, гладкая вода).
-    float3 L = -frame.light_dir.xyz;
+    float3 L = skyf.light_dir.xyz;
     float3 H = normalize(L + V);
     float nl = saturate(dot(N, L));
     float nh = saturate(dot(N, H));
     float a2 = 0.0016;
     float dd = nh * nh * (a2 - 1.0) + 1.0;
     float spec = a2 / (WATER_PI * dd * dd) * F * nl / max(4.0 * nv, 0.05);
-    const float3 sun = float3(1.15, 1.1, 1.0);
+    // «Солнце» — освещённость светила / π в единицах материалов (sky.h).
+    float3 sun = sky_sun_term(skyf);
+    float3 sky_up = sky_ambient_term(skyf, float3(0, 1, 0));
 
     // Пропускание по пути взгляда через толщу: красный гаснет быстрее —
     // бирюза на мелководье, синева на глубине.
@@ -214,7 +225,7 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     // иначе сквозь неё просвечивает цвет очистки (небо).
     float2 edge_d = min(world.xz, float2(frame.map_size_m) - world.xz);
     T *= smoothstep(0.0, 30.0, min(edge_d.x, edge_d.y));
-    float3 scatter = float3(0.010, 0.085, 0.095) * (sun * 0.6 + float3(0.3, 0.35, 0.4));
+    float3 scatter = float3(0.010, 0.085, 0.095) * (sun * 0.6 + sky_up) * 2.6;
     float3 inscatter = scatter * (1.0 - T);
 
     // Пена: обрушение и камни из функции волн, кромка заплеска, шум для рваного края.
@@ -223,7 +234,7 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     float noise2 = detail.sample(s, world.xz / 1.7 + fdir * t * 0.2).b;
     float edge = (1.0 - smoothstep(0.0, 0.14, depth)) * in.swash;
     float foam = saturate((in.foam * 1.3 + edge) * smoothstep(0.4, 0.8, noise * 0.75 + noise2 * 0.35));
-    float3 foam_col = float3(0.85, 0.88, 0.9) * (sun * saturate(dot(in.normal, L)) * 0.8 + 0.35);
+    float3 foam_col = float3(0.85, 0.88, 0.9) * (sun * saturate(dot(in.normal, L)) * 0.8 + sky_up);
 
     // Мягкая кромка: слой тоньше ~15 см постепенно растворяется. Видимая граница
     // определяется прозрачностью, а не пересечением треугольников воды и рельефа.
@@ -233,10 +244,10 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     // равной глубины, а не диагонали сетки рельефа.
     float thin = smoothstep(0.03, 0.2, depth);
     thin *= thin;
-    float3 water = refl * F + sun * spec + inscatter * (1.0 - F);
+    float3 water = refl * F + SKY_PI * sun * spec + inscatter * (1.0 - F);
     float3 col = mix(water, foam_col, foam) * thin;
     float3 tr = mix(float3(1.0), T * (1.0 - F) * (1.0 - foam), thin);
-    o.color = float4(col, 1.0);
+    o.color = float4(col * frame.pre_exposure, 1.0);
     o.transmit = float4(tr, 1.0);
     return o;
 }

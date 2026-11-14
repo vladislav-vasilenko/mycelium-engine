@@ -29,6 +29,7 @@ impl FramePass for TonemapPass {
         let table = ctx.slot.table(Table::Tonemap);
         unsafe {
             table.setAddress_atIndex(ctx.upload_addr, 1);
+            table.setAddress_atIndex(ctx.r.sky.state.gpuAddress(), 2);
             table.setTexture_atIndex(ctx.targets.hdr.gpuResourceID(), 0);
         }
         enc.setRenderPipelineState(&ctx.r.pipelines.tonemap);

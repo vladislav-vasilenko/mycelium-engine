@@ -20,6 +20,7 @@ mod passes;
 mod readback;
 mod resources;
 pub mod shaders;
+mod sky;
 mod targets;
 mod terrain;
 mod terrain_clusters;
@@ -46,7 +47,7 @@ use crate::layout::Vertex;
 use crate::reference::PATTERN_SIZE;
 use frame::{
     FRAME_SLOTS, FrameSlot, HANDS_OFFSET, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES,
-    PALETTE_OFFSET, SEA_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
+    PALETTE_OFFSET, SEA_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
 };
 use hands::HandsGpu;
 use passes::{PassBarrier, PassCtx};
@@ -94,6 +95,8 @@ pub struct Renderer {
     water: Option<WaterGpu>,
     hands: Option<HandsGpu>,
     clusters: Option<ClustersGpu>,
+    /// Небо (04.1): LUT, свет неба, экспозиция.
+    sky: sky::SkyGpu,
     pub stats: Stats,
 }
 
@@ -168,6 +171,7 @@ impl Renderer {
             "pattern (compute → fragment)",
         );
 
+        let sky = sky::SkyGpu::new(&device, &residency);
         let slots = (0..FRAME_SLOTS)
             .map(|i| FrameSlot::new(&device, &residency, i))
             .collect::<Result<Vec<_>, _>>()?;
@@ -224,6 +228,7 @@ impl Renderer {
             water: None,
             hands: None,
             clusters: None,
+            sky,
             stats: Stats::default(),
         })
     }
@@ -434,6 +439,9 @@ impl Renderer {
         if let Some(w) = &input.water {
             upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
             upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
+        }
+        if let Some(s) = &input.sky {
+            upload_bytes(&slot.upload, SKY_OFFSET, bytemuck::bytes_of(s));
         }
         if let Some(list) = input.clusters {
             let n = list.len().min(MAX_VISIBLE_CLUSTERS);

@@ -5,7 +5,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx};
-use crate::renderer::frame::{INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, Table};
+use crate::renderer::frame::{INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, SKY_OFFSET, Table};
 use crate::renderer::resources::label;
 use crate::renderer::terrain_clusters::{CLUSTER_VERTEX_COUNT, MAX_VISIBLE_CLUSTERS};
 use crate::water::WATER_LEVELS;
@@ -41,6 +41,7 @@ impl FramePass for ScenePass {
             draw_terrain(ctx, &enc);
         }
         draw_cubes(ctx, &enc);
+        draw_sky(ctx, &enc);
         draw_water(ctx, &enc);
         enc.endEncoding();
     }
@@ -96,6 +97,7 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
         table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
         table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
+        table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
         table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
@@ -140,6 +142,7 @@ fn draw_clusters(
         table.setAddress_atIndex(c.vertices.gpuAddress(), 6);
         table.setAddress_atIndex(c.triangles.gpuAddress(), 7);
         table.setAddress_atIndex(ctx.slot.visible.gpuAddress(), 8);
+        table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
         table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
         table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
@@ -188,6 +191,38 @@ fn draw_cubes(ctx: &PassCtx, enc: &RenderEncoder) {
     }
 }
 
+/// Небо (04.1) за непрозрачной геометрией: полноэкранный треугольник на глубине
+/// 0 (reversed-Z — бесконечность) проходит тест только там, где пусто.
+fn draw_sky(ctx: &PassCtx, enc: &RenderEncoder) {
+    if ctx.input.sky.is_none() {
+        return;
+    }
+    let sky = &ctx.r.sky;
+    let table = ctx.slot.table(Table::SkyDraw);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(ctx.upload_addr + SKY_OFFSET as u64, 2);
+        table.setAddress_atIndex(sky.frame.gpuAddress(), 3);
+        table.setTexture_atIndex(sky.skyview.gpuResourceID(), 0);
+        table.setTexture_atIndex(sky.transmittance.gpuResourceID(), 1);
+        table.setTexture_atIndex(sky.skyview_moon.gpuResourceID(), 2);
+    }
+    enc.pushDebugGroup(&label("sky"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.sky);
+    enc.setDepthStencilState(Some(&ctx.r.water_depth_state));
+    enc.setCullMode(MTLCullMode::None);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe { enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, 3) };
+    if let Some((stars, n)) = &sky.stars {
+        unsafe { table.setAddress_atIndex(stars.gpuAddress(), 0) };
+        enc.setRenderPipelineState(&ctx.r.pipelines.stars);
+        enc.setArgumentTable_atStages(table, BOTH_STAGES);
+        unsafe { enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Point, 0, *n) };
+    }
+    enc.popDebugGroup();
+    enc.setDepthStencilState(Some(&ctx.r.depth_state));
+}
+
 /// Прозрачная вода после непрозрачной геометрии: проверка глубины без записи.
 fn draw_water(ctx: &PassCtx, enc: &RenderEncoder) {
     let Some((w, t)) = ctx.water else { return };
@@ -198,6 +233,9 @@ fn draw_water(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(ctx.upload_addr + LEVELS_OFFSET as u64, 3);
         table.setTexture_atIndex(w.field.gpuResourceID(), 0);
         table.setTexture_atIndex(t.detail.gpuResourceID(), 1);
+        table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
+        table.setAddress_atIndex(ctx.upload_addr + SKY_OFFSET as u64, 5);
+        table.setTexture_atIndex(ctx.r.sky.skyview.gpuResourceID(), 2);
     }
     enc.pushDebugGroup(&label(&format!("water: {WATER_LEVELS} levels")));
     enc.setRenderPipelineState(&ctx.r.pipelines.water);

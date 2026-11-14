@@ -24,6 +24,11 @@ pub struct Args {
     pub pose: Option<usize>,
     /// Рельеф тайлами уровня 0 вместо кластеров (сравнение, 02.3).
     pub tiles: bool,
+    /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
+    pub date: Option<(i32, u32, u32)>,
+    pub time_h: Option<f64>,
+    pub timescale: Option<f64>,
+    pub exposure: Option<f32>,
     /// Старт пешком на маркере: `trail`, `mouth` (устье реки), `beach`.
     pub at: Option<crate::world::MarkerKind>,
 }
@@ -62,6 +67,41 @@ impl Args {
                     }
                 }
                 "--tiles" => args.tiles = true,
+                "--date" => {
+                    let v: Vec<u32> = it
+                        .next()
+                        .unwrap_or_default()
+                        .split('-')
+                        .filter_map(|p| p.parse().ok())
+                        .collect();
+                    args.date = (v.len() == 3).then(|| (v[0] as i32, v[1], v[2]));
+                    if args.date.is_none() {
+                        eprintln!("--date ГГГГ-ММ-ДД");
+                    }
+                }
+                "--time" => {
+                    let v: Vec<f64> = it
+                        .next()
+                        .unwrap_or_default()
+                        .split(':')
+                        .filter_map(|p| p.parse().ok())
+                        .collect();
+                    args.time_h = match v.as_slice() {
+                        [h] => Some(*h),
+                        [h, m] => Some(h + m / 60.0),
+                        _ => {
+                            eprintln!("--time ЧЧ:ММ");
+                            None
+                        }
+                    };
+                }
+                "--timescale" => args.timescale = it.next().and_then(|v| v.parse().ok()),
+                "--exposure" => {
+                    args.exposure = match it.next().as_deref() {
+                        Some("auto") | None => None,
+                        Some(v) => v.parse().ok(),
+                    }
+                }
                 "--at" => {
                     use crate::world::MarkerKind;
                     args.at = match it.next().as_deref() {

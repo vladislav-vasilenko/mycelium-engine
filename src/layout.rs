@@ -29,7 +29,10 @@ pub struct FrameUniforms {
     pub underwater_m: f32,
     /// Доля леса в поясах у глаз 0…1: руки под пологом в тени (02.7).
     pub canopy_eye: f32,
-    pub _pad: [f32; 2],
+    /// Предэкспозиция (04.1): освещённые шейдеры пишут яркость × это число,
+    /// тонмаппинг делит обратно — ночные яркости ~10⁻⁶ не теряются в half.
+    pub pre_exposure: f32,
+    pub _pad: f32,
     /// Проекция × поворот вида без сдвига: позиции идут относительно камеры
     /// (AD-49), иначе сдвиг на десятки км съедает точность f32.
     pub view_proj_rel: [[f32; 4]; 4],
@@ -183,6 +186,25 @@ pub struct TerrainCluster {
     pub depth: u32,
 }
 
+/// Входы неба от CPU (04.1), 176 байт; на GPU — `SkyInputs` в `common.h`.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct SkyInputs {
+    /// К солнцу в мировых осях (x восток, y вверх, z юг).
+    pub sun_dir: [f32; 4],
+    /// К луне; w — освещённая доля.
+    pub moon_dir: [f32; 4],
+    /// Строки поворота экваториальных осей в мировые (звёзды).
+    pub star_rot: [[f32; 4]; 3],
+    /// x — фиксированная экспозиция (0 — авто), y — dt кадра, с, z — время, с,
+    /// w — освещённость солнца на верхней границе атмосферы.
+    pub params: [f32; 4],
+    /// Обратная к `view_proj_rel`: направление взгляда пикселя в проходе неба.
+    pub inv_view_proj_rel: [[f32; 4]; 4],
+    /// x — телесный угол пикселя, ср (яркость звёзд), y — звёзд в буфере.
+    pub view: [f32; 4],
+}
+
 /// Сколько вершин рук проверяет ядро `skin_probe`: вершины `i × (n / SKIN_PROBES)`.
 pub const SKIN_PROBES: usize = 8;
 
@@ -229,10 +251,13 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(FeatureSegment, kind) as u32,
         size_of::<TerrainCluster>() as u32,
         offset_of!(TerrainCluster, depth) as u32,
+        size_of::<SkyInputs>() as u32,
+        offset_of!(SkyInputs, params) as u32,
+        offset_of!(SkyInputs, inv_view_proj_rel) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 39;
+pub const LAYOUT_PROBE_LEN: usize = 42;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -274,6 +299,9 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "FeatureSegment.kind",
     "sizeof(TerrainCluster)",
     "TerrainCluster.depth",
+    "sizeof(SkyInputs)",
+    "SkyInputs.params",
+    "SkyInputs.inv_view_proj_rel",
 ];
 
 #[cfg(test)]
@@ -288,7 +316,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12
+                12, 176, 80, 96
             ]
         );
     }

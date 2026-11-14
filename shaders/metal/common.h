@@ -17,7 +17,8 @@ struct FrameUniforms {
     float grid_step_m;     // и шаг, м
     float underwater_m;    // глубина глаз под водой, 0 — над водой
     float canopy_eye;      // доля леса у глаз 0…1: тень полога на руках
-    float _pad_uw[2];      // не float2/float3: выравнивание раздуло бы структуру
+    float pre_exposure;    // освещённые шейдеры пишут яркость × это (04.1)
+    float _pad_uw;
     float4x4 view_proj_rel; // проекция × поворот вида без сдвига (AD-49)
     float4 cam_hi;         // камера = cam_hi + cam_lo; cam_hi кратна 256 м
     float4 cam_lo;
@@ -47,10 +48,11 @@ constant float3 UW_EXTINCTION = float3(0.46, 0.13, 0.10);
 constant float3 UW_COLOR = float3(0.020, 0.115, 0.135);
 constant float3 UW_ABSORB = float3(0.42, 0.085, 0.055);
 
-// Дымка толщи между глазом и точкой на расстоянии `dist` (только под водой).
-inline float3 underwater_fog(float3 color, float dist, float eye_depth) {
+// Дымка толщи между глазом и точкой на расстоянии `dist` (только под водой);
+// `light` — освещённость сверху относительно полудня (sky.h, underwater_light).
+inline float3 underwater_fog(float3 color, float dist, float eye_depth, float light) {
     float3 t = exp(-UW_EXTINCTION * dist);
-    float3 fogc = UW_COLOR * exp(-UW_ABSORB * eye_depth);
+    float3 fogc = UW_COLOR * light * exp(-UW_ABSORB * eye_depth);
     return color * t + fogc * (1.0 - t);
 }
 
@@ -162,4 +164,14 @@ struct TerrainCluster {
     uint triangle_offset;
     uint triangle_count;
     uint depth;
+};
+
+// Входы неба от CPU (src/layout.rs, SkyInputs), 176 байт.
+struct SkyInputs {
+    float4 sun_dir;      // к солнцу в мировых осях (x восток, y вверх, z юг)
+    float4 moon_dir;     // к луне; w — освещённая доля
+    float4 star_rot[3];  // строки поворота экваториальных осей в мировые
+    float4 params;       // x: фикс. экспозиция (0 — авто), y: dt, с, z: время, с, w: E☉
+    float4x4 inv_view_proj_rel;  // обратная к view_proj_rel: направление пикселя
+    float4 view;         // x — телесный угол пикселя, ср; y — звёзд
 };

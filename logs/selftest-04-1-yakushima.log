@@ -1,0 +1,54 @@
+мир: слои assets/world/yakushima/far, seed 0x5a4b, 16×16 тайлов, генератор v4, собран за 1061 мс, контрольная сумма 7d7c60dbae528056
+2026-11-14 12:54:26.347 echo[28312:35037615] Metal API Validation Enabled
+2026-11-14 12:54:26.347 echo[28312:35037615] Metal GPU Validation Enabled
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: да | raytracing from render: да
+объекты карты: 61569 отрезков, ячеек 960², до 41 отрезков в ячейке
+ландшафт: 1081600 вершин, 2097152 треугольников, материалов 6 (JPEG за 343 мс), загружен за 821 мс
+кластеры рельефа: 548519 кластеров, 33635 групп, 19 уровней, 67078391 треугольников (уровень 0 — 33554432), 456.0 МБ, из кэша за 734 мс
+вода: поле берега 1025×1025, 13 уровней сетки, готово за 6 мс
+руки: 4600 вершин, 51 костей, поз 4, загружены за 62 мс
+кадр 2560×1440 px, шейдеры из /Users/vladmac/Code/GameDev/GameEngine/shaders/metal
+GPU: Apple M3 Max | ОС: Version 27.0.1 (Build 26A434) | Metal 4: да | семейство Apple9 | raytracing: да | raytracing from render: да
+план проходов (с readback):
+  [кадр с readback после такого же]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  wet_sand  after Stages(2) before Stages(4) [(ResourceId(6), War)]
+  sky_lut   after Stages(2) before Stages(4) [(ResourceId(7), War)]
+  scene     after Stages(6) before Stages(2) [(ResourceId(1), Raw), (ResourceId(6), Raw), (ResourceId(7), Raw), (ResourceId(2), War), (ResourceId(3), Waw)]
+  readback  after Stages(14) before Stages(12) [(ResourceId(1), Raw), (ResourceId(3), Raw), (ResourceId(2), Raw), (ResourceId(5), Waw)]
+  viewmodel after Stages(12) before Stages(2) [(ResourceId(7), Raw), (ResourceId(2), War), (ResourceId(3), War)]
+  exposure  after Stages(2) before Stages(4) [(ResourceId(2), Raw), (ResourceId(8), War)]
+  tonemap   after Stages(6) before Stages(2) [(ResourceId(2), Raw), (ResourceId(8), Raw), (ResourceId(4), Waw)]
+  [обычный кадр после кадра с readback]
+  pattern   after Stages(10) before Stages(4) [(ResourceId(1), War)]
+  wet_sand  after Stages(2) before Stages(4) [(ResourceId(6), War)]
+  sky_lut   after Stages(2) before Stages(4) [(ResourceId(7), War)]
+  scene     after Stages(6) before Stages(2) [(ResourceId(1), Raw), (ResourceId(6), Raw), (ResourceId(7), Raw), (ResourceId(2), War), (ResourceId(3), Waw)]
+  viewmodel after Stages(6) before Stages(2) [(ResourceId(7), Raw), (ResourceId(2), Waw), (ResourceId(3), Waw)]
+  exposure  after Stages(2) before Stages(4) [(ResourceId(2), Raw), (ResourceId(8), War)]
+  tonemap   after Stages(6) before Stages(2) [(ResourceId(2), Raw), (ResourceId(8), Raw), (ResourceId(4), Waw)]
+
+[pass] захват и освобождение курсора
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 5)
+[pass] reversed-Z глубина в 9 точках 2560×1440 (попаданий в кубы 5, видны оба куба true): макс. ошибка 5.40e-8
+[pass] раскладка структур CPU/GPU (42 полей) 
+[pass] перезагрузка MSL без изменений: Ok(2)
+[pass] поколение pipeline 1 → 2
+       диагностика: pattern.metal [compile MSL]: program_source:179:1: error: 'kernel' attribute only applies to functions
+[pass] ошибочная правка отклонена: файл pattern.metal, стадия compile MSL
+[pass] после ошибки остаётся предыдущее поколение pipeline
+[pass] кадры рисуются после ошибочной правки (3 кадра)
+[pass] исправленная правка подхватывается в том же запуске
+[pass] в свёрнутом окне вывод пропускается: выведено 0 кадров
+[pass] после разворота вывод возобновился: 5 кадров, пропусков без drawable 0
+[pass] resize: новые цели (960, 600)
+[pass] compute-узор 256×256 совпадает с эталоном CPU: несовпадений 0, макс. отклонение 0/255 (кадр 23)
+[pass] reversed-Z глубина в 9 точках 960×600 (попаданий в кубы 6, видны оба куба true): макс. ошибка 8.38e-8
+[pass] раскладка структур CPU/GPU (42 полей) 
+[pass] отладочный вид ландшафта: высота и уклон GPU совпадают с SampleGround в 9 точках (макс. 0.010 м, 0.02°), биом не совпал в 0
+[pass] ландшафт: глубина GPU совпадает с лучом по SampleGround в 9 точках (небо 0), макс. отн. ошибка 9.3e-5
+[pass] раскладка TerrainVertex и общих структур (42 полей)
+[pass] волны моря: GPU совпадает с CPU в 8 точках (макс. 0.06 мм, пена 0.000)
+[pass] руки: скиннинг GPU совпадает с CPU в 8 вершинах (макс. 0.0000 мм)
+кадров 32, пропуски: занят слот 0, нет drawable 0; отложенно освобождено 3; CPU кодирование последнего кадра 0.677 мс
+SELFTEST PASSED (21 проверок)

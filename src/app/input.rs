@@ -29,6 +29,10 @@ impl App {
         if repeat {
             return;
         }
+        if self.time_key(code) {
+            self.update_title(true);
+            return;
+        }
         match code {
             KeyCode::Escape => self.set_grab(false),
             KeyCode::F5 => self.reload_shaders(),

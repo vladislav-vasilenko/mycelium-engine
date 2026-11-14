@@ -111,6 +111,13 @@ impl App {
             water::WATER_LEVELS,
             t_water.elapsed().as_secs_f64() * 1000.0
         );
+        // Звёзды неба (04.1): каталог BSC5; без файла небо остаётся без звёзд.
+        let stars_path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/sky/stars.bin");
+        match std::fs::read(&stars_path) {
+            Ok(bytes) => r.set_stars(&bytes),
+            Err(e) => eprintln!("звёзды не загружены: {}: {e}", stars_path.display()),
+        }
         let t_hands = Instant::now();
         let hands = match Hands::load() {
             Ok(h) => {

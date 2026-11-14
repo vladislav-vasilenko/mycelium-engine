@@ -7,3 +7,4 @@ dist/
 assets/source/geo/cache/
 assets/source/geo/gsi/
 .venv-geo/
+assets/source/sky/

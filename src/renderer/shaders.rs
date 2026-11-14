@@ -17,6 +17,16 @@ pub const DEPTH_FORMAT: MTLPixelFormat = MTLPixelFormat::Depth32Float;
 pub const DRAWABLE_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm_sRGB;
 pub const PATTERN_FORMAT: MTLPixelFormat = MTLPixelFormat::RGBA8Unorm;
 
+/// Смешивание цели рендера.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Blend {
+    Opaque,
+    /// Вода: `цвет + dst × пропускание` (dual-source).
+    Transmit,
+    /// Звёзды: `dst + цвет`.
+    Additive,
+}
+
 pub struct Pipelines {
     pub pattern: Obj<dyn MTLComputePipelineState>,
     pub layout_probe: Obj<dyn MTLComputePipelineState>,
@@ -32,6 +42,16 @@ pub struct Pipelines {
     /// Руки со скином (проход `viewmodel`) и сверка скиннинга с CPU.
     pub hands: Obj<dyn MTLRenderPipelineState>,
     pub skin_probe: Obj<dyn MTLComputePipelineState>,
+    /// Небо (04.1): LUT, свет неба, проход неба.
+    pub sky_transmittance: Obj<dyn MTLComputePipelineState>,
+    pub sky_multiscatter: Obj<dyn MTLComputePipelineState>,
+    pub sky_view: Obj<dyn MTLComputePipelineState>,
+    pub sky_view_moon: Obj<dyn MTLComputePipelineState>,
+    pub sky_ambient: Obj<dyn MTLComputePipelineState>,
+    pub sky: Obj<dyn MTLRenderPipelineState>,
+    pub exposure_meter: Obj<dyn MTLComputePipelineState>,
+    /// Звёзды точками с аддитивным смешиванием (04.1).
+    pub stars: Obj<dyn MTLRenderPipelineState>,
     /// Счётчик поколений для диагностики после перезагрузки.
     pub generation: u32,
 }
@@ -186,7 +206,7 @@ fn render_pipeline(
     label: &str,
     (vs, fs): (&str, &str),
     color_format: MTLPixelFormat,
-    transmit_blend: bool,
+    blend: Blend,
 ) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
     require_function(lib, file, vs)?;
     require_function(lib, file, fs)?;
@@ -196,7 +216,17 @@ fn render_pipeline(
     desc.setFragmentFunctionDescriptor(Some(&function(lib, fs)));
     let color = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
     color.setPixelFormat(color_format);
-    if transmit_blend {
+    if blend == Blend::Additive {
+        // Звёзды: свет добавляется к небу.
+        color.setBlendingState(MTL4BlendState::Enabled);
+        color.setSourceRGBBlendFactor(MTLBlendFactor::One);
+        color.setDestinationRGBBlendFactor(MTLBlendFactor::One);
+        color.setRgbBlendOperation(MTLBlendOperation::Add);
+        color.setSourceAlphaBlendFactor(MTLBlendFactor::Zero);
+        color.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
+        color.setAlphaBlendOperation(MTLBlendOperation::Add);
+    }
+    if blend == Blend::Transmit {
         // Прозрачная вода: результат = цвет (index 0) + dst × пропускание (index 1).
         color.setBlendingState(MTL4BlendState::Enabled);
         color.setSourceRGBBlendFactor(MTLBlendFactor::One);
@@ -230,6 +260,7 @@ pub fn build_pipelines(
     let terrain_lib = compile_library(device, dir, "terrain.metal", over)?;
     let water_lib = compile_library(device, dir, "water.metal", over)?;
     let hands_lib = compile_library(device, dir, "hands.metal", over)?;
+    let sky_lib = compile_library(device, dir, "sky.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -240,7 +271,7 @@ pub fn build_pipelines(
             "scene",
             ("scene_vs", "scene_fs"),
             HDR_FORMAT,
-            false,
+            Blend::Opaque,
         )?,
         tonemap: render_pipeline(
             compiler,
@@ -249,7 +280,7 @@ pub fn build_pipelines(
             "tonemap",
             ("tonemap_vs", "tonemap_fs"),
             DRAWABLE_FORMAT,
-            false,
+            Blend::Opaque,
         )?,
         terrain: render_pipeline(
             compiler,
@@ -258,7 +289,7 @@ pub fn build_pipelines(
             "terrain",
             ("terrain_vs", "terrain_fs"),
             HDR_FORMAT,
-            false,
+            Blend::Opaque,
         )?,
         terrain_clusters: render_pipeline(
             compiler,
@@ -267,7 +298,7 @@ pub fn build_pipelines(
             "terrain clusters",
             ("terrain_cluster_vs", "terrain_fs"),
             HDR_FORMAT,
-            false,
+            Blend::Opaque,
         )?,
         water: render_pipeline(
             compiler,
@@ -276,7 +307,7 @@ pub fn build_pipelines(
             "water",
             ("water_vs", "water_fs"),
             HDR_FORMAT,
-            true,
+            Blend::Transmit,
         )?,
         wet_sand: compute_pipeline(compiler, &water_lib, "water.metal", "wet_sand_update")?,
         water_probe: compute_pipeline(compiler, &water_lib, "water.metal", "water_probe")?,
@@ -287,9 +318,43 @@ pub fn build_pipelines(
             "hands",
             ("hands_vs", "hands_fs"),
             HDR_FORMAT,
-            false,
+            Blend::Opaque,
         )?,
         skin_probe: compute_pipeline(compiler, &hands_lib, "hands.metal", "skin_probe")?,
+        sky_transmittance: compute_pipeline(
+            compiler,
+            &sky_lib,
+            "sky.metal",
+            "sky_transmittance_lut",
+        )?,
+        sky_multiscatter: compute_pipeline(
+            compiler,
+            &sky_lib,
+            "sky.metal",
+            "sky_multiscatter_lut",
+        )?,
+        sky_view: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut")?,
+        sky_view_moon: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut_moon")?,
+        sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
+        exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
+        stars: render_pipeline(
+            compiler,
+            &sky_lib,
+            "sky.metal",
+            "stars",
+            ("stars_vs", "stars_fs"),
+            HDR_FORMAT,
+            Blend::Additive,
+        )?,
+        sky: render_pipeline(
+            compiler,
+            &sky_lib,
+            "sky.metal",
+            "sky",
+            ("sky_vs", "sky_fs"),
+            HDR_FORMAT,
+            Blend::Opaque,
+        )?,
         generation,
     })
 }

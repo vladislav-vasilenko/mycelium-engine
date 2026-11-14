@@ -84,6 +84,11 @@ impl App {
         } else {
             String::new()
         };
+        let clock = if self.scene == SceneMode::Terrain {
+            format!(" · {}", self.time_label())
+        } else {
+            String::new()
+        };
         let hands = match &self.hands {
             Some(h) if self.hands_visible && self.sim.mode == MoveMode::Walk => {
                 format!(" · руки: {}", crate::hands::POSE_NAMES[h.rig.target()])
@@ -91,7 +96,7 @@ impl App {
             _ => String::new(),
         };
         window.set_title(&format!(
-            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}{terrain}{hands}",
+            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{clock}{place}{view}{terrain}{hands}",
             r.info.name, r.stats.cpu_encode_ms
         ));
         self.title_timer = Instant::now();

@@ -42,6 +42,7 @@ impl FramePass for ViewmodelPass {
             table.setAddress_atIndex(ctx.upload_addr + HANDS_OFFSET as u64, 1);
             table.setAddress_atIndex(ctx.upload_addr + PALETTE_OFFSET as u64, 2);
             table.setAddress_atIndex(ctx.upload_addr, 3);
+            table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
             table.setTexture_atIndex(h.albedo.gpuResourceID(), 0);
         }
         enc.setRenderPipelineState(&ctx.r.pipelines.hands);

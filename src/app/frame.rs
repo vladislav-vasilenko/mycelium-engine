@@ -52,6 +52,7 @@ impl App {
         for _ in 0..ticks {
             self.sim.step(&input, Some(&self.world));
         }
+        self.advance_time(ticks);
 
         let selftest = self.selftest.is_some();
         let camera = match (selftest, self.scene) {
@@ -81,20 +82,38 @@ impl App {
             return;
         };
         let hands = self.hands_frame(&camera, w as f32 / h as f32);
-        let Some(r) = self.renderer.as_mut() else {
-            return;
-        };
         let proj = sim::projection(w as f32 / h as f32);
         let view = camera.view();
         let cam_hi = (camera.position / 256.0).floor() * 256.0;
+        let view_proj_rel = {
+            let mut rot = view;
+            rot.w_axis = glam::Vec4::W;
+            proj * rot
+        };
+        let terrain_scene = self.scene == SceneMode::Terrain;
+        let sky = terrain_scene.then(|| self.sky_frame(view_proj_rel, self.frame_dt, h));
+        let Some(r) = self.renderer.as_mut() else {
+            return;
+        };
+        let pre_exposure = r.last_exposure();
         // Время мира от тиков симуляции: волны и накат детерминированы.
         let time = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
         let uniforms = FrameUniforms {
             view_proj: (proj * view).to_cols_array_2d(),
             camera_pos: camera.position.extend(1.0).to_array(),
-            light_dir: LIGHT_DIR.normalize().extend(0.0).to_array(),
+            // К главному светилу — со знаком «от источника к сцене».
+            light_dir: match &sky {
+                Some(s) => (-s.light_to).extend(0.0).to_array(),
+                None => LIGHT_DIR.normalize().extend(0.0).to_array(),
+            },
             time,
-            exposure: 1.0,
+            // Небо: автоэкспозиция (−1) или фиксированная `--exposure`; кубы — 1.
+            // Отладочные виды и самопроверка — фиксированная экспозиция 1.
+            exposure: if terrain_scene && self.view_mode == TerrainView::Lit && !selftest {
+                self.args.exposure.unwrap_or(-1.0)
+            } else {
+                1.0
+            },
             pattern_time: if selftest {
                 reference::SELFTEST_PATTERN_TIME
             } else {
@@ -115,14 +134,16 @@ impl App {
                 let w = c.at(camera.position.x, camera.position.z, self.world.size_m().x);
                 w[0] + w[1]
             }),
-            _pad: [0.0; 2],
+            // Предэкспозиция — экспозиция прошлого замера; кубы и отладочные виды — 1.
+            pre_exposure: if terrain_scene && self.view_mode == TerrainView::Lit && !selftest {
+                pre_exposure
+            } else {
+                1.0
+            },
+            _pad: 0.0,
             // Относительно камеры (AD-49): поворот вида без сдвига, камера =
             // крупная часть (кратна 256 м) + остаток.
-            view_proj_rel: {
-                let mut rot = view;
-                rot.w_axis = glam::Vec4::W;
-                (proj * rot).to_cols_array_2d()
-            },
+            view_proj_rel: view_proj_rel.to_cols_array_2d(),
             cam_hi: cam_hi.extend(0.0).to_array(),
             cam_lo: (camera.position - cam_hi).extend(0.0).to_array(),
         };
@@ -177,6 +198,7 @@ impl App {
             water: water_frame,
             hands,
             clusters: use_clusters.then_some(&self.visible_clusters[..]),
+            sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {
             self.readback_requested = true;

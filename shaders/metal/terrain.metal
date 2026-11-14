@@ -1,5 +1,6 @@
 #include "common.h"
 #include "features.h"
+#include "sky.h"
 
 // Ландшафт LOD 0: все тайлы одним instanced draw. Номер экземпляра — номер
 // тайла, вершины тайла лежат подряд по TILE_SAMPLES² штук.
@@ -175,7 +176,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            texture2d<float> wetness_mask [[texture(3)]],
                            device const FeatureSegment* feat_segs [[buffer(2)]],
                            device const uint2* feat_cells [[buffer(3)]],
-                           device const uint* feat_list [[buffer(4)]]) {
+                           device const uint* feat_list [[buffer(4)]],
+                           device const SkyFrame& skyf [[buffer(9)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -398,7 +400,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
             break;
     }
 
-    // Временный свет до этапа 04: солнце (Ламберт + GGX) и небо, без теней и тумана.
+    // Свет неба 04.1: прямой свет светила с пропусканием атмосферы и рассеянный
+    // свет неба (SH); тени и туман — 04.2.
     float3 L = -frame.light_dir.xyz;
     float3 V = normalize(-in.rel);
     float3 H = normalize(L + V);
@@ -413,11 +416,12 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
     float F = 0.04 + 0.96 * pow(1.0 - saturate(dot(H, V)), 5.0);
     float spec = D * G * F / (4.0 * nv + 1e-4);
-    const float3 sun = float3(1.15, 1.1, 1.0);
-    float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
+    float3 sun = sky_sun_term(skyf);
+    float3 sky = sky_ambient_term(skyf, N);
     // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
     float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);
-    float3 color = albedo * (sun * nl * sun_flecks + sky_c) + sun * spec * sun_flecks;
+    // Блик — физический: BRDF × освещённость (π · «солнце»).
+    float3 color = albedo * (sun * nl * sun_flecks + sky_c) + SKY_PI * sun * spec * sun_flecks;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:
@@ -425,7 +429,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float2 rip = (detail.sample(s, pattern_uv(frame, lxz, 3.0) + frame.time * 0.05).rg - 0.5) * 0.25;
         float3 Nw = normalize(float3(rip.x, 1.0, rip.y));
         float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(Nw, V)), 5.0);
-        float3 sky_refl = float3(0.30, 0.42, 0.62) * 0.7;
+        float3 sky_refl = sky_ambient_term(skyf, float3(0, 1, 0)) * 1.1;
         // Сквозь мелкую воду видно мокрое дно.
         float3 bed = albedo * 0.35 * (sun * nl + sky);
         float3 Hw = normalize(L + V);
@@ -437,7 +441,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         // Под водой: свет у точки ниже моря ослаблен толщей над ней, путь от
         // глаз — дымкой толщи.
         color *= exp(-UW_ABSORB * max(-in.world.y, 0.0));
-        color = underwater_fog(color, length(in.rel), frame.underwater_m);
+        color = underwater_fog(color, length(in.rel), frame.underwater_m, underwater_light(skyf));
     }
-    return float4(color, 1.0);
+    return float4(color * frame.pre_exposure, 1.0);
 }

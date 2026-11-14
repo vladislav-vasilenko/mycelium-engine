@@ -14,6 +14,7 @@ mod hands;
 mod input;
 mod selftest;
 mod setup;
+mod sky;
 mod title;
 
 use std::collections::HashSet;
@@ -77,6 +78,9 @@ pub struct App {
     use_clusters: bool,
     cluster_stats: crate::terrain_clusters::SelectStats,
     cluster_select_ms: f64,
+    /// Небо 04.1: место наблюдателя и игровое время.
+    site: crate::sky::celestial::Site,
+    time: crate::sky::time::TimeOfDay,
     /// Длительность прошлого кадра для маски мокрого песка, с.
     frame_dt: f32,
     grabbed: bool,
@@ -129,6 +133,8 @@ impl App {
             sim.set_mode(MoveMode::Walk, &world);
         }
         let tiles_only = args.tiles;
+        let site = sky::site_of(&world);
+        let time = sky::initial_time(&args, site);
         App {
             args,
             world,
@@ -150,6 +156,8 @@ impl App {
             use_clusters: !tiles_only,
             cluster_stats: Default::default(),
             cluster_select_ms: 0.0,
+            site,
+            time,
             frame_dt: 0.0,
             grabbed: false,
             last_frame: Instant::now(),

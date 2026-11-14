@@ -5,6 +5,7 @@
 // Палитра `palette[j]` = смещение рук × глобальная матрица сустава × обратная
 // матрица привязки (src/hands/skeleton.rs, Skeleton::palette).
 #include "common.h"
+#include "sky.h"
 
 struct Skinned {
     float3 position;
@@ -54,12 +55,13 @@ fragment float4 hands_fs(HandsOut in [[stage_in]],
                          bool front [[front_facing]],
                          constant HandsUniforms& h [[buffer(1)]],
                          constant FrameUniforms& frame [[buffer(3)]],
+                         device const SkyFrame& skyf [[buffer(4)]],
                          texture2d<float> albedo_tex [[texture(0)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(4));
     float3 albedo = albedo_tex.sample(s, in.uv).rgb;
     float3 n_eye = normalize(in.normal) * (front ? 1.0 : -1.0);
     float3 N = normalize((h.view_to_world * float4(n_eye, 0.0)).xyz);
-    float3 L = -frame.light_dir.xyz;
+    float3 L = skyf.light_dir.xyz;
     float wrap = saturate((dot(N, L) + 0.35) / 1.35);
     // Красноватый край терминатора: свет, прошедший под кожей.
     float3 scatter = float3(0.25, 0.06, 0.03) * saturate(1.0 - abs(dot(N, L) * 2.0 - 0.2));
@@ -67,8 +69,8 @@ fragment float4 hands_fs(HandsOut in [[stage_in]],
     float3 V = -normalize((h.view_to_world * float4(0.0, 0.0, -1.0, 0.0)).xyz);
     float3 H = normalize(L + V);
     float spec = 0.08 * pow(saturate(dot(N, H)), 24.0) * saturate(dot(N, L));
-    const float3 sun = float3(1.15, 1.1, 1.0);
-    float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
+    float3 sun = sky_sun_term(skyf);
+    float3 sky = sky_ambient_term(skyf, N);
     // Под пологом леса (02.7): прямого солнца мало, небо зеленее и тусклее.
     float shade = frame.canopy_eye;
     float3 sun_k = sun * mix(1.0, 0.22, shade);
@@ -76,9 +78,9 @@ fragment float4 hands_fs(HandsOut in [[stage_in]],
     float3 color = albedo * (sun_k * (wrap + scatter) + sky) + sun_k * spec;
     if (frame.underwater_m > 0.0) {
         color *= exp(-UW_ABSORB * frame.underwater_m);
-        color = underwater_fog(color, 0.4, frame.underwater_m);
+        color = underwater_fog(color, 0.4, frame.underwater_m, underwater_light(skyf));
     }
-    return float4(color, 1.0);
+    return float4(color * frame.pre_exposure, 1.0);
 }
 
 // Сверка с CPU: позиции после скиннинга в вершинах i × (n / SKIN_PROBES).

@@ -75,4 +75,9 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     TerrainCluster tc;
     out[37] = sizeof(TerrainCluster);
     out[38] = uint((thread char*)&tc.depth - (thread char*)&tc);
+    SkyInputs si;
+    thread char* sib = (thread char*)&si;
+    out[39] = sizeof(SkyInputs);
+    out[40] = uint((thread char*)&si.params - sib);
+    out[41] = uint((thread char*)&si.inv_view_proj_rel - sib);
 }

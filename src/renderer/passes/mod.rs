@@ -5,9 +5,11 @@
 //! `encode`. Новый проход — новый тип с `FramePass` и строка в `REGISTRY`
 //! плюс объявление в `frame::frame_passes`.
 
+mod exposure;
 mod pattern;
 mod readback;
 mod scene;
+mod sky_lut;
 mod tonemap;
 mod viewmodel;
 mod wet_sand;
@@ -69,12 +71,14 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 6] = [
+static REGISTRY: [&dyn FramePass; 8] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
+    &sky_lut::SkyLutPass,
     &scene::ScenePass,
     &readback::ReadbackPass,
     &viewmodel::ViewmodelPass,
+    &exposure::ExposurePass,
     &tonemap::TonemapPass,
 ];
 

@@ -86,6 +86,7 @@ impl App {
         };
         let proj = sim::projection(w as f32 / h as f32);
         let view = camera.view();
+        let cam_hi = (camera.position / 256.0).floor() * 256.0;
         // Время мира от тиков симуляции: волны и накат детерминированы.
         let time = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
         let uniforms = FrameUniforms {
@@ -111,6 +112,15 @@ impl App {
             grid_step_m: self.world.heightfield.step_m,
             underwater_m,
             _pad: [0.0; 3],
+            // Относительно камеры (AD-49): поворот вида без сдвига, камера =
+            // крупная часть (кратна 256 м) + остаток.
+            view_proj_rel: {
+                let mut rot = view;
+                rot.w_axis = glam::Vec4::W;
+                (proj * rot).to_cols_array_2d()
+            },
+            cam_hi: cam_hi.extend(0.0).to_array(),
+            cam_lo: (camera.position - cam_hi).extend(0.0).to_array(),
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3).
         let use_clusters =

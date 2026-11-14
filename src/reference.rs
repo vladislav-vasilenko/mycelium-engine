@@ -223,3 +223,54 @@ mod tests {
         }
     }
 }
+
+/// Точность проекции у ног в 28 км от угла карты (AD-49): путь «мир × view_proj»
+/// в f32 дрожит на пиксели, путь «относительно камеры» — на сотые доли.
+#[cfg(test)]
+mod precision_tests {
+    use glam::{DMat4, DVec3, Mat4, Vec3, Vec4};
+
+    fn max_error_px(relative: bool) -> f64 {
+        let height = 1440.0;
+        let cam = Vec3::new(27_900.125, 4.567, 17_790.875);
+        let cam_hi = (cam / 256.0).floor() * 256.0;
+        let mut worst = 0.0f64;
+        for k in 0..400 {
+            let yaw = k as f32 * 0.0031;
+            let fwd = Vec3::new(yaw.sin(), -1.2, yaw.cos()).normalize();
+            // Узел сетки 7,5 м у ног: координаты точно представимы.
+            let node = Vec3::new(
+                ((cam.x + 0.3) / 7.5).round() * 7.5,
+                3.0,
+                ((cam.z + 0.9) / 7.5).round() * 7.5,
+            );
+            let proj = crate::sim::projection(16.0 / 9.0);
+            let view = Mat4::look_to_rh(cam, fwd, Vec3::Y);
+            let dview = DMat4::look_to_rh(cam.as_dvec3(), fwd.as_dvec3(), DVec3::Y);
+            let reference = proj.as_dmat4() * dview * node.as_dvec3().extend(1.0);
+            let r = reference.truncate().truncate() / reference.w;
+            let clip = if relative {
+                let mut rot = view;
+                rot.w_axis = Vec4::W;
+                let rel = (node - cam_hi) - (cam - cam_hi);
+                proj * rot * rel.extend(1.0)
+            } else {
+                proj * view * node.extend(1.0)
+            };
+            let c = (clip.truncate().truncate() / clip.w).as_dvec2();
+            worst = worst.max((c - r).abs().max_element() * height / 2.0);
+        }
+        worst
+    }
+
+    #[test]
+    fn camera_relative_projection_does_not_jitter_far_from_origin() {
+        let old = max_error_px(false);
+        let new = max_error_px(true);
+        eprintln!(
+            "ошибка у ног в 28 км: мир × view_proj {old:.3} px, относительно камеры {new:.4} px"
+        );
+        assert!(old > 0.3, "старый путь неожиданно точен: {old} px");
+        assert!(new < 0.02, "относительно камеры {new} px");
+    }
+}

@@ -79,7 +79,7 @@ vertex WaterVaryings water_vs(uint vid [[vertex_id]],
     float lift = SURF_LIFT_M * saturate(max(w.shore, w.swash) * 4.0);
     out.world = w.pos + float3(0.0, lift, 0.0);
     out.base = lv.origin + float2(i, j) * lv.cell;
-    out.position = frame.view_proj * float4(out.world, 1.0);
+    out.position = clip_from_world(frame, out.world);
     out.normal = n3.y < 0.0 ? -n3 : n3;
     out.foam = w.foam;
     out.swash = w.swash;
@@ -128,7 +128,7 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
                 float y = wave_at(field, sp, world.xz, frame.time, 0.0).pos.y;
                 world = ro + rd * ((y - ro.y) / rd.y);
             }
-            float4 clip = frame.view_proj * float4(world, 1.0);
+            float4 clip = clip_from_world(frame, world);
             o.depth = clip.z / clip.w;
             f = field_bilinear(field, sp, world.xz);
             bed = f.r;

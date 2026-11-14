@@ -16,7 +16,7 @@ vertex SceneVaryings scene_vs(uint vid [[vertex_id]],
     InstanceData inst = instances[iid];
     float4 world = inst.model * float4(float3(v.position), 1.0);
     SceneVaryings out;
-    out.position = frame.view_proj * world;
+    out.position = clip_from_world(frame, world.xyz / world.w);
     // Для равномерного масштаба хватает верхней 3x3 части.
     out.normal = (inst.model * float4(float3(v.normal), 0.0)).xyz;
     out.uv = v.uv;

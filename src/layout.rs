@@ -28,6 +28,13 @@ pub struct FrameUniforms {
     /// Глубина глаз под поверхностью воды, м; 0 — над водой (подводный вид).
     pub underwater_m: f32,
     pub _pad: [f32; 3],
+    /// Проекция × поворот вида без сдвига: позиции идут относительно камеры
+    /// (AD-49), иначе сдвиг на десятки км съедает точность f32.
+    pub view_proj_rel: [[f32; 4]; 4],
+    /// Камера = `cam_hi + cam_lo`: крупная часть кратна 256 м (разность с ней
+    /// точна), мелкая — остаток. `cam_hi` — и начало узоров текстур.
+    pub cam_hi: [f32; 4],
+    pub cam_lo: [f32; 4],
 }
 
 #[repr(C, align(16))]
@@ -192,6 +199,8 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(FrameUniforms, view_mode) as u32,
         offset_of!(FrameUniforms, map_size_m) as u32,
         offset_of!(FrameUniforms, underwater_m) as u32,
+        offset_of!(FrameUniforms, view_proj_rel) as u32,
+        offset_of!(FrameUniforms, cam_lo) as u32,
         size_of::<InstanceData>() as u32,
         offset_of!(InstanceData, tint) as u32,
         size_of::<Vertex>() as u32,
@@ -221,7 +230,7 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 37;
+pub const LAYOUT_PROBE_LEN: usize = 39;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -235,6 +244,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "FrameUniforms.view_mode",
     "FrameUniforms.map_size_m",
     "FrameUniforms.underwater_m",
+    "FrameUniforms.view_proj_rel",
+    "FrameUniforms.cam_lo",
     "sizeof(InstanceData)",
     "InstanceData.tint",
     "sizeof(Vertex)",
@@ -273,8 +284,9 @@ mod tests {
         assert_eq!(
             expected_probe(),
             [
-                144, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 80, 64, 32, 12, 24, 32, 12, 24,
-                28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16, 12
+                240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
+                32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
+                12
             ]
         );
     }

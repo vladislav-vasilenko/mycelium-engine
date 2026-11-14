@@ -17,7 +17,27 @@ struct FrameUniforms {
     float grid_step_m;     // и шаг, м
     float underwater_m;    // глубина глаз под водой, 0 — над водой
     float _pad_uw[3];      // не float3: тот выравнивается по 16 и раздул бы структуру
+    float4x4 view_proj_rel; // проекция × поворот вида без сдвига (AD-49)
+    float4 cam_hi;         // камера = cam_hi + cam_lo; cam_hi кратна 256 м
+    float4 cam_lo;
 };
+
+// Позиция относительно камеры (AD-49): мир − cam_hi точна (cam_hi кратна 256 м,
+// узлы сетки — кратны шагу), минус малая cam_lo. Без огромного сдвига в матрице
+// точность f32 не теряется даже в 30 км от начала карты.
+inline float3 camera_relative(constant FrameUniforms& f, float3 world) {
+    return (world - f.cam_hi.xyz) - f.cam_lo.xyz;
+}
+
+inline float4 clip_from_world(constant FrameUniforms& f, float3 world) {
+    return f.view_proj_rel * float4(camera_relative(f, world), 1.0);
+}
+
+// Координаты узора с периодом `period` м: дробь крупной части (постоянна, пока
+// камера в той же клетке 256 м) плюс точная малая часть `local = мир − cam_hi`.
+inline float2 pattern_uv(constant FrameUniforms& f, float2 local_xz, float period) {
+    return fract(f.cam_hi.xz / period) + local_xz / period;
+}
 
 // Подводная толща (src/app/frame.rs, underwater_m): ослабление по пути, м⁻¹. Красный
 // гаснет первым; к поглощению добавлено рассеяние — видимость ~25 м.

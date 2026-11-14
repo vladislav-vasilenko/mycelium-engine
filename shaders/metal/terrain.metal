@@ -28,8 +28,8 @@ vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
     TerrainVertex v = vertices[iid * TILE_SAMPLES * TILE_SAMPLES + vid];
     TerrainVaryings out;
     out.world = float3(v.position);
-    out.rel = out.world - frame.camera_pos.xyz;
-    out.position = frame.view_proj * float4(out.world, 1.0);
+    out.rel = camera_relative(frame, out.world);
+    out.position = frame.view_proj_rel * float4(out.rel, 1.0);
     out.normal = float3(v.normal);
     out.weights = float4(v.weights) / 255.0;
     out.material = float4(float(v.material.x), float(v.material.y) / 255.0,
@@ -85,8 +85,8 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
     float dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
     float dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
     out.world = world;
-    out.rel = world - frame.camera_pos.xyz;
-    out.position = frame.view_proj * float4(world, 1.0);
+    out.rel = camera_relative(frame, world);
+    out.position = frame.view_proj_rel * float4(out.rel, 1.0);
     out.normal = normalize(float3(-dx, 1.0, -dz));
     // Слои мира: тексель на узел сетки биомов, центр текселя — узел.
     constexpr sampler ls(filter::linear, address::clamp_to_edge);
@@ -140,8 +140,9 @@ struct MatSample {
 // Выборка слоя по мировым XZ с подавлением повторов: вторая выборка в
 // повёрнутых и растянутых координатах, доля — из крупного шума.
 inline MatSample sample_layer(texture2d_array<float> albedo, texture2d_array<float> normal,
-                              sampler s, int layer, float2 xz, float mixk) {
-    float2 uv = xz / MAT_TILE_M[layer];
+                              sampler s, int layer, constant FrameUniforms& frame,
+                              float2 local_xz, float mixk) {
+    float2 uv = pattern_uv(frame, local_xz, MAT_TILE_M[layer]);
     float2 uv2 = float2(0.8 * uv.x - 0.6 * uv.y, 0.6 * uv.x + 0.8 * uv.y) * 0.43 + 0.37;
     float4 a = mix(albedo.sample(s, uv, layer), albedo.sample(s, uv2, layer), mixk);
     float4 n = mix(normal.sample(s, uv, layer), normal.sample(s, uv2, layer), mixk);
@@ -170,6 +171,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
+    // Узоры текстур — от начала cam_hi (AD-49): точные даже в 30 км от угла карты.
+    float2 lxz = in.rel.xz + frame.cam_lo.xz;
     float3 n = normalize(in.normal);
     // Нормаль грани — как у треугольника LOD 0 в SampleGround.
     float3 face = normalize(cross(dfdy(in.rel), dfdx(in.rel)));
@@ -183,7 +186,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // дальности, а полоса уже пикселя гаснет по покрытию, а не мерцает.
     FeatureDist fd = feature_distances(xz, frame.map_size_m, feat_segs, feat_cells, feat_list);
     float px = max(length(dfdx(in.rel)), length(dfdy(in.rel)));
-    float wobble = (detail.sample(s, xz / 9.0).g - 0.5) * 0.4;
+    float wobble = (detail.sample(s, pattern_uv(frame, lxz, 9.0)).g - 0.5) * 0.4;
     float trail_px = 1.0 - smoothstep(-px, px + 0.2, fd.trail + wobble);
     float road_px = 1.0 - smoothstep(-px, px + 0.1, fd.road);
     // Камни берега русла и вода в русле (до 03.2 вода — только цвет).
@@ -227,13 +230,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     }
 
     // Смешивание по высоте рельефа материала: на границе выше выступающий слой.
-    float mixk = 0.3 + 0.4 * detail.sample(s, xz / 41.0).g;
+    float mixk = 0.3 + 0.4 * detail.sample(s, pattern_uv(frame, lxz, 41.0)).g;
     MatSample ms[MAT_COUNT];
     float best = -1.0;
     for (int i = 0; i < MAT_COUNT; ++i) {
         wl[i] /= max(total, 1e-4);
         if (wl[i] > 0.01) {
-            ms[i] = sample_layer(mat_albedo, mat_normal, s, i, xz, mixk);
+            ms[i] = sample_layer(mat_albedo, mat_normal, s, i, frame, lxz, mixk);
             best = max(best, wl[i] + 0.5 * ms[i].height);
         }
     }
@@ -259,7 +262,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         }
     }
     // Крупная вариация тона, чтобы поле не выглядело одной плиткой.
-    float macro = detail.sample(s, xz / 23.0).g;
+    float macro = detail.sample(s, pattern_uv(frame, lxz, 23.0)).g;
     albedo *= 0.85 + 0.3 * macro;
     // Влажная почва торфяника темнее.
     albedo *= 1.0 - 0.3 * moist * in.weights.y;
@@ -327,7 +330,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
 
     // Временный свет до этапа 04: солнце (Ламберт + GGX) и небо, без теней и тумана.
     float3 L = -frame.light_dir.xyz;
-    float3 V = normalize(frame.camera_pos.xyz - in.world);
+    float3 V = normalize(-in.rel);
     float3 H = normalize(L + V);
     float nl = max(dot(N, L), 0.0);
     float nv = max(dot(N, V), 1e-3);
@@ -347,7 +350,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:
         // отражение — по нормали воды (вверх) с рябью от детальной текстуры.
-        float2 rip = (detail.sample(s, xz / 3.0 + frame.time * 0.05).rg - 0.5) * 0.25;
+        float2 rip = (detail.sample(s, pattern_uv(frame, lxz, 3.0) + frame.time * 0.05).rg - 0.5) * 0.25;
         float3 Nw = normalize(float3(rip.x, 1.0, rip.y));
         float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(Nw, V)), 5.0);
         float3 sky_refl = float3(0.30, 0.42, 0.62) * 0.7;

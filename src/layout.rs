@@ -217,6 +217,52 @@ pub struct ShadowUniforms {
     pub params: [f32; 4],
 }
 
+/// Камера выбора кластеров на GPU (02.5), 128 байт: то же, что
+/// `terrain_clusters::View`. На GPU — `CullView` в `common.h`.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct CullView {
+    /// Плоскости пирамиды: xyz — нормаль внутрь, w — смещение.
+    pub planes: [[f32; 4]; 6],
+    /// xyz — камера (у орто-вида не используется), w — пикселей на единицу.
+    pub camera: [f32; 4],
+    /// x — znear, y — порог ошибки, z — орто (1), w — вид включён (1).
+    pub params: [f32; 4],
+}
+
+/// Узел дерева групп для обхода на GPU (02.5), 32 байта.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct CullNode {
+    pub sphere: [f32; 4],
+    /// Наибольшая ошибка поддерева, м; «бесконечность» — 1e30.
+    pub error: f32,
+    /// Лист — номер группы, внутренний узел — −1.
+    pub group: i32,
+    pub child_offset: u32,
+    pub child_count: u32,
+}
+
+/// Сфера и ошибка группы (02.5), 32 байта.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct CullBounds {
+    pub sphere: [f32; 4],
+    pub error: f32,
+    pub _pad: [f32; 3],
+}
+
+/// Кластер для проверки среза на GPU (02.5), 32 байта.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct CullCluster {
+    pub sphere: [f32; 4],
+    pub group: u32,
+    /// Группа, из которой кластер получен; −1 — исходная сетка.
+    pub refined: i32,
+    pub _pad: [u32; 2],
+}
+
 /// Входы неба от CPU (04.1), 176 байт; на GPU — `SkyInputs` в `common.h`.
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -288,10 +334,14 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<TerrainZone>() as u32,
         size_of::<ShadowUniforms>() as u32,
         offset_of!(ShadowUniforms, splits) as u32,
+        size_of::<CullView>() as u32,
+        offset_of!(CullView, params) as u32,
+        size_of::<CullNode>() as u32,
+        size_of::<CullCluster>() as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 45;
+pub const LAYOUT_PROBE_LEN: usize = 49;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -339,6 +389,10 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(TerrainZone)",
     "sizeof(ShadowUniforms)",
     "ShadowUniforms.splits",
+    "sizeof(CullView)",
+    "CullView.params",
+    "sizeof(CullNode)",
+    "sizeof(CullCluster)",
 ];
 
 #[cfg(test)]
@@ -353,7 +407,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96, 32, 304, 256
+                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32
             ]
         );
     }

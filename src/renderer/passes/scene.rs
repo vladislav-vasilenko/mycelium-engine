@@ -5,6 +5,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx};
+use crate::renderer::cull::ARGS_OFFSET;
 use crate::renderer::frame::{
     INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, Table,
 };
@@ -87,9 +88,21 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
     let Some(terrain) = &ctx.r.terrain else {
         return;
     };
-    if let (Some(list), Some(c)) = (ctx.input.clusters, &ctx.r.clusters) {
-        draw_clusters(ctx, enc, terrain, c, list.len().min(MAX_VISIBLE_CLUSTERS));
-        return;
+    if let Some(c) = &ctx.r.clusters {
+        if ctx.input.cull.is_some() {
+            draw_clusters(ctx, enc, terrain, c, None);
+            return;
+        }
+        if let Some(list) = ctx.input.clusters {
+            draw_clusters(
+                ctx,
+                enc,
+                terrain,
+                c,
+                Some(list.len().min(MAX_VISIBLE_CLUSTERS)),
+            );
+            return;
+        }
     }
     let table = ctx.slot.table(Table::Terrain);
     unsafe {
@@ -139,9 +152,9 @@ fn draw_clusters(
     enc: &RenderEncoder,
     terrain: &crate::renderer::terrain::TerrainGpu,
     c: &crate::renderer::terrain_clusters::ClustersGpu,
-    count: usize,
+    count: Option<usize>,
 ) {
-    if count == 0 {
+    if count == Some(0) {
         return;
     }
     let table = ctx.slot.table(Table::Terrain);
@@ -170,16 +183,26 @@ fn draw_clusters(
         table.setTexture_atIndex(c.cover.gpuResourceID(), 6);
         table.setTexture_atIndex(c.macro_detail.gpuResourceID(), 9);
     }
-    enc.pushDebugGroup(&label(&format!("terrain: {count} clusters")));
+    enc.pushDebugGroup(&label(&match count {
+        Some(n) => format!("terrain: {n} clusters (CPU cut)"),
+        None => "terrain: clusters (GPU cut, indirect)".to_string(),
+    }));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain_clusters);
     enc.setArgumentTable_atStages(table, BOTH_STAGES);
-    unsafe {
-        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+    match count {
+        // Срез на GPU (02.5): число экземпляров — из indirect-аргументов вида 0.
+        None => enc.drawPrimitives_indirectBuffer(
             MTLPrimitiveType::Triangle,
-            0,
-            CLUSTER_VERTEX_COUNT,
-            count,
-        );
+            c.cull.counters[ctx.slot_index].gpuAddress() + ARGS_OFFSET as u64,
+        ),
+        Some(n) => unsafe {
+            enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                MTLPrimitiveType::Triangle,
+                0,
+                CLUSTER_VERTEX_COUNT,
+                n,
+            );
+        },
     }
     enc.popDebugGroup();
 }

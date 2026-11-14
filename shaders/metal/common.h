@@ -167,6 +167,34 @@ struct TerrainCluster {
 };
 
 // Входы неба от CPU (src/layout.rs, SkyInputs), 176 байт.
+// Выбор кластеров на GPU (02.5): src/layout.rs, CullView / CullNode / CullBounds / CullCluster.
+struct CullView {
+    float4 planes[6];  // xyz — нормаль внутрь, w — смещение
+    float4 camera;     // xyz — камера, w — пикселей на единицу
+    float4 params;     // x — znear, y — порог, z — орто, w — вид включён
+};
+
+struct CullNode {
+    float4 sphere;
+    float error;
+    int group;
+    uint child_offset;
+    uint child_count;
+};
+
+struct CullBounds {
+    float4 sphere;
+    float error;
+    float _pad[3];
+};
+
+struct CullCluster {
+    float4 sphere;
+    uint group;
+    int refined;
+    uint _pad[2];
+};
+
 struct SkyInputs {
     float4 sun_dir;      // к солнцу в мировых осях (x восток, y вверх, z юг)
     float4 moon_dir;     // к луне; w — освещённая доля

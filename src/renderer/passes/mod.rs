@@ -5,6 +5,7 @@
 //! `encode`. Новый проход — новый тип с `FramePass` и строка в `REGISTRY`
 //! плюс объявление в `frame::frame_passes`.
 
+mod cull;
 mod exposure;
 mod pattern;
 mod readback;
@@ -54,6 +55,7 @@ pub(super) struct PassCtx<'a> {
     /// Ресурсы и pipeline рендерера (только чтение).
     pub r: &'a Renderer,
     pub slot: &'a FrameSlot,
+    pub slot_index: usize,
     pub upload_addr: u64,
     pub targets: &'a Targets,
     pub drawable: &'a ProtocolObject<dyn MTLTexture>,
@@ -72,10 +74,11 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 9] = [
+static REGISTRY: [&dyn FramePass; 10] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
+    &cull::CullPass,
     &shadows::ShadowsPass,
     &scene::ScenePass,
     &readback::ReadbackPass,

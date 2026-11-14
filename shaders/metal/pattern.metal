@@ -84,4 +84,9 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     ShadowUniforms shu;
     out[43] = sizeof(ShadowUniforms);
     out[44] = uint((thread char*)&shu.splits - (thread char*)&shu);
+    CullView cv;
+    out[45] = sizeof(CullView);
+    out[46] = uint((thread char*)&cv.params - (thread char*)&cv);
+    out[47] = sizeof(CullNode);
+    out[48] = sizeof(CullCluster);
 }

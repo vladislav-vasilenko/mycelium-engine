@@ -40,18 +40,19 @@ pub fn light_view_proj(center: DVec3, radius: f64, to_light: DVec3) -> DMat4 {
     proj * view
 }
 
-/// Каскады кадра и списки их кластеров подряд в `visible` (очищается);
-/// `budget` — сколько места в буфере кластеров слота осталось после основного
-/// списка. `None` — светило под горизонтом.
+/// Каскады кадра и камеры их выбора кластеров. С `set` (выбор на CPU) списки
+/// каскадов идут подряд в `visible` (очищается); `budget` — сколько места в
+/// буфере кластеров слота осталось после основного списка. Без `set` выбор
+/// делает GPU (02.5) по возвращённым камерам. `None` — светило под горизонтом.
 pub fn shadow_frame(
-    set: &ClusterSet,
+    set: Option<&ClusterSet>,
     camera: Vec3,
     map_size_m: f32,
     to_light: Vec3,
     budget: usize,
     visible: &mut Vec<u32>,
     scratch: &mut Vec<u32>,
-) -> Option<ShadowFrame> {
+) -> Option<(ShadowFrame, [View; CASCADES])> {
     visible.clear();
     if to_light.y <= 0.0 {
         return None;
@@ -78,6 +79,7 @@ pub fn shadow_frame(
         params: [1.0, 0.0, 0.0, 0.0],
     };
     let mut ranges = [(0u32, 0u32); CASCADES];
+    let mut views = [View::ortho(glam::Mat4::IDENTITY, 1.0, 1.0); CASCADES];
     for (k, &(center, radius)) in cascades.iter().enumerate() {
         let vp = light_view_proj(center, radius, l);
         // Относительно камеры: мир = rel + камера.
@@ -86,16 +88,21 @@ pub fn shadow_frame(
         let texel = 2.0 * radius / SHADOW_SIZE as f64;
         u.texel_m[k] = texel as f32;
         let view = View::ortho(vp.as_mat4(), (1.0 / texel) as f32, 1.0);
+        views[k] = view;
+        let Some(set) = set else { continue };
         select(set, &view, true, scratch);
         let start = visible.len();
         let n = scratch.len().min(budget - start);
         visible.extend_from_slice(&scratch[..n]);
         ranges[k] = (start as u32, n as u32);
     }
-    Some(ShadowFrame {
-        uniforms: u,
-        ranges,
-    })
+    Some((
+        ShadowFrame {
+            uniforms: u,
+            ranges,
+        },
+        views,
+    ))
 }
 
 /// Точка в мире → (u, v, глубина) карты каскада; для тестов.

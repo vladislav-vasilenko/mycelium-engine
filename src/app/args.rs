@@ -24,6 +24,8 @@ pub struct Args {
     pub pose: Option<usize>,
     /// Рельеф тайлами уровня 0 вместо кластеров (сравнение, 02.3).
     pub tiles: bool,
+    /// Срез кластеров на CPU (02.3) вместо GPU (02.5) — для сравнения.
+    pub cpu_cull: bool,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -67,6 +69,7 @@ impl Args {
                     }
                 }
                 "--tiles" => args.tiles = true,
+                "--cpu-cull" => args.cpu_cull = true,
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

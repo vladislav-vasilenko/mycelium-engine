@@ -13,6 +13,7 @@
 //! - `readback` — раскладка и разбор копий для самопроверки;
 //! - `targets`, `terrain`, `water`, `hands` — цели рендера и ресурсы сцены.
 
+mod cull;
 mod device;
 mod frame;
 mod hands;
@@ -36,6 +37,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
+pub use cull::{CULL_VIEWS, CullFrame, CullStats};
 pub use device::{DeviceInfo, probe_device};
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
@@ -48,8 +50,9 @@ use crate::frame_graph::{self, FramePlan};
 use crate::layout::Vertex;
 use crate::reference::PATTERN_SIZE;
 use frame::{
-    FRAME_SLOTS, FrameSlot, HANDS_OFFSET, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES,
-    PALETTE_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
+    CULL_OFFSET, FRAME_SLOTS, FrameSlot, HANDS_OFFSET, INSTANCE_OFFSET, LEVELS_OFFSET,
+    MAX_INSTANCES, PALETTE_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS,
+    frame_passes,
 };
 use hands::HandsGpu;
 use passes::{PassBarrier, PassCtx};
@@ -101,6 +104,8 @@ pub struct Renderer {
     sky: sky::SkyGpu,
     /// Каскадные тени (04.2).
     shadows: shadows::ShadowGpu,
+    /// Итог выбора кластеров на GPU последнего завершённого кадра (02.5).
+    cull_stats: Option<CullStats>,
     pub stats: Stats,
 }
 
@@ -235,6 +240,7 @@ impl Renderer {
             clusters: None,
             sky,
             shadows,
+            cull_stats: None,
             stats: Stats::default(),
         })
     }
@@ -373,6 +379,14 @@ impl Renderer {
             return FrameOutcome::SkippedBusySlot;
         }
 
+        // Счётчики выбора на GPU прошлого кадра слота (02.5) и сброс.
+        let frame_index = self.frame_index;
+        if let Some(c) = self.clusters.as_mut()
+            && let Some(s) = c.cull.take_and_reset(slot_index, frame_index + 1)
+        {
+            self.cull_stats = Some(s);
+        }
+
         let Some(drawable) = self.layer.nextDrawable() else {
             self.stats.skipped_no_drawable += 1;
             return FrameOutcome::SkippedNoDrawable;
@@ -455,6 +469,9 @@ impl Renderer {
             .as_ref()
             .map_or_else(bytemuck::Zeroable::zeroed, |s| s.uniforms);
         upload_bytes(&slot.upload, SHADOW_OFFSET, bytemuck::bytes_of(&shadow_u));
+        if let Some(c) = &input.cull {
+            upload_bytes(&slot.upload, CULL_OFFSET, bytemuck::cast_slice(&c.views));
+        }
         if let Some(list) = input.clusters {
             let n = list.len().min(MAX_VISIBLE_CLUSTERS);
             upload_bytes(&slot.visible, 0, bytemuck::cast_slice(&list[..n]));
@@ -480,6 +497,7 @@ impl Renderer {
         let ctx = PassCtx {
             r: self,
             slot,
+            slot_index,
             upload_addr: slot.upload.gpuAddress(),
             targets: self.targets.as_ref().expect("цели есть: размер проверен"),
             drawable: &drawable_tex,
@@ -515,5 +533,12 @@ fn depth_state_no_write(
 impl Drop for Renderer {
     fn drop(&mut self) {
         self.wait_idle();
+    }
+}
+
+impl Renderer {
+    /// Числа выбора кластеров на GPU (02.5) последнего завершённого кадра.
+    pub fn cull_stats(&self) -> Option<CullStats> {
+        self.cull_stats
     }
 }

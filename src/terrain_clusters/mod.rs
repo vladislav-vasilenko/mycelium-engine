@@ -10,6 +10,7 @@
 //! 4 байта на треугольник (три локальных индекса u8).
 
 mod cache;
+mod gpu;
 mod select;
 #[cfg(test)]
 mod tests;
@@ -24,6 +25,7 @@ use crate::layout::TerrainCluster;
 use crate::world::heightfield::HeightField;
 
 pub use cache::load_or_build;
+pub use gpu::{CullData, cull_data};
 pub use select::{SelectStats, View, select};
 
 /// Ширина дерева над группами (детей у узла не больше).

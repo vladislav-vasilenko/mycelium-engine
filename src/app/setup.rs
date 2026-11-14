@@ -73,6 +73,7 @@ impl App {
         // Кластерный рельеф (02.3): иерархия из поля высот полного разрешения.
         let t_clusters = Instant::now();
         let (clusters, cached) = crate::terrain_clusters::load_or_build(&self.world);
+        let cull = crate::terrain_clusters::cull_data(&clusters);
         let (layer_size, weights_rgba, material_rgba) = terrain_mesh::attribute_layers(&self.world);
         r.set_terrain_clusters(&renderer::ClusterData {
             heights: &self.world.heightfield.heights,
@@ -83,6 +84,7 @@ impl App {
             weights_rgba: &weights_rgba,
             material_rgba: &material_rgba,
             cover: self.world.cover.as_ref().map(|c| (&c.rgba[..], c.size)),
+            cull: &cull,
             macro_detail: self
                 .world
                 .macro_detail

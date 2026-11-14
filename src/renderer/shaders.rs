@@ -47,6 +47,9 @@ pub struct Pipelines {
     pub sky_multiscatter: Obj<dyn MTLComputePipelineState>,
     pub sky_view: Obj<dyn MTLComputePipelineState>,
     pub sky_view_moon: Obj<dyn MTLComputePipelineState>,
+    /// Выбор кластеров на GPU (02.5): глубина дерева и indirect-аргументы.
+    pub cull_clusters: Obj<dyn MTLComputePipelineState>,
+    pub cull_finish: Obj<dyn MTLComputePipelineState>,
     /// LUT воздушной перспективы (04.2).
     pub sky_aerial: Obj<dyn MTLComputePipelineState>,
     pub sky_ambient: Obj<dyn MTLComputePipelineState>,
@@ -286,6 +289,7 @@ pub fn build_pipelines(
     let water_lib = compile_library(device, dir, "water.metal", over)?;
     let hands_lib = compile_library(device, dir, "hands.metal", over)?;
     let sky_lib = compile_library(device, dir, "sky.metal", over)?;
+    let cull_lib = compile_library(device, dir, "cull.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -361,6 +365,8 @@ pub fn build_pipelines(
         sky_view: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut")?,
         sky_view_moon: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut_moon")?,
         sky_aerial: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_aerial_lut")?,
+        cull_clusters: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_clusters")?,
+        cull_finish: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_finish")?,
         sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
         exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
         terrain_shadow: depth_only_pipeline(

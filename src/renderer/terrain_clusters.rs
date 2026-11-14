@@ -31,6 +31,8 @@ pub(super) struct ClustersGpu {
     /// Игровая зона: высоты и параметры (`TerrainZone`); без зоны — заглушки.
     pub zone_heights: Obj<dyn MTLBuffer>,
     pub zone_info: Obj<dyn MTLBuffer>,
+    /// Выбор кластеров на GPU (02.5).
+    pub cull: super::cull::CullGpu,
 }
 
 /// Данные кластерного рельефа для `Renderer::set_terrain_clusters`.
@@ -49,6 +51,8 @@ pub struct ClusterData<'a> {
     pub macro_detail: Option<(&'a [u8], u32)>,
     /// Игровая зона: высоты (n²) и параметры, если есть.
     pub zone: Option<(&'a [f32], crate::layout::TerrainZone)>,
+    /// Дерево групп и кластеры для выбора на GPU (02.5).
+    pub cull: &'a crate::terrain_clusters::CullData,
 }
 
 impl Renderer {
@@ -151,6 +155,7 @@ impl Renderer {
             macro_detail,
             zone_heights,
             zone_info,
+            cull: super::cull::CullGpu::new(&self.device, &self.residency, d.cull),
         }) {
             self.retire(
                 vec![old.weights, old.material, old.cover, old.macro_detail],
@@ -161,6 +166,7 @@ impl Renderer {
                     old.triangles,
                     old.zone_heights,
                     old.zone_info,
+                    old.cull,
                 ))),
             );
         }

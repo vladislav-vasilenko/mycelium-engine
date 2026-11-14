@@ -71,13 +71,27 @@ impl App {
         };
         let terrain = if self.scene == SceneMode::Terrain {
             if self.use_clusters && self.clusters.is_some() {
-                let s = self.cluster_stats;
-                format!(
-                    " · рельеф: {} кл., {:.2} млн тр., выбор {:.2} мс",
-                    s.clusters,
-                    s.triangles as f64 / 1e6,
-                    self.cluster_select_ms
-                )
+                match self.renderer.as_ref().and_then(|r| r.cull_stats()) {
+                    Some(g) if !self.args.cpu_cull => format!(
+                        " · рельеф: {} кл. (GPU), тени {}{}",
+                        g.visible[0],
+                        g.visible[1..].iter().sum::<u32>(),
+                        if g.overflow > 0 {
+                            format!(", переполнение {}", g.overflow)
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    _ => {
+                        let s = self.cluster_stats;
+                        format!(
+                            " · рельеф: {} кл., {:.2} млн тр., выбор {:.2} мс",
+                            s.clusters,
+                            s.triangles as f64 / 1e6,
+                            self.cluster_select_ms
+                        )
+                    }
+                }
             } else {
                 " · рельеф: тайлы".to_string()
             }

@@ -148,9 +148,13 @@ impl App {
             cam_hi: cam_hi.extend(0.0).to_array(),
             cam_lo: (camera.position - cam_hi).extend(0.0).to_array(),
         };
-        // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3).
+        // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3): на GPU
+        // (02.5) или на CPU (`--cpu-cull`). Самопроверка считает и CPU-срез —
+        // эталон для сверки с GPU.
         let use_clusters =
             self.use_clusters && self.scene == SceneMode::Terrain && self.clusters.is_some();
+        let gpu_cull = use_clusters && !self.args.cpu_cull;
+        let mut main_view = None;
         if use_clusters {
             let set = self.clusters.as_ref().unwrap();
             // Самопроверка вида Raw сверяет кластеры уровня 0 с CPU точно:
@@ -164,15 +168,18 @@ impl App {
                 sim::NEAR_PLANE_M,
                 threshold,
             );
-            let t = Instant::now();
-            self.cluster_stats =
-                crate::terrain_clusters::select(set, &v, true, &mut self.visible_clusters);
-            self.cluster_select_ms = t.elapsed().as_secs_f64() * 1000.0;
+            main_view = Some(v);
+            if !gpu_cull || selftest {
+                let t = Instant::now();
+                self.cluster_stats =
+                    crate::terrain_clusters::select(set, &v, true, &mut self.visible_clusters);
+                self.cluster_select_ms = t.elapsed().as_secs_f64() * 1000.0;
+            }
         }
-        // Каскады теней (04.2): списки кластеров каскадов — после основного.
-        let shadows = match (&sky, use_clusters) {
+        // Каскады теней (04.2): на CPU списки каскадов — после основного.
+        let cascades = match (&sky, use_clusters) {
             (Some(s), true) => shadows::shadow_frame(
-                self.clusters.as_ref().unwrap(),
+                (!gpu_cull).then(|| self.clusters.as_ref().unwrap()),
                 camera.position,
                 self.world.size_m().x,
                 s.light_to,
@@ -186,6 +193,17 @@ impl App {
             ),
             _ => None,
         };
+        let cull = main_view.filter(|_| gpu_cull).map(|v| {
+            let mut views = [crate::layout::CullView::default(); renderer::CULL_VIEWS];
+            views[0] = v.to_gpu();
+            if let Some((_, cv)) = &cascades {
+                for (k, c) in cv.iter().enumerate() {
+                    views[k + 1] = c.to_gpu();
+                }
+            }
+            renderer::CullFrame { views }
+        });
+        let shadows = cascades.map(|(s, _)| s);
         let instances = match self.scene {
             SceneMode::Cubes => scene::instances().to_vec(),
             SceneMode::Terrain => marker_posts(&self.world),
@@ -215,9 +233,10 @@ impl App {
             capture,
             water: water_frame,
             hands,
-            clusters: use_clusters.then_some(&self.visible_clusters[..]),
+            clusters: (use_clusters && !gpu_cull).then_some(&self.visible_clusters[..]),
             shadows,
             shadow_clusters: &self.shadow_clusters,
+            cull,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {

@@ -15,7 +15,7 @@ pub(super) const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
 // Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
 // SeaParams @4096, WaterLevel[] @4608, HandsUniforms @8192,
 // палитра костей float4x4[MAX_JOINTS] @8448..12544, SkyInputs @12544..12704.
-pub(super) const UPLOAD_BYTES: usize = 13312;
+pub(super) const UPLOAD_BYTES: usize = 14080;
 pub(super) const INSTANCE_OFFSET: usize = 256;
 pub(super) const INSTANCE_END: usize = 4096;
 pub(super) const MAX_INSTANCES: usize =
@@ -28,6 +28,8 @@ pub(super) const PALETTE_OFFSET: usize = 8448;
 pub(super) const SKY_OFFSET: usize = 12544;
 /// `ShadowUniforms` (04.2) после входов неба.
 pub(super) const SHADOW_OFFSET: usize = 12800;
+/// `CullView` × 5 (02.5) после теней.
+pub(super) const CULL_OFFSET: usize = 13312;
 
 // Ресурсы для планировщика проходов.
 const RES_PATTERN: ResourceId = ResourceId(1);
@@ -42,6 +44,8 @@ const RES_SKY: ResourceId = ResourceId(7);
 const RES_EXPOSURE: ResourceId = ResourceId(8);
 /// Каскады карты теней (04.2).
 const RES_SHADOW: ResourceId = ResourceId(9);
+/// Списки видимых кластеров и indirect-аргументы (02.5).
+const RES_CULL: ResourceId = ResourceId(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -73,6 +77,9 @@ pub struct FrameInput<'a> {
     pub shadows: Option<super::shadows::ShadowFrame>,
     /// Кластеры каскадов подряд; ложатся в буфер слота после `clusters`.
     pub shadow_clusters: &'a [u32],
+    /// Выбор кластеров на GPU (02.5): камеры видов. Тогда `clusters` и
+    /// `shadow_clusters` не используются, рисование — по indirect-аргументам.
+    pub cull: Option<super::cull::CullFrame>,
 }
 
 /// Вода в кадре (03.1).
@@ -107,9 +114,10 @@ pub(super) enum Table {
     SkyDraw,
     Exposure,
     Shadow,
+    Cull,
 }
 
-const TABLE_NAMES: [&str; 14] = [
+const TABLE_NAMES: [&str; 15] = [
     "pattern",
     "scene",
     "readback",
@@ -124,6 +132,7 @@ const TABLE_NAMES: [&str; 14] = [
     "sky draw",
     "exposure",
     "shadow",
+    "cull",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -131,7 +140,7 @@ const TABLE_NAMES: [&str; 14] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 14],
+    tables: [Obj<dyn MTL4ArgumentTable>; 15],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -164,7 +173,7 @@ impl FrameSlot {
         residency.addAllocation(as_allocation(&*upload));
         let visible = shared_buffer(
             device,
-            super::terrain_clusters::MAX_VISIBLE_CLUSTERS * 4,
+            super::cull::VISIBLE_TOTAL * 4,
             &format!("visible clusters slot {index}"),
         );
         residency.addAllocation(as_allocation(&*visible));
@@ -173,7 +182,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("14 таблиц")),
+                .unwrap_or_else(|_| unreachable!("15 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -207,9 +216,15 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_SKY, Stages::DISPATCH)],
         },
         PassDecl {
+            name: "cull",
+            kind: PassKind::Compute,
+            reads: vec![],
+            writes: vec![(RES_CULL, Stages::DISPATCH)],
+        },
+        PassDecl {
             name: "shadows",
             kind: PassKind::Render,
-            reads: vec![],
+            reads: vec![(RES_CULL, Stages::VERTEX)],
             writes: vec![(RES_SHADOW, Stages::FRAGMENT)],
         },
         PassDecl {
@@ -220,6 +235,7 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
                 (RES_WETNESS, Stages::FRAGMENT),
                 (RES_SKY, Stages::FRAGMENT),
                 (RES_SHADOW, Stages::FRAGMENT),
+                (RES_CULL, Stages::VERTEX),
             ],
             writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
         },

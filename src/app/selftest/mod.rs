@@ -258,6 +258,17 @@ impl App {
             t.step = TestStep::Done;
         }
         if t.step == TestStep::Done {
+            // Срез на GPU (02.5) против CPU-эталона на той же неподвижной камере.
+            if let Some(g) = r.cull_stats().filter(|_| !self.args.cpu_cull) {
+                let cpu = self.cluster_stats.clusters;
+                t.check(
+                    g.visible[0] == cpu && g.overflow == 0,
+                    format!(
+                        "срез кластеров на GPU: {} (CPU {cpu}), переполнение {}",
+                        g.visible[0], g.overflow
+                    ),
+                );
+            }
             let s = &r.stats;
             println!(
                 "кадров {}, пропуски: занят слот {}, нет drawable {}; отложенно освобождено {}; CPU кодирование последнего кадра {:.3} мс",

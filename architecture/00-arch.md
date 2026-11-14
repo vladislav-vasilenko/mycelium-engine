@@ -131,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `cull` (compute, срез кластеров на GPU, 02.5) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -270,6 +270,10 @@ sequenceDiagram
 | `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
 | `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
+| `CullView` | 128 Б, 16 | `planes [[f32;4];6]` @0, `camera` @96 (w — пикселей на единицу), `params` @112 (znear, порог, орто, включён) |
+| `CullNode` | 32 Б, 4 | `sphere` @0, `error` @16, `group i32` @20, `child_offset` @24, `child_count` @28 |
+| `CullBounds` | 32 Б, 4 | `sphere` @0, `error` @16 |
+| `CullCluster` | 32 Б, 4 | `sphere` @0, `group` @16, `refined i32` @20 |
 | `ShadowUniforms` | 304 Б, 16 | `vp_rel [[[f32;4];4];4]` @0 (проекция света × вид относительно камеры, глубина [0, 1], 0 — у света), `splits` @256 (дальние границы каскадов 0–2, м; 3 — ∞), `texel_m` @272, `params` @288 (x — тени включены) |
 | `TerrainZone` | 32 Б, 4 | `far_count u32` @0 (узлов поля острова; `u32::MAX` — зоны нет), `n u32` @4, `step_m` @8, `origin_x` @12, `origin_z` @16 (отдельные `f32`: `float2` в MSL выравнивается по 8), `_pad [f32;3]` @20 |
 | `SkyInputs` | 176 Б, 16 | `sun_dir` @0, `moon_dir` @16 (w — освещённая доля), `star_rot [[f32;4];3]` @32, `params` @80 (фикс. экспозиция, dt, время, E☉), `inv_view_proj_rel` @96, `view` @160 (телесный угол пикселя) |
@@ -565,6 +569,16 @@ sequenceDiagram
 | `renderer/terrain_clusters.rs` | `ClusterData.macro_detail`, `ClustersGpu.macro_detail` (без слоя — 1 × 1 нейтральный: небо открыто, ровно, сухо) |
 | `terrain.metal` | `texture(9)` таблицы `terrain` (оба пути; у тайлов без кластеров — любая текстура); в `terrain_fs`: мох во впадинах, вдоль стока и на северных склонах, суше на гребнях; осыпи (камень + почва) поверх; тон по кривизне и влажности; кроны вдали темнее в ложбинах; затенение света неба `sky_vis³ · (1 − 0,6 · впадина)` и части солнца; `sample_layer_uv`, `sample_layer_triplanar` (камень на склонах круче 35–55°); вид `VIEW_MACRO` = 14 |
 
+### 4.9i. Выбор кластеров на GPU (02.5)
+
+| Файл | Элементы |
+| --- | --- |
+| `src/terrain_clusters/gpu.rs` | `CullData { nodes, groups, clusters, group_clusters, depths, depth_sizes, roots }`, `cull_data(&ClusterSet)` (глубины дерева обходом в ширину, фронт глубины d ≤ узлов на глубине d; бесконечная ошибка → 1e30 для быстрой математики MSL), `MAX_DEPTH` = 48, `View::to_gpu(self) -> CullView` |
+| `src/renderer/cull.rs` | `CULL_VIEWS` = 5 (камера + 4 каскада), `CASCADE_CAP` = 2¹⁶, `VISIBLE_TOTAL` = 2¹⁸ + 4 · 2¹⁶ (буфер видимых слота), `region_base(view)`, `ARGS_OFFSET`; `CullFrame { views }`, `CullStats { visible, overflow, frame }`; `CullGpu` (дерево, группы, кластеры, `levels` — `CullLevel` по глубинам, `regions` — `CullRegions`; на слот — `frontier` видов × узлов и shared-счётчики с indirect-аргументами), `take_and_reset(slot, frame)` — числа завершённого кадра слота и сброс (фронт глубины 0 = корни) |
+| `passes/cull.rs` | `CullPass`: dispatch `cull_clusters` на глубину (потоки = узлов на глубине × 5 видов), барьеры внутри кодировщика, `cull_finish` пишет `MTLDrawPrimitivesIndirectArguments` |
+| `shaders/metal/cull.metal` | `cull_error`, `cull_visible`, ядра `cull_clusters` (то же правило, что `select`: ошибка узла, сфера узла, ошибка грубой и точной группы, сфера кластера; атомарные счётчики фронта и списка, переполнение) и `cull_finish` |
+| Отрисовка | `draw_clusters` и `ShadowsPass` при `FrameInput.cull` — `drawPrimitives:indirectBuffer:` с областью видимых своего вида; без него — CPU-срез 02.3 (`--cpu-cull`) |
+
 ### 4.10. Сборка `.app`
 
 `scripts/bundle-app.sh [--open]` собирает `target/release/Echo.app`:
@@ -653,7 +667,7 @@ sequenceDiagram
 
 | Буфер | Диапазон | Содержимое |
 | --- | --- | --- |
-| upload слота (13 312 Б) | 0..240 | `FrameUniforms` |
+| upload слота (14 080 Б) | 0..240 | `FrameUniforms` |
 | | 256..4096 | до 48 `InstanceData` |
 | | 4096..4528 | `SeaParams` |
 | | 4608..5024 | `WaterLevel[13]` |
@@ -661,8 +675,9 @@ sequenceDiagram
 | | 8448..12 544 | палитра костей, до 64 × `float4x4` |
 | | 12 544..12 720 | `SkyInputs` (04.1) |
 | | 12 800..13 104 | `ShadowUniforms` (04.2); без теней — нули (`params.x` = 0) |
-| видимые кластеры слота (`MAX_VISIBLE_CLUSTERS` × 4 Б) | 0..4·n | основной срез кадра (n ≤ 2¹⁸) |
-| | далее | списки каскадов теней подряд, `ShadowFrame.ranges` — относительно конца основного среза |
+| | 13 312..13 952 | `CullView` × 5 (02.5) |
+| видимые кластеры слота (`VISIBLE_TOTAL` × 4 Б) | 0..2¹⁸ | основной срез кадра |
+| | далее | GPU (02.5): каскад k — с `region_base(k + 1)`, по 2¹⁶; CPU (`--cpu-cull`): каскады подряд после основного, `ShadowFrame.ranges` |
 | `readback_buf` (262 656 Б) | 0..262 144 | узор RGBA8, строка 1024 Б |
 | | 262 144..262 400 | глубина `f32` в 9 точках `DEPTH_SAMPLES` |
 | | 262 400..262 656 | 31 значение `u32` из `layout_probe` |
@@ -751,6 +766,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 04.1 · Время суток, солнце, луна, звёзды, атмосфера, свет неба, экспозиция, управление временем | `src/sky/`, `app/sky.rs`, `renderer/sky.rs`, `sky_lut`, `exposure`, `sky.metal`, `stars.bin` | Частично (AD-51): нет текстуры луны, консоли, GPU-замера |
+| 02.5 · п. 1 срез на GPU, п. 2 indirect, п. 4 счётчики | `terrain_clusters/gpu.rs`, `renderer/cull.rs`, `passes/cull.rs`, `cull.metal`, indirect в `scene` и `shadows`, проверка в самопроверке | Частично (AD-56): mesh-шейдеры и экземпляры растений (п. 3, после 02.4) — нет |
 | 02.9 · Крупная детализация: маски, свет, цвет, стены | `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `texture(9)`, `sample_layer_triplanar`, вид `macro` | Частично (AD-55): стохастическая выборка плиток не сделана; GPU-замер не снят |
 | 04.2 · п. 1 прямой свет солнца или луны | `sky_sun_term` (04.1), Ламберт + GGX в `terrain_fs` | Выполнено в 04.1 |
 | 04.2 · п. 2 каскадные тени | `app/shadows.rs`, `renderer/shadows.rs`, `passes/shadows.rs`, `View::ortho`, `terrain_shadow_vs`, `shadow_factor` | Частично (AD-53): тени от рельефа; отклонение — каскады 30/150/800 м + весь остров вместо конца на 300–500 м; тени на воде и руках — нет |
@@ -1169,6 +1185,15 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** +22 МБ PNG; маска живёт на сетке 7,5 м — внутри зоны 1 м мельче не становится; ручные коэффициенты смешивания.
 - **Пересмотреть.** При стриминге 08.1 (маски по тайлам) и с лесом 02.4: те же маски — условия роста.
 
+
+### AD-56. Срез кластеров на GPU обходом дерева групп по глубинам, отрисовка через indirect
+
+- **Решение.** Правило 02.3 перенесено в compute без изменений. Дерево групп обходится по глубинам: dispatch на глубину d, поток — узел фронта и вид (камера и 4 каскада теней в одном dispatch); узел с ошибкой ≤ порога или вне пирамиды пропускается, внутренний узел атомарно дописывает детей во фронт d + 1, лист проверяет кластеры группы и пишет видимые в область своего вида. Размер dispatch глубины — число узлов на ней (верхняя граница фронта), фронт читается счётчиком. `cull_finish` пишет indirect-аргументы `drawPrimitives`; рельеф и каскады рисуются по ним. Счётчики — shared-буфер слота: CPU читает числа прошлого кадра слота для заголовка и самопроверки и сбрасывает их.
+- **Почему.** Детерминированное число dispatch (глубина дерева ~20) без persistent threads и глобальной очереди: проще и проверяемо — самопроверка сравнивает число видимых с CPU-эталоном (совпадение до кластера: 61 662 на Якусиме, 8 506 на генераторе). CPU-время рельефа и теней не зависит от числа кластеров.
+- **Отброшено.** Persistent threads с очередью (как в Nanite) — быстрее на больших деревьях, но сложнее синхронизация и отладка; проверить её на M3 позже. Mesh-шейдеры сразу — сначала тот же путь «экземпляр = кластер» через indirect, чтобы сравнить. Чтение результатов на CPU в том же кадре — ожидание GPU.
+- **Цена.** ~20 dispatch с барьерами на кадр; порядок видимых недетерминирован (для отрисовки неважно); числа в заголовке отстают на 2 кадра; ёмкость каскада 2¹⁶ (переполнение считается).
+- **Пересмотреть.** При mesh-шейдерах (02.5 п. 2), экземплярах растений (п. 3) и Hi-Z (02.6): тот же фронт получает второй проход по глубине.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1226,3 +1251,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 04.2 | после `5d2a75e` | AD-53: каскадные тени — `app/shadows.rs`, `renderer/shadows.rs` (`ShadowGpu`, `ShadowFrame`, `CASCADES`, `SHADOW_SIZE`), проход `shadows` и ресурс `RES_SHADOW`, таблица `shadow` (14 таблиц), конвейер `terrain_shadow` (`depth_only_pipeline`), `ShadowUniforms` (304 Б, раскладка 45 полей) в upload @12800 (upload 13 312 Б), `FrameInput.shadows`/`shadow_clusters`, `View::ortho`, отсечение узлов иерархии по сфере, `node_position`, `terrain_shadow_vs`, `shadow_factor`; `buffer(12)` и `texture(7)` таблицы `terrain` |
 | 2026-11-15 | 04.2 | после `26f3618` | AD-54: воздушная перспектива — `SkyGpu.aerial` (3D LUT 32³), `AERIAL_SIZE`, ядро и конвейер `sky_aerial_lut` в `sky_lut`, `aerial_at`/`apply_aerial`, влажная дымка в `medium_at`; рельеф `texture(8)`, вода `texture(3)`; таблицы аргументов до 16 текстур |
 | 2026-11-15 | 02.9 | после `24f8b5a` | AD-55: `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `LayersMeta.macro_detail`, `cover::export_as`, `ClusterData`/`ClustersGpu.macro_detail`, `texture(9)` таблицы `terrain`, маски в `terrain_fs`, `sample_layer_uv`/`sample_layer_triplanar`, `TerrainView::Macro` (14, `--view macro`); дымка `HAZE_SCAT` 0,018 |
+| 2026-11-15 | 02.5 | после `34197b8` | AD-56: `terrain_clusters/gpu.rs` (`CullData`, `cull_data`, `View::to_gpu`), `renderer/cull.rs` (`CullGpu`, `CullFrame`, `CullStats`, `region_base`, `VISIBLE_TOTAL`), проход `cull` и `RES_CULL`, таблица `cull` (15 таблиц), `cull.metal` (`cull_clusters`, `cull_finish`), `CullView`/`CullNode`/`CullBounds`/`CullCluster` (раскладка 49 полей), upload 14 080 Б (`CULL_OFFSET` 13 312), indirect в `draw_clusters` и `ShadowsPass`, `PassCtx.slot_index`, `FrameInput.cull`, `Renderer::cull_stats`, `--cpu-cull`, `shadow_frame(Option<&ClusterSet>)` возвращает камеры каскадов; проверка среза в самопроверке (22 проверки) |

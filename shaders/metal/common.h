@@ -15,7 +15,23 @@ struct FrameUniforms {
     float map_size_m;      // сторона карты: XZ → координаты маски влажности
     uint grid_nx;          // поле высот кластерного рельефа: узлов по x
     float grid_step_m;     // и шаг, м
+    float underwater_m;    // глубина глаз под водой, 0 — над водой
+    float _pad_uw[3];      // не float3: тот выравнивается по 16 и раздул бы структуру
 };
+
+// Подводная толща (src/app/frame.rs, underwater_m): ослабление по пути, м⁻¹. Красный
+// гаснет первым; к поглощению добавлено рассеяние — видимость ~25 м.
+constant float3 UW_EXTINCTION = float3(0.46, 0.13, 0.10);
+// Цвет толщи у поверхности при солнце, линейный; с глубиной гаснет по поглощению.
+constant float3 UW_COLOR = float3(0.020, 0.115, 0.135);
+constant float3 UW_ABSORB = float3(0.42, 0.085, 0.055);
+
+// Дымка толщи между глазом и точкой на расстоянии `dist` (только под водой).
+inline float3 underwater_fog(float3 color, float dist, float eye_depth) {
+    float3 t = exp(-UW_EXTINCTION * dist);
+    float3 fogc = UW_COLOR * exp(-UW_ABSORB * eye_depth);
+    return color * t + fogc * (1.0 - t);
+}
 
 struct InstanceData {
     float4x4 model;

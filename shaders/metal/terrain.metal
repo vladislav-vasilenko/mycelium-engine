@@ -358,5 +358,11 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float3 water = mix(bed * float3(0.7, 0.9, 0.9), sky_refl, fres) + sun * glint;
         color = mix(color, water, stream * 0.9);
     }
+    if (frame.underwater_m > 0.0) {
+        // Под водой: свет у точки ниже моря ослаблен толщей над ней, путь от
+        // глаз — дымкой толщи.
+        color *= exp(-UW_ABSORB * max(-in.world.y, 0.0));
+        color = underwater_fog(color, length(in.rel), frame.underwater_m);
+    }
     return float4(color, 1.0);
 }

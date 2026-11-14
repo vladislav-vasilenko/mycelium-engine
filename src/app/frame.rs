@@ -60,6 +60,20 @@ impl App {
             (false, _) => self.sim.interpolated(alpha),
         };
         let water_frame = self.water_frame(camera.position);
+        // Глаза под водой: та же функция волн, что рисует море (03.1).
+        let underwater_m = match (&water_frame, &self.shore) {
+            (Some(wf), Some(shore)) if !selftest => {
+                let t = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
+                let p = glam::Vec2::new(camera.position.x, camera.position.z);
+                let w = water::sample_water(shore, &wf.params, p, t);
+                if w.dry {
+                    0.0
+                } else {
+                    (w.height - camera.position.y).max(0.0)
+                }
+            }
+            _ => 0.0,
+        };
         let Some((w, h)) = self.renderer.as_ref().and_then(|r| r.size()) else {
             if let Some(r) = self.renderer.as_mut() {
                 r.collect_completed();
@@ -95,6 +109,8 @@ impl App {
             map_size_m: self.world.size_m().x,
             grid_nx: self.world.heightfield.nx as u32,
             grid_step_m: self.world.heightfield.step_m,
+            underwater_m,
+            _pad: [0.0; 3],
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3).
         let use_clusters =
@@ -135,6 +151,11 @@ impl App {
             draw_terrain: self.scene == SceneMode::Terrain,
             clear_color: match self.scene {
                 SceneMode::Cubes => TEST_SCENE_CLEAR,
+                // Под водой фон — цвет толщи (как `UW_COLOR` в common.h).
+                SceneMode::Terrain if underwater_m > 0.0 => {
+                    let k = |c: f32, a: f32| c * (-a * underwater_m).exp();
+                    [k(0.020, 0.42), k(0.115, 0.085), k(0.135, 0.055)]
+                }
                 SceneMode::Terrain => SKY_COLOR,
             },
             readback,

@@ -164,6 +164,25 @@ fragment WaterOut water_fs(WaterVaryings in [[stage_in]],
     }
 
     float t = frame.time;
+    if (frame.underwater_m > 0.0) {
+        // Поверхность снизу: в конусе ~48,6° от вертикали (окно Снелла) небо
+        // преломляется внутрь, дальше — полное внутреннее отражение толщи.
+        float3 I = normalize(world - frame.camera_pos.xyz);
+        float2 rip = (detail.sample(s, world.xz / 5.0 + float2(0.03, 0.02) * t).rg - 0.5) * 0.2;
+        float3 Nd = -normalize(in.normal + float3(rip.x, 0.0, rip.y));
+        float3 Rf = refract(I, Nd, 1.33);
+        float3 c;
+        if (dot(Rf, Rf) < 1e-6) {
+            c = UW_COLOR * 0.6;
+        } else {
+            float F = 0.02 + 0.98 * pow(1.0 - saturate(dot(-I, Nd)), 5.0);
+            c = sky_color(Rf) * (1.0 - F) * 1.3 + UW_COLOR * F;
+        }
+        c = underwater_fog(c, length(world - frame.camera_pos.xyz), frame.underwater_m);
+        o.color = float4(c, 1.0);
+        o.transmit = float4(0.0);
+        return o;
+    }
     float3 V = normalize(frame.camera_pos.xyz - world);
     // Мелкая рябь поверх нормали волн: две бегущие выборки шума.
     float2 r1 = detail.sample(s, world.xz / 7.0 + float2(0.03, 0.02) * t).rg - 0.5;

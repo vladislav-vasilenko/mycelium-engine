@@ -70,6 +70,10 @@ fragment float4 hands_fs(HandsOut in [[stage_in]],
     const float3 sun = float3(1.15, 1.1, 1.0);
     float3 sky = float3(0.20, 0.26, 0.36) * (0.5 + 0.5 * N.y);
     float3 color = albedo * (sun * (wrap + scatter) + sky) + sun * spec;
+    if (frame.underwater_m > 0.0) {
+        color *= exp(-UW_ABSORB * frame.underwater_m);
+        color = underwater_fog(color, 0.4, frame.underwater_m);
+    }
     return float4(color, 1.0);
 }
 

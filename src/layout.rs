@@ -25,6 +25,9 @@ pub struct FrameUniforms {
     /// Поле высот кластерного рельефа (02.3): узлов по x и шаг, м.
     pub grid_nx: u32,
     pub grid_step_m: f32,
+    /// Глубина глаз под поверхностью воды, м; 0 — над водой (подводный вид).
+    pub underwater_m: f32,
+    pub _pad: [f32; 3],
 }
 
 #[repr(C, align(16))]
@@ -188,6 +191,7 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(FrameUniforms, frame_index) as u32,
         offset_of!(FrameUniforms, view_mode) as u32,
         offset_of!(FrameUniforms, map_size_m) as u32,
+        offset_of!(FrameUniforms, underwater_m) as u32,
         size_of::<InstanceData>() as u32,
         offset_of!(InstanceData, tint) as u32,
         size_of::<Vertex>() as u32,
@@ -217,7 +221,7 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 36;
+pub const LAYOUT_PROBE_LEN: usize = 37;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -230,6 +234,7 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "FrameUniforms.frame_index",
     "FrameUniforms.view_mode",
     "FrameUniforms.map_size_m",
+    "FrameUniforms.underwater_m",
     "sizeof(InstanceData)",
     "InstanceData.tint",
     "sizeof(Vertex)",
@@ -268,8 +273,8 @@ mod tests {
         assert_eq!(
             expected_probe(),
             [
-                128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28,
-                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16, 12
+                144, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 80, 64, 32, 12, 24, 32, 12, 24,
+                28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16, 12
             ]
         );
     }

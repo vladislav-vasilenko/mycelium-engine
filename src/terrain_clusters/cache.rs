@@ -8,12 +8,14 @@ use std::path::PathBuf;
 
 use glam::Vec3;
 
-use super::{Bounds, ClusterInfo, ClusterSet, Node, build};
+#[cfg(test)]
+use super::build;
+use super::{Bounds, ClusterInfo, ClusterSet, Node, build_world};
 use crate::layout::TerrainCluster;
 use crate::world::heightfield::HeightField;
 
 /// Версия формата: меняется при изменении сборки или раскладки файла.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const MAGIC: &[u8; 4] = b"ECLU";
 
 /// Хеш поля высот (размер, шаг, все высоты побитно) и версии формата.
@@ -27,22 +29,34 @@ pub fn key(hf: &HeightField) -> u64 {
     h
 }
 
+/// Ключ мира: поле острова и, если есть, зона (положение, деление, высоты).
+pub fn world_key(world: &crate::world::World) -> u64 {
+    use crate::world::noise::mix64;
+    let mut h = key(&world.heightfield);
+    if let Some(z) = &world.zone {
+        h = mix64(h ^ (z.i0 as u64) << 40 ^ (z.j0 as u64) << 20 ^ (z.cells * 64 + z.ratio) as u64);
+        h ^= key(&z.grid).rotate_left(17);
+    }
+    h
+}
+
 fn path(key: u64) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target/terrain-cache")
         .join(format!("clusters-{key:016x}.bin"))
 }
 
-/// Иерархия из кэша или новая сборка с записью в кэш. Второй элемент — взята ли из кэша.
-pub fn load_or_build(hf: &HeightField) -> (ClusterSet, bool) {
-    let k = key(hf);
+/// Иерархия мира из кэша или новая сборка с записью в кэш. Второй элемент —
+/// взята ли из кэша.
+pub fn load_or_build(world: &crate::world::World) -> (ClusterSet, bool) {
+    let k = world_key(world);
     let p = path(k);
     if let Ok(bytes) = std::fs::read(&p)
         && let Some(set) = decode(&bytes, k)
     {
         return (set, true);
     }
-    let set = build(hf);
+    let set = build_world(world);
     if let Some(dir) = p.parent()
         && std::fs::create_dir_all(dir).is_ok()
         && let Ok(mut f) = std::fs::File::create(&p)

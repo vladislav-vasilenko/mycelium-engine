@@ -175,3 +175,13 @@ struct SkyInputs {
     float4x4 inv_view_proj_rel;  // обратная к view_proj_rel: направление пикселя
     float4 view;         // x — телесный угол пикселя, ср; y — звёзд
 };
+
+// Игровая зона рельефа (src/layout.rs, TerrainZone), 32 байта.
+struct TerrainZone {
+    uint far_count;    // узлов поля острова; ~0u — зоны нет
+    uint n;            // узлов зоны по стороне
+    float step_m;
+    float origin_x;    // не float2: выравнивание по 8 сдвинуло бы поле
+    float origin_z;
+    float _pad[3];
+};

@@ -186,6 +186,23 @@ pub struct TerrainCluster {
     pub depth: u32,
 }
 
+/// Игровая зона рельефа для вершинного шейдера кластеров (02.7, шаг 5), 32 байта.
+/// Узел кластера ≥ `far_count` — узел зоны с плоским номером `узел − far_count`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct TerrainZone {
+    /// Узлов поля острова; `u32::MAX` — зоны нет.
+    pub far_count: u32,
+    /// Узлов зоны по стороне.
+    pub n: u32,
+    pub step_m: f32,
+    /// Угол зоны в мире, м. Отдельные `f32`, а не `[f32; 2]`: `float2` в MSL
+    /// выравнивается по 8 и сдвинул бы поле.
+    pub origin_x: f32,
+    pub origin_z: f32,
+    pub _pad: [f32; 3],
+}
+
 /// Входы неба от CPU (04.1), 176 байт; на GPU — `SkyInputs` в `common.h`.
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -254,10 +271,11 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<SkyInputs>() as u32,
         offset_of!(SkyInputs, params) as u32,
         offset_of!(SkyInputs, inv_view_proj_rel) as u32,
+        size_of::<TerrainZone>() as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 42;
+pub const LAYOUT_PROBE_LEN: usize = 43;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -302,6 +320,7 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(SkyInputs)",
     "SkyInputs.params",
     "SkyInputs.inv_view_proj_rel",
+    "sizeof(TerrainZone)",
 ];
 
 #[cfg(test)]
@@ -316,7 +335,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96
+                12, 176, 80, 96, 32
             ]
         );
     }

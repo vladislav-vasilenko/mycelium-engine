@@ -25,6 +25,9 @@ pub(super) struct ClustersGpu {
     pub material: Obj<dyn MTLTexture>,
     /// Пояса растительности RGBA8 (02.7); без слоя — 1 × 1 нулей.
     pub cover: Obj<dyn MTLTexture>,
+    /// Игровая зона: высоты и параметры (`TerrainZone`); без зоны — заглушки.
+    pub zone_heights: Obj<dyn MTLBuffer>,
+    pub zone_info: Obj<dyn MTLBuffer>,
 }
 
 /// Данные кластерного рельефа для `Renderer::set_terrain_clusters`.
@@ -39,6 +42,8 @@ pub struct ClusterData<'a> {
     pub material_rgba: &'a [u8],
     /// Пояса растительности: RGBA8 и сторона, если есть.
     pub cover: Option<(&'a [u8], u32)>,
+    /// Игровая зона: высоты (n²) и параметры, если есть.
+    pub zone: Option<(&'a [f32], crate::layout::TerrainZone)>,
 }
 
 impl Renderer {
@@ -51,7 +56,25 @@ impl Renderer {
             bytemuck::cast_slice(d.triangles),
             "terrain cluster triangles",
         );
-        for b in [&heights, &clusters, &vertices, &triangles] {
+        let no_zone = crate::layout::TerrainZone {
+            far_count: u32::MAX,
+            n: 1,
+            step_m: 1.0,
+            origin_x: 0.0,
+            origin_z: 0.0,
+            _pad: [0.0; 3],
+        };
+        let (zh, zinfo) = d.zone.unwrap_or((&[0.0], no_zone));
+        let zone_heights = buf(bytemuck::cast_slice(zh), "terrain zone heights");
+        let zone_info = buf(bytemuck::bytes_of(&zinfo), "terrain zone info");
+        for b in [
+            &heights,
+            &clusters,
+            &vertices,
+            &triangles,
+            &zone_heights,
+            &zone_info,
+        ] {
             self.residency.addAllocation(as_allocation(&**b));
         }
         let layer = |name: &str| {
@@ -104,6 +127,8 @@ impl Renderer {
             weights,
             material,
             cover,
+            zone_heights,
+            zone_info,
         }) {
             self.retire(
                 vec![old.weights, old.material, old.cover],
@@ -112,6 +137,8 @@ impl Renderer {
                     old.clusters,
                     old.vertices,
                     old.triangles,
+                    old.zone_heights,
+                    old.zone_info,
                 ))),
             );
         }

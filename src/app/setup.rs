@@ -72,7 +72,7 @@ impl App {
         );
         // Кластерный рельеф (02.3): иерархия из поля высот полного разрешения.
         let t_clusters = Instant::now();
-        let (clusters, cached) = crate::terrain_clusters::load_or_build(&self.world.heightfield);
+        let (clusters, cached) = crate::terrain_clusters::load_or_build(&self.world);
         let (layer_size, weights_rgba, material_rgba) = terrain_mesh::attribute_layers(&self.world);
         r.set_terrain_clusters(&renderer::ClusterData {
             heights: &self.world.heightfield.heights,
@@ -83,6 +83,20 @@ impl App {
             weights_rgba: &weights_rgba,
             material_rgba: &material_rgba,
             cover: self.world.cover.as_ref().map(|c| (&c.rgba[..], c.size)),
+            zone: self.world.zone.as_ref().map(|z| {
+                let o = z.origin(&self.world.heightfield);
+                (
+                    &z.grid.heights[..],
+                    crate::layout::TerrainZone {
+                        far_count: (self.world.heightfield.nx * self.world.heightfield.nz) as u32,
+                        n: z.grid.nx as u32,
+                        step_m: z.grid.step_m,
+                        origin_x: o.x,
+                        origin_z: o.y,
+                        _pad: [0.0; 3],
+                    },
+                )
+            }),
         })?;
         eprintln!(
             "кластеры рельефа: {} кластеров, {} групп, {} уровней, {} треугольников (уровень 0 — {}), {:.1} МБ, {} за {:.0} мс",
@@ -90,7 +104,13 @@ impl App {
             clusters.groups.len(),
             clusters.levels,
             clusters.triangle_count(),
-            (self.world.heightfield.nx - 1) * (self.world.heightfield.nz - 1) * 2,
+            clusters
+                .info
+                .iter()
+                .zip(&clusters.gpu)
+                .filter(|(i, _)| i.refined < 0)
+                .map(|(_, g)| g.triangle_count as usize)
+                .sum::<usize>(),
             (clusters.vertices.len() * 4 + clusters.triangles.len() * 4 + clusters.gpu.len() * 16)
                 as f64
                 / 1e6,

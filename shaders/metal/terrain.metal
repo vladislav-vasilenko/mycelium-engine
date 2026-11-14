@@ -55,7 +55,9 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
                                           device const uint* visible [[buffer(8)]],
                                           texture2d<float> layer_weights [[texture(4)]],
                                           texture2d<float> layer_material [[texture(5)]],
-                                          texture2d<float> layer_cover [[texture(6)]]) {
+                                          texture2d<float> layer_cover [[texture(6)]],
+                                          device const float* zone_heights [[buffer(10)]],
+                                          constant TerrainZone& zone [[buffer(11)]]) {
     uint cid = visible[iid];
     TerrainCluster c = clusters[cid];
     uint tri = vid / 3;
@@ -76,19 +78,38 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
     uint packed = cluster_triangles[c.triangle_offset + tri];
     uint local = (packed >> (8 * (vid % 3))) & 0xff;
     uint node = cluster_vertices[c.vertex_offset + local];
-    uint nx = frame.grid_nx;
-    int i = int(node % nx);
-    int j = int(node / nx);
-    int nz = int(frame.map_size_m / frame.grid_step_m + 0.5) + 1;
-    auto h = [&](int a, int b) {
-        a = clamp(a, 0, int(nx) - 1);
-        b = clamp(b, 0, nz - 1);
-        return heights[uint(b) * nx + uint(a)];
-    };
-    float s = frame.grid_step_m;
-    float3 world = float3(float(i) * s, heights[node], float(j) * s);
-    float dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
-    float dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
+    float3 world;
+    float dx, dz;
+    if (node >= zone.far_count) {
+        // Узел игровой зоны (02.7, шаг 5): своё поле высот ~1 м.
+        uint k = node - zone.far_count;
+        int zn = int(zone.n);
+        int a = int(k % zone.n);
+        int b = int(k / zone.n);
+        auto zh = [&](int x, int y) {
+            x = clamp(x, 0, zn - 1);
+            y = clamp(y, 0, zn - 1);
+            return zone_heights[uint(y) * zone.n + uint(x)];
+        };
+        float s = zone.step_m;
+        world = float3(zone.origin_x + float(a) * s, zone_heights[k], zone.origin_z + float(b) * s);
+        dx = (zh(a + 1, b) - zh(a - 1, b)) / (2.0 * s);
+        dz = (zh(a, b + 1) - zh(a, b - 1)) / (2.0 * s);
+    } else {
+        uint nx = frame.grid_nx;
+        int i = int(node % nx);
+        int j = int(node / nx);
+        int nz = int(frame.map_size_m / frame.grid_step_m + 0.5) + 1;
+        auto h = [&](int a, int b) {
+            a = clamp(a, 0, int(nx) - 1);
+            b = clamp(b, 0, nz - 1);
+            return heights[uint(b) * nx + uint(a)];
+        };
+        float s = frame.grid_step_m;
+        world = float3(float(i) * s, heights[node], float(j) * s);
+        dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
+        dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
+    }
     out.world = world;
     out.rel = camera_relative(frame, world);
     out.position = frame.view_proj_rel * float4(out.rel, 1.0);

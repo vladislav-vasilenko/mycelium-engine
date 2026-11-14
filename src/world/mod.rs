@@ -13,6 +13,7 @@ pub mod generator;
 pub mod heightfield;
 pub mod layers;
 pub mod noise;
+pub mod zone;
 
 use glam::{Vec2, Vec3};
 
@@ -187,6 +188,8 @@ pub struct World {
     pub features: Option<features::FeatureSet>,
     /// Пояса растительности (`cover.png`), если есть (02.7).
     pub cover: Option<CoverLayer>,
+    /// Игровая зона с рельефом ~1 м внутри поля острова (02.7, шаг 5).
+    pub zone: Option<zone::ZoneField>,
 }
 
 /// Пояса растительности на квадратной сетке на всю карту: RGBA, сумма 255 на
@@ -329,6 +332,7 @@ impl World {
             fields: grid.fields,
             features: None,
             cover: None,
+            zone: None,
         };
         world.markers = match markers {
             Some(mut m) => {
@@ -428,7 +432,12 @@ impl Ground for World {
         let local = (Vec2::new(x, z) - self.tile_origin(id)) / self.step_m;
         // Высота и нормаль — по треугольникам поля высот полного разрешения:
         // это уровень 0 кластеров, видимый вблизи.
-        let (height, normal) = self.heightfield.sample(x, z)?;
+        let (height, normal) = match &self.zone {
+            Some(zf) => zf
+                .sample(&self.heightfield, x, z)
+                .or_else(|| self.heightfield.sample(x, z))?,
+            None => self.heightfield.sample(x, z)?,
+        };
         // Нечисловые свойства — от ближайшей точки сетки.
         let near = tile.at(
             (local.x.round() as usize).min(TILE_SAMPLES - 1),

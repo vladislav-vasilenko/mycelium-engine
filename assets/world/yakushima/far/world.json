@@ -76,6 +76,20 @@
     "size": 4097,
     "step_m": 7.5
   },
+  "height_zone": {
+    "file": "height_zone.png",
+    "origin_cell": [
+      2315,
+      1248
+    ],
+    "cells": 384,
+    "ratio": 8,
+    "height_range_m": [
+      451.0,
+      1374.0
+    ],
+    "source": "GSI DEM1A"
+  },
   "cover": {
     "file": "cover.png",
     "size": 2049,

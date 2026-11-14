@@ -80,6 +80,9 @@ pub struct Manifest {
     /// Пояса растительности (02.7), необязательный.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<cover::CoverMeta>,
+    /// Игровая зона ~1 м внутри поля высот (02.7, шаг 5), необязательная.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height_zone: Option<fine::HeightZoneMeta>,
     /// Поле высот мельче сетки слоёв (02.3), необязательное.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_fine: Option<fine::HeightFineMeta>,
@@ -361,6 +364,8 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         geo: world.geo.clone(),
         height_fine: fine::export(dir, &world.heightfield, nx, h_range)?,
         cover: cover::export(dir, &world.cover)?,
+        // Зона пока только импортируется: экспорт пишет поле острова (02.7, шаг 5).
+        height_zone: None,
         features,
     };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -513,6 +518,9 @@ pub fn import(dir: &Path) -> Result<World, String> {
     }
     if let Some(meta) = &m.height_fine {
         world.heightfield = fine::import(dir, meta, m.height_range_m, world.size_m().x)?;
+    }
+    if let Some(meta) = &m.height_zone {
+        world.zone = Some(fine::import_zone(dir, meta, &mut world.heightfield)?);
     }
     Ok(world)
 }

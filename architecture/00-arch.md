@@ -270,13 +270,14 @@ sequenceDiagram
 | `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
 | `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
+| `TerrainZone` | 32 Б, 4 | `far_count u32` @0 (узлов поля острова; `u32::MAX` — зоны нет), `n u32` @4, `step_m` @8, `origin_x` @12, `origin_z` @16 (отдельные `f32`: `float2` в MSL выравнивается по 8), `_pad [f32;3]` @20 |
 | `SkyInputs` | 176 Б, 16 | `sun_dir` @0, `moon_dir` @16 (w — освещённая доля), `star_rot [[f32;4];3]` @32, `params` @80 (фикс. экспозиция, dt, время, E☉), `inv_view_proj_rel` @96, `view` @160 (телесный угол пикселя) |
 | `HandsUniforms` | 144 Б, 16 | `proj [[f32;4];4]` @0 (проекция рук, reversed-Z), `view_to_world [[f32;4];4]` @64 (поворот глаз → мир), `vertex_count u32` @128, `joint_count u32` @132, `_pad [u32;2]` @136 |
 
 | Элемент | Описание |
 | --- | --- |
-| `expected_probe() -> [u32; 42]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
-| `LAYOUT_PROBE_LEN = 42`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8`, `SKIN_PROBES = 8` | Длина и имена полей для диагностики |
+| `expected_probe() -> [u32; 43]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
+| `LAYOUT_PROBE_LEN = 43`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8`, `SKIN_PROBES = 8` | Длина и имена полей для диагностики |
 
 Изменение любой структуры требует правки `common.h` в той же правке; несовпадение ловят тест `cpu_layout_matches_msl_rules` и самопроверка.
 
@@ -504,6 +505,7 @@ sequenceDiagram
 | `osm_yakushima.overpassql`, `osm.py` | запрос Overpass (реки, ручьи, водопады, дороги и тропы, вершины, деревья, приюты, болота, водоёмы) и разбор в мировые метры: `Features` (реки, тропы, дороги, болота, точки), `segments`, `sample_lines`, `to_json` |
 | `gsi.py` | разбор JPGIS GML GSI: `parse_gml` (охват, размер, начало, значения после запятой; −9999 — нет данных), `iter_tiles(archive, kind)` по вложенным zip, `mosaic(archives, kind, bbox, step″)` — мозаика широта × долгота, строка 0 — север. `yakushima.py`: `load_gsi` (DEM5A 0,2″, кэш `.npy` по именам и размерам архивов), `sample_gsi` (среднее по окну ≈ шагу мира без NaN, затем билинейно), `compare_dem` (Copernicus − GSI по поясам) |
 | `cover.py` | пояса растительности: `load_fractions` (доли групп классов ESA WorldCover в окне 30 м), `belts` (низинный лес, кедровый лес якусуги, якудзаса и луга, гранит и застройка по покрову и высоте с шумом ±80 м, граница леса 1500–1750 м), `encode` (RGBA с суммой 255), `report`; `yakushima.py` пишет `cover.png` 2049² × 15 м (`write_cover`) |
+| `zone.py` | игровая зона ~1 м по GSI DEM1A: `ZONE_I0`, `ZONE_J0`, `ZONE_CELLS` = 384, `ZONE_RATIO` = 8 (ущелье Сиратани, 2,88 × 2,88 км, шаг 0,9375 м), `meshes_for`/`dem1a_keep` (отбор квадратов 3-го уровня до разбора), `build` (мозаика DEM1A, билинейно в узлы, пропуски из DEM5A); `yakushima.py` пишет `height_zone.png` в собственном диапазоне высот (шаг ~1,4 см) |
 | `hydrology.py` | сток: `fill` (priority flood с подъёмом 1 мм), `d8`, `accumulate`, `flow` (с врезкой известных русел), `channel_segments`, `river_width_m` (1,5 м + 3,5 м × √км²) |
 | `yakushima.py far` | дальний рельеф всего острова: сетка 1025², шаг 30 м; высоты — грунт GSI DEM5A, за охватом GSI — Copernicus; локальная касательная проекция WGS84 (центр 30,335° с. ш., 130,525° в. д.); суша — связная область у центра; знаковое расстояние до кромки (EDT); дно — процедурный шельф до −250 м до батиметрии GEBCO; тип берега по уклону; влажность и температура по высоте; маркеры мест по OSM (конец дороги к Сиратани, Дзёмон-суги, Миянoура, Ханоэго, устье Анбо — на ближайший берег; пляж Нагата — приблизительно); сток по рельефу со сверкой с реками OSM и по рельефу с врезкой OSM; ширина рек по водосбору; болота OSM в маску торфяника; слои формата 3, `features.json`, `flow.png` и `world.json` с `geo` и `features` в `assets/world/yakushima/far/`. Повторный запуск даёт те же файлы |
 
@@ -595,7 +597,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые, `buffer(10)` высоты зоны, `buffer(11)` `TerrainZone`; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
 | `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
@@ -686,7 +688,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | `Resize` | Размер изменился и прошло 4 кадра | Новые цели, запрос readback |
 | `ReadbackB` | Готов readback | Те же проверки при новом размере; сцена переключается на ландшафт |
 | `TerrainView` | 3 кадра с контрольной камерой ландшафта | Запрос readback |
-| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), вид `Raw`, волны `water_probe`, скиннинг `skin_probe` в контрольной позе `point` (±0,01 мм), раскладка 42 полей. В самопроверке порог среза кластеров −1: рисуется только уровень 0, вид `Raw` сверяет его с CPU точно |
+| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), вид `Raw`, волны `water_probe`, скиннинг `skin_probe` в контрольной позе `point` (±0,01 мм), раскладка 43 полей. В самопроверке порог среза кластеров −1: рисуется только уровень 0, вид `Raw` сверяет его с CPU точно |
 | `Done` | — | Статистика, `SELFTEST PASSED` и код 0 или `SELFTEST FAILED` и код 1. Предохранитель — 1000 кадров. Кадры, пришедшие после `exit()`, игнорируются, итог печатается один раз |
 
 Итог — 21 проверка. Модульные тесты (`cargo test`, 43 и 1 ручной `export_first_map`): планировщик (6), раскладка (1), симуляция и ходьба (17, включая бота на тропе в сгенерированном мире и в мире из слоёв), эталоны (2), куб (1), шум (2), генератор (1), мир (6), слои (4), сетка ландшафта (3).
@@ -741,7 +743,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.7 · Импорт Якусимы: данные и лицензии, весь остров 30 м | `tools/geo/yakushima.py`, `assets/world/yakushima/far/`, `World.step_m`, `coast_distance.png`, `GeoRef` | Частично (AD-42, AD-43): Copernicus, дно процедурное |
 | 02.7 · Реки по стоку, тропы и места по OSM | `tools/geo/{osm,hydrology}.py`, `features.json`, `flow.png`, `world/features.rs`, `features.h` | Частично (AD-45): сток и сверка готовы, вода в руслах — цвет до 03.2, водопады — только точки OSM |
 | 02.7 · Пояса растительности и покров | `tools/geo/cover.py`, `cover.png`, `layers/cover.rs`, `World.cover`, слой `Grass004`, пояса и полог в `terrain.metal`, вид «пояса» | Выполнено (AD-50) |
-| 02.7 · Игровая зона 1 м (GSI DEM1A) | — | Не начато |
+| 02.7 · Игровая зона 1 м (GSI DEM1A) | `tools/geo/zone.py`, `height_zone.png`, `world/zone.rs`, `fine::import_zone`, `TerrainZone`, `build_world` | Частично (AD-52): зона Сиратани; маршрут бота по тропе — не сделан |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
 | 10.2 · glTF и скиннинг, сверка GPU ↔ CPU | `src/hands/{asset,skeleton}.rs`, `hands.metal` (`skin`, `skin_probe`), `SkinnedVertex` в `layout_probe` | Выполнено (AD-44) |
 | 10.3 · Проход `viewmodel` | `ViewmodelPass`, `hands::projection` (60°, 1 см), `frame_passes` | Выполнено; стоимость в GPU capture не замерена |
@@ -1102,6 +1104,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Два прохода compute каждый кадр; экспозиция зависит от прошлого кадра (сдвиг на кадр); луна и звёзды ярче физических; предэкспозицию нужно помнить в каждом новом освещённом шейдере.
 - **Пересмотреть.** 04.2 — воздушная перспектива (LUT объёма камеры) и тени; 04.3 — облака меняют свет неба; 11 — GI заменит SH-окружение.
 
+### AD-52. Игровая зона 1 м в поле острова: деление клеток на 8 и веер в кольце
+
+- **Решение.** Зона — квадрат клеток острова 7,5 м, каждая делится на 8 (0,9375 м); каждый 8-й узел зоны совпадает с узлом острова, высоты острова в этих узлах выравниваются по зоне. Внешнее кольцо клеток острова, примыкающих к зоне стороной, триангулируется веером от дальнего угла к 9 узлам границы — сетка без Т-стыков (`zone::combined_mesh`). Кластеры собираются по общей сетке; номера добавленных узлов зоны переводятся в `nx·nz + номер в зоне`, вершинный шейдер берёт высоту из поля зоны. Ходьба — тот же разбор (`ZoneField::sample`).
+- **Почему.** Пользователь увидел у ног грани 7,5 м. DEM1A на весь остров — ~900 млн точек, без стриминга не помещается; зона там, где идёт маршрут, даёт 1 м за +18,6 млн треугольников уровня 0. Деление на целое число сохраняет общие узлы, а иерархия кластеров сама делает переход по детализации — без юбок и морфинга.
+- **Отброшено.** Отдельный мир зоны со сшивкой по краю на GPU (две системы); юбки по краю зоны (видимые щели под углом); DEM1A на весь остров (память, 08.1).
+- **Цена.** Сборка иерархии 68 с (кэш 1,1 с), 709 МБ кластеров; кольцо из узких треугольников веера; экспорт слоёв пока не пишет зону; материалы и вода остаются на сетке 30 м.
+- **Пересмотреть.** 08.1 — зоны по требованию вокруг игрока; 08.4 — тесселяция вблизи.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1155,3 +1165,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.3 | после `67a33c4` | AD-49: рендеринг относительно камеры — `FrameUniforms.view_proj_rel/cam_hi/cam_lo` (240 Б, раскладка 39 полей), `camera_relative`, `clip_from_world`, `pattern_uv` в `common.h`; рельеф, вода, кубы; тест `camera_relative_projection_does_not_jitter_far_from_origin` |
 | 2026-11-14 | 02.7 | после `79d0ca5` | AD-50: пояса растительности — `tools/geo/cover.py`, `cover.png`, `layers/cover.rs`, `World.cover` (`CoverLayer::at`), текстура поясов `texture(6)`, шестой материал `Grass004`, пояса, полог вдали и тень полога в `terrain.metal`, `FrameUniforms.canopy_eye` и тень на руках, вид «пояса», `--at view` |
 | 2026-11-14 | 04.1 | после `264783c` | AD-51: модуль `src/sky/` (`celestial`, `time`, тесты), `app/sky.rs`, `renderer/sky.rs`, проходы `sky_lut` и `exposure`, `sky.h`/`sky.metal`, небо и звёзды в `scene`, `SkyInputs` (176 Б) в upload @12544 (upload 12 800 Б), `FrameUniforms.pre_exposure`, ресурсы `RES_SKY`/`RES_EXPOSURE`, 13 таблиц, конвейеры неба и звёзд (`Blend::Additive`), свет неба в рельефе, воде, руках, экспозиция в тонмаппинге; `--date`, `--time`, `--timescale`, `--exposure`, клавиши времени; `assets/sky/stars.bin` |
+| 2026-11-14 | 02.7 | после `f7657b1` | AD-52: игровая зона Сиратани ~1 м — `tools/geo/zone.py`, `gsi.mosaic(keep)`, `height_zone.png`, `world/zone.rs` (`ZoneField`, `combined_mesh`, `CombinedMesh`), `World.zone`, `fine::import_zone`, `terrain_clusters::build_world`/`build_mesh`, ключ кэша `world_key` (версия 2), `TerrainZone` (раскладка 43 поля), высоты зоны в вершинном шейдере кластеров |

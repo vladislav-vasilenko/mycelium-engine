@@ -30,6 +30,7 @@ from PIL import Image
 from scipy import ndimage
 
 import cover
+import zone
 import gsi
 import hydrology
 import osm
@@ -269,8 +270,10 @@ def build_far():
     lo = math.floor(height.min() / 10.0) * 10.0 - 10.0
     hi = math.ceil(height.max() / 10.0) * 10.0 + 10.0
     write_png16(OUT_FAR / "height.png", quantize(height, lo, hi, 65535))
+    zone_meta = None
     if mosaic is not None:
         write_fine(mosaic, height, land, lo, hi)
+        zone_meta = write_zone(mosaic)
     write_png16(OUT_FAR / "coast_distance.png", quantize(coast_d, *COAST_RANGE_M, 65535))
     zero = np.zeros_like(height)
     # Тропы и реки уже текселя сетки рисуются попиксельно по features.png;
@@ -310,6 +313,7 @@ def build_far():
         "coast_distance_range_m": list(COAST_RANGE_M),
         "features": {"file": "features.json"},
         "height_fine": {"file": "height_fine.png", "size": FINE_NODES, "step_m": FINE_STEP_M},
+        **({"height_zone": zone_meta} if zone_meta else {}),
         "cover": {
             "file": "cover.png",
             "size": COVER_NODES,
@@ -452,6 +456,19 @@ def write_fine(mosaic, coarse, coarse_land, lo, hi):
 # Пояса растительности (02.7, шаг 4): 2049² × 15 м — каждый второй узел поля 7,5 м.
 COVER_NODES = 2049
 WORLDCOVER = "ESA_WorldCover_10m_2021_v200_N30E129_Map.tif"
+
+
+def write_zone(mosaic):
+    """height_zone.png: игровая зона ~0,94 м по DEM1A (ущелье Сиратани)."""
+    archives = sorted(GSI_DIR.glob("*.zip"))
+
+    def fallback(lat, lon):
+        return sample_gsi(mosaic, lat, lon, 5.0)
+
+    h, meta = zone.build(archives, world_to_geo, FINE_STEP_M, fallback)
+    lo, hi = meta["height_range_m"]
+    write_png16(OUT_FAR / meta["file"], quantize(h, lo, hi, 65535))
+    return meta
 
 
 def write_cover(fine, fine_land):

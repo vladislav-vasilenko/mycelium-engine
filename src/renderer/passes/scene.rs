@@ -143,6 +143,8 @@ fn draw_clusters(
         table.setAddress_atIndex(c.triangles.gpuAddress(), 7);
         table.setAddress_atIndex(ctx.slot.visible.gpuAddress(), 8);
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
+        table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
+        table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);
         table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
         table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
         table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);

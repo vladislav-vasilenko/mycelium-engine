@@ -74,3 +74,55 @@ pub fn export(
         step_m: hf.step_m,
     }))
 }
+
+/// `height_zone.png` — игровая зона (02.7, шаг 5): клетки острова
+/// `[origin_cell, origin_cell + cells)`, каждая делится на `ratio`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HeightZoneMeta {
+    pub file: String,
+    pub origin_cell: [usize; 2],
+    pub cells: usize,
+    pub ratio: usize,
+    pub height_range_m: [f32; 2],
+    #[serde(default)]
+    pub source: String,
+}
+
+/// Читает зону и выравнивает высоты совпадающих узлов острова по зоне —
+/// так стык зоны и острова совпадает до бита.
+pub fn import_zone(
+    dir: &Path,
+    meta: &HeightZoneMeta,
+    far: &mut HeightField,
+) -> Result<crate::world::zone::ZoneField, String> {
+    let img = read_png(&dir.join(&meta.file))?;
+    let n = meta.cells * meta.ratio + 1;
+    if (img.width, img.height) != (n, n) || img.max != u16::MAX {
+        return Err(format!(
+            "{}: нужно 16 бит {n}², а не {}×{}",
+            meta.file, img.width, img.height
+        ));
+    }
+    let [i0, j0] = meta.origin_cell;
+    if i0 + meta.cells >= far.nx || j0 + meta.cells >= far.nz || i0 == 0 || j0 == 0 {
+        return Err(format!("{}: зона выходит за поле острова", meta.file));
+    }
+    let [lo, hi] = meta.height_range_m;
+    let k = (hi - lo) / u16::MAX as f32;
+    let heights: Vec<f32> = (0..n * n)
+        .map(|i| lo + img.data[i * img.channels] as f32 * k)
+        .collect();
+    let r = meta.ratio;
+    for b in (0..n).step_by(r) {
+        for a in (0..n).step_by(r) {
+            far.heights[(j0 + b / r) * far.nx + i0 + a / r] = heights[b * n + a];
+        }
+    }
+    Ok(crate::world::zone::ZoneField {
+        i0,
+        j0,
+        cells: meta.cells,
+        ratio: r,
+        grid: HeightField::new(n, n, far.step_m / r as f32, heights),
+    })
+}

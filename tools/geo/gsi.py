@@ -41,19 +41,22 @@ def parse_gml(data):
     return lat0, lon0, lat1, lon1, grid.reshape(rows, cols)
 
 
-def iter_tiles(archive, kind):
-    """Все XML вида `kind` (`DEM10B`, `DEM5A`, `DEM1A`) из архива GSI."""
+def iter_tiles(archive, kind, keep=None):
+    """Все XML вида `kind` (`DEM10B`, `DEM5A`, `DEM1A`) из архива GSI; `keep(имя)`
+    отбирает файлы до разбора (DEM1A — 15 МБ текста на квадрат 3-го уровня)."""
     with zipfile.ZipFile(archive) as outer:
         for name in sorted(outer.namelist()):
             if f"-{kind}-" not in name or not name.endswith(".zip"):
                 continue
+            if keep is not None and not keep(name):
+                continue
             with zipfile.ZipFile(io.BytesIO(outer.read(name))) as inner:
                 for xml in sorted(inner.namelist()):
-                    if xml.endswith(".xml"):
+                    if xml.endswith(".xml") and (keep is None or keep(xml)):
                         yield parse_gml(inner.read(xml))
 
 
-def mosaic(archives, kind, bbox, step_arcsec):
+def mosaic(archives, kind, bbox, step_arcsec, keep=None):
     """Мозаика вида `kind` на сетке широта × долгота с шагом `step_arcsec`.
 
     `bbox` = (lat_south, lon_west, lat_north, lon_east). Строка 0 — север.
@@ -66,7 +69,7 @@ def mosaic(archives, kind, bbox, step_arcsec):
     out = np.full((rows, cols), np.nan, dtype=np.float32)
     count = 0
     for archive in archives:
-        for lat0, lon0, lat1, lon1, g in iter_tiles(archive, kind):
+        for lat0, lon0, lat1, lon1, g in iter_tiles(archive, kind, keep):
             r0 = int(round((n - lat1) / d))
             c0 = int(round((lon0 - w) / d))
             r1, c1 = r0 + g.shape[0], c0 + g.shape[1]

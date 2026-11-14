@@ -120,17 +120,38 @@ impl ClusterSet {
 
 /// Собирает иерархию кластеров из всего поля высот.
 pub fn build(hf: &HeightField) -> ClusterSet {
-    let positions = hf.positions();
-    let indices = hf.triangles();
-    let adapter = VertexDataAdapter::new(bytemuck::cast_slice(&positions), 12, 0)
-        .expect("позиции поля высот");
+    build_mesh(&hf.positions(), &hf.triangles())
+}
+
+/// Иерархия для мира: поле острова или общая сетка острова и игровой зоны.
+/// Номера узлов зоны в кластерах переводятся в `nx·nz + плоский номер в зоне`,
+/// чтобы вершинный шейдер нашёл высоту в поле зоны.
+pub fn build_world(world: &crate::world::World) -> ClusterSet {
+    let Some(zone) = &world.zone else {
+        return build(&world.heightfield);
+    };
+    let mesh = crate::world::zone::combined_mesh(&world.heightfield, zone);
+    let mut set = build_mesh(&mesh.positions, &mesh.indices);
+    let far_count = (world.heightfield.nx * world.heightfield.nz) as u32;
+    for v in &mut set.vertices {
+        if *v >= far_count {
+            *v = far_count + mesh.extra_to_zone[(*v - far_count) as usize];
+        }
+    }
+    set
+}
+
+/// Иерархия по произвольной сетке узлов (позиции и треугольники CCW сверху).
+pub fn build_mesh(positions: &[[f32; 3]], indices: &[u32]) -> ClusterSet {
+    let adapter =
+        VertexDataAdapter::new(bytemuck::cast_slice(positions), 12, 0).expect("позиции поля высот");
     let config = clod_default_config(MAX_TRIANGLES);
     let mut set = ClusterSet::default();
     let mut max_depth = 0;
     let mut raw_groups = Vec::new();
     clod_build(
         config,
-        &ClodMesh::new(&indices, &adapter),
+        &ClodMesh::new(indices, &adapter),
         |group, clusters| {
             let gid = set.groups.len() as u32;
             raw_groups.push(group);

@@ -8,6 +8,7 @@
 //! Треугольники ячейки: диагональ из (i, j) в (i+1, j+1),
 //! треугольники (a, c, b) и (a, d, c) с обходом CCW сверху.
 
+pub mod carve;
 pub mod features;
 pub mod generator;
 pub mod heightfield;

@@ -534,6 +534,14 @@ pub fn import(dir: &Path) -> Result<World, String> {
     if let Some(meta) = &m.height_zone {
         world.zone = Some(fine::import_zone(dir, meta, &mut world.heightfield)?);
     }
+    // Тропы и дороги — полкой в рельефе (поле острова и зона 1 м).
+    if let Some(f) = &world.features {
+        super::carve::carve_paths(&mut world.heightfield, glam::Vec2::ZERO, f);
+        if let Some(z) = &mut world.zone {
+            let o = z.origin(&world.heightfield);
+            super::carve::carve_paths(&mut z.grid, o, f);
+        }
+    }
     Ok(world)
 }
 

@@ -314,3 +314,30 @@ fn yakushima_macro_masks_follow_relief() {
     assert!(damp > 0.4, "у рек сухо: {damp}");
     assert!(sky < pk[0] - 0.03, "у рек неба {sky}, на вершине {}", pk[0]);
 }
+
+/// Тропы врезаны (02.7): в зоне 1 м поперёк полотна почти нет уклона.
+#[test]
+fn yakushima_trails_are_benches() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/world/yakushima/far");
+    let w = super::layers::import(&dir).expect("мир Якусимы");
+    let z = w.zone.as_ref().expect("зона");
+    let o = z.origin(&w.heightfield);
+    let f = w.features.as_ref().unwrap();
+    let (mut n, mut flat) = (0, 0);
+    for s in f.segments.iter().filter(|s| s.kind == super::features::KIND_TRAIL) {
+        let a = glam::Vec2::from(s.a) - o;
+        let b = glam::Vec2::from(s.b) - o;
+        let m = (a + b) * 0.5;
+        let along = (b - a).normalize_or_zero();
+        let perp = glam::Vec2::new(-along.y, along.x) * (s.half_width * 0.8);
+        let (Some((h1, _)), Some((h2, _))) =
+            (z.grid.sample(m.x + perp.x, m.y + perp.y), z.grid.sample(m.x - perp.x, m.y - perp.y))
+        else {
+            continue;
+        };
+        n += 1;
+        flat += usize::from((h1 - h2).abs() < 0.15);
+    }
+    assert!(n > 50, "мало отрезков троп в зоне: {n}");
+    assert!(flat * 10 >= n * 9, "ровных поперёк {flat} из {n}");
+}

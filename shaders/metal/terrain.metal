@@ -301,12 +301,20 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     FeatureDist fd = feature_distances(xz, frame.map_size_m, feat_segs, feat_cells, feat_list);
     float px = max(length(dfdx(in.rel)), length(dfdy(in.rel)));
     float wobble = (detail.sample(s, pattern_uv(frame, lxz, 9.0)).g - 0.5) * 0.4;
-    float trail_px = 1.0 - smoothstep(-px, px + 0.2, fd.trail + wobble);
-    float road_px = 1.0 - smoothstep(-px, px + 0.1, fd.road);
+    // Край тропы — не линия краски: полотно переходит в вытоптанную бровку
+    // (почва пятнами по шуму) на ~1 м, край неровный.
+    float edge_n = detail.sample(s, pattern_uv(frame, lxz, 3.7)).g;
+    float trail_px = 1.0 - smoothstep(-px - 0.15, px + 0.55, fd.trail + wobble * 1.6);
+    float trail_edge = (1.0 - smoothstep(0.2, 1.4, fd.trail + wobble)) * smoothstep(0.35, 0.75, edge_n);
+    float road_px = 1.0 - smoothstep(-px - 0.1, px + 0.4, fd.road + wobble * 0.5);
     // Камни берега русла и вода в русле (до 03.2 вода — только цвет).
     float bank = 1.0 - smoothstep(0.0, 1.5 + px, fd.river + wobble);
     float stream = 1.0 - smoothstep(-px, px, fd.river + 0.4);
-    float trail = max(smoothstep(0.1, 0.6, in.weights.w), trail_px);
+    // Грубая маска тропы сетки биомов (30 м) — только у мира генератора; у
+    // мира с поясами (Якусима) тропы — точные отрезки OSM, маска дала бы
+    // полосу 30 м с прямыми краями.
+    bool has_belts = (in.cover.x + in.cover.y + in.cover.z + in.cover.w) > 0.05;
+    float trail = max(has_belts ? 0.0 : smoothstep(0.1, 0.6, in.weights.w), trail_px);
     float moist = in.material.z;
     // Маска непрерывная: smoothstep даёт гладкую границу мокрого песка.
     float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(clamp_s, xz / frame.map_size_m).r);
@@ -333,6 +341,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float wl[MAT_COUNT];
     float forest_w = in.weights.x;
     float4 cv = in.cover;
+    // Пояса из сетки 15 м интерполируются линейно — граница выходит прямой.
+    // Шум на масштабах 20–30 м двигает её: край пятна неровный, как на местности.
+    float4 bn = float4(detail.sample(s, pattern_uv(frame, lxz, 19.0)).r,
+                       detail.sample(s, pattern_uv(frame, lxz, 27.0)).g,
+                       detail.sample(s, pattern_uv(frame, lxz, 23.0)).r,
+                       detail.sample(s, pattern_uv(frame, lxz, 31.0)).g);
+    cv *= 0.45 + 1.1 * bn;
     float cv_sum = cv.x + cv.y + cv.z + cv.w;
     bool belts = cv_sum > 0.05;
     cv = belts ? cv / cv_sum : float4(0.0);
@@ -365,10 +380,12 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Поверх: тропа — почва, русло — камень с песком, крутые склоны и дно у
     // каменистого берега — камень, остальное дно — песок.
     float river = max(in.material.y, bank);
-    float steep = smoothstep(0.22, 0.42, slope);
+    // Порог крутизны дрожит шумом: граница камня не повторяет рёбра сетки 7,5 м.
+    float steep_n = (detail.sample(s, pattern_uv(frame, lxz, 17.0)).g - 0.5) * 0.16;
+    float steep = smoothstep(0.18 + steep_n, 0.50 + steep_n, slope);
     float under = smoothstep(0.0, -0.6, in.world.y);
     float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-    over[MAT_SOIL] += trail + 0.4 * road_px;
+    over[MAT_SOIL] += trail + 0.4 * road_px + 0.6 * trail_edge * (1.0 - trail);
     // В лесных поясах крутые склоны и выходы камня замшелые (Якусима — один из
     // самых влажных лесов Японии): часть «крутого камня» отдаётся мху.
     float mossy = belts ? 0.65 * (cv.x * 0.5 + cv.y) * forest_w : 0.0;
@@ -379,7 +396,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float scree_k = scree * (1.0 - 0.7 * mossy) * (1.0 - under);
     over[MAT_ROCK] += 0.55 * scree_k;
     over[MAT_SOIL] += 0.45 * scree_k;
-    float cover_sum = trail + road_px + river + steep + under + scree_k;
+    float cover_sum = trail + road_px + river + steep + under + scree_k + 0.6 * trail_edge * (1.0 - trail);
     float cover = saturate(cover_sum);
     float total = 0.0;
     for (int i = 0; i < MAT_COUNT; ++i) {
@@ -469,7 +486,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float sum = 0.0;
     float final_w[MAT_COUNT];
     for (int i = 0; i < MAT_COUNT; ++i) {
-        float f = wl[i] > 0.01 ? max(wl[i] + 0.5 * ms[i].height - (best - 0.18), 0.0) : 0.0;
+        float f = wl[i] > 0.01 ? max(wl[i] + 0.5 * ms[i].height - (best - 0.3), 0.0) : 0.0;
         final_w[i] = f;
         sum += f;
     }

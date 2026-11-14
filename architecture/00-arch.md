@@ -478,7 +478,7 @@ sequenceDiagram
 | Элемент | Вид | Описание |
 | --- | --- | --- |
 | `MaterialLayer { id, role }`, `LAYERS` | struct, const | 5 слоёв: 0 камень `Rock062`, 1 песок `Ground093A`, 2 почва `Ground082S`, 3 мох `Moss002`, 4 лесная подстилка `Ground037`; индекс = `MAT_*` в MSL |
-| `MATERIAL_SIZE` = 1024 | const | сторона текстуры |
+| `MATERIAL_SIZE` = 2048 | const | сторона текстуры; `normal_rough.a` — AO фотоскана (`AmbientOcclusion.jpg`) |
 | `MaterialArrays { size, layers, albedo_height, normal_rough }` | struct | упакованные слои RGBA8: цвет + высота (Displacement); нормаль XY + шероховатость + 255 |
 | `source_dir()` | fn | `Contents/Resources/ambientcg` в бандле или `assets/source/ambientcg` |
 | `load(dir) -> Result<MaterialArrays, String>` | fn | декодирует `Color`, `NormalGL`, `Roughness`, `Displacement` (JPEG, `zune-jpeg`) параллельно по слоям; ошибка называет материал и файл |
@@ -619,7 +619,7 @@ sequenceDiagram
 | `common.h` | `camera_relative`, `clip_from_world`, `pattern_uv` (AD-49), `underwater_fog`, `FrameUniforms`, `InstanceData`, `Vertex`, `TerrainVertex`, `GerstnerWave`, `SeaParams`, `WaterLevel`, `SkinnedVertex`, `HandsUniforms`, `SKIN_PROBES`, `pattern_color` | Общие типы и эталонная функция узора |
 | `pattern.metal` | `pattern_main` (kernel), `layout_probe` (kernel) | Диагностический узор; запись размеров и смещений структур |
 | `scene.metal` | `scene_vs`, `scene_fs` | Вершины из буфера по `vertex_id`, экземпляры по `instance_id`; ambient + Ламберт с текстурой узора |
-| `terrain.metal` | `terrain_vs`, `terrain_fs`, `sample_layer`, `ramp` | Вершина `instance_id × 4225 + vertex_id`; 5 слоёв материалов ambientCG по весам, типу берега, уклону, тропе, руслу и дну, смешивание по высоте рельефа материала, карты нормалей, мокрый песок по маске, солнце (Ламберт + GGX) и небо; отладочные виды по `view_mode`. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
+| `terrain.metal` | `terrain_vs`, `terrain_fs`, `sample_layer_uv` (явные градиенты), `layer_height`, `sample_layer_triplanar`, `rot_uv`/`rot_grad`, `MAT_DEPTH_M`, `ramp` | Вершина `instance_id × 4225 + vertex_id`; 5 слоёв материалов ambientCG по весам, типу берега, уклону, тропе, руслу и дну, смешивание по высоте рельефа материала, карты нормалей, мокрый песок по маске, солнце (Ламберт + GGX) и небо; вблизи — параллакс главного слоя (до 24 шагов, гаснет к 22 м и при скользящем взгляде) с самозатенением к солнцу до 14 м, мелкая нормаль ×5,3 до 8 м, AO материала на свет неба; отладочные виды по `view_mode`. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
 | `features.h` | `FeatureDist`, `feature_distances` | Точное расстояние до отрезков троп, рек и дорог своей ячейки 32 м |
 | `water.h` | `ShoreSample`, `field_bilinear`, `shore_at`, `alongshore_phase`, `WaveOut`, `wave_at` | Функция волн, общая для отрисовки, маски и проверки. См. [03-water.md](03-water.md) |
 | `water.metal` | `water_vs`, `water_fs`, `wet_sand_update` (kernel), `water_probe` (kernel), `level_point`, `sky_color` | Кольцевая сетка воды, цвет, пена, мокрый песок, проверка CPU ↔ GPU |
@@ -766,6 +766,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 04.1 · Время суток, солнце, луна, звёзды, атмосфера, свет неба, экспозиция, управление временем | `src/sky/`, `app/sky.rs`, `renderer/sky.rs`, `sky_lut`, `exposure`, `sky.metal`, `stars.bin` | Частично (AD-51): нет текстуры луны, консоли, GPU-замера |
+| 02.2 · Детализация вблизи: 2K, параллакс, мелкий слой | `MATERIAL_SIZE` 2048, AO в `normal_rough.a`, параллакс и самозатенение в `terrain_fs`, мелкая нормаль | Выполнено (AD-57); GPU-замер не снят |
 | 02.5 · п. 1 срез на GPU, п. 2 indirect, п. 4 счётчики | `terrain_clusters/gpu.rs`, `renderer/cull.rs`, `passes/cull.rs`, `cull.metal`, indirect в `scene` и `shadows`, проверка в самопроверке | Частично (AD-56): mesh-шейдеры и экземпляры растений (п. 3, после 02.4) — нет |
 | 02.9 · Крупная детализация: маски, свет, цвет, стены | `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `texture(9)`, `sample_layer_triplanar`, вид `macro` | Частично (AD-55): стохастическая выборка плиток не сделана; GPU-замер не снят |
 | 04.2 · п. 1 прямой свет солнца или луны | `sky_sun_term` (04.1), Ламберт + GGX в `terrain_fs` | Выполнено в 04.1 |
@@ -1194,6 +1195,15 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** ~20 dispatch с барьерами на кадр; порядок видимых недетерминирован (для отрисовки неважно); числа в заголовке отстают на 2 кадра; ёмкость каскада 2¹⁶ (переполнение считается).
 - **Пересмотреть.** При mesh-шейдерах (02.5 п. 2), экземплярах растений (п. 3) и Hi-Z (02.6): тот же фронт получает второй проход по глубине.
 
+
+### AD-57. Детализация вблизи: текстуры 2K, параллакс главного слоя с общим смещением, мелкая нормаль
+
+- **Решение.** Фотосканы ambientCG — 2048² (1–2 мм на тексель при повторе 2–4 м), AO фотоскана — в альфе массива нормалей. Параллакс (steep parallax + линейное уточнение) считается только по высоте главного слоя; найденное смещение в метрах по XZ получают все слои, смешанные по высоте как раньше. Самозатенение — 6 шагов к светилу. Мелкая нормаль главного слоя в 5,3 раза мельче (повёрнутая) вблизи. Все выборки — с явными градиентами от несмещённых координат.
+- **Почему.** Под ногами нужен объём и зерно; параллакс по каждому слою умножил бы выборки на число слоёв (до 6 × 24 × 2). Общее смещение даёт согласованный рельеф при смешивании.
+- **Отброшено.** Тесселяция/смещение геометрии — кластеры рельефа 7,5 м и 1 м, мелкий рельеф 1–6 см геометрией дорог; виртуальное текстурирование (08.2) — следующий шаг; 4K — вдвое больше памяти (уже ~270 МБ на массивы с мипами без сжатия).
+- **Цена.** ~270 МБ GPU-памяти несжатых массивов, декодирование JPEG при запуске 1,5 с (было 0,34 с), +100 МБ исходников в git; на границе слоёв рельеф параллакса — от главного слоя; при скользящем взгляде параллакс гаснет.
+- **Пересмотреть.** Сжатие ASTC/BC при запекании ассетов, виртуальные текстуры 08.2, параллакс по нескольким слоям, если стыки заметны.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1252,3 +1262,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 04.2 | после `26f3618` | AD-54: воздушная перспектива — `SkyGpu.aerial` (3D LUT 32³), `AERIAL_SIZE`, ядро и конвейер `sky_aerial_lut` в `sky_lut`, `aerial_at`/`apply_aerial`, влажная дымка в `medium_at`; рельеф `texture(8)`, вода `texture(3)`; таблицы аргументов до 16 текстур |
 | 2026-11-15 | 02.9 | после `24f8b5a` | AD-55: `tools/geo/macro.py`, `macro.png`, `World.macro_detail`, `LayersMeta.macro_detail`, `cover::export_as`, `ClusterData`/`ClustersGpu.macro_detail`, `texture(9)` таблицы `terrain`, маски в `terrain_fs`, `sample_layer_uv`/`sample_layer_triplanar`, `TerrainView::Macro` (14, `--view macro`); дымка `HAZE_SCAT` 0,018 |
 | 2026-11-15 | 02.5 | после `34197b8` | AD-56: `terrain_clusters/gpu.rs` (`CullData`, `cull_data`, `View::to_gpu`), `renderer/cull.rs` (`CullGpu`, `CullFrame`, `CullStats`, `region_base`, `VISIBLE_TOTAL`), проход `cull` и `RES_CULL`, таблица `cull` (15 таблиц), `cull.metal` (`cull_clusters`, `cull_finish`), `CullView`/`CullNode`/`CullBounds`/`CullCluster` (раскладка 49 полей), upload 14 080 Б (`CULL_OFFSET` 13 312), indirect в `draw_clusters` и `ShadowsPass`, `PassCtx.slot_index`, `FrameInput.cull`, `Renderer::cull_stats`, `--cpu-cull`, `shadow_frame(Option<&ClusterSet>)` возвращает камеры каскадов; проверка среза в самопроверке (22 проверки) |
+| 2026-11-15 | 02.2 | после `830af70` | AD-57: материалы 2K (`MATERIAL_SIZE` 2048) с AO в `normal_rough.a`; `MatSample.ao`, `MAT_DEPTH_M`, `sample_layer_uv` с градиентами, `layer_height`, параллакс и самозатенение, мелкая нормаль, AO материала на свет неба в `terrain_fs`; `sample_layer` удалён |

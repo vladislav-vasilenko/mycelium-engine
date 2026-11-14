@@ -1,12 +1,13 @@
 //! Материалы ландшафта: фотосканы ambientCG → два массива текстур.
 //!
-//! Источник — `assets/source/ambientcg/<Id>/{Color,NormalGL,Roughness,Displacement}.jpg`
-//! (CC0, 1024 × 1024). Сборка на CPU при запуске:
+//! Источник — `assets/source/ambientcg/<Id>/{Color,NormalGL,Roughness,Displacement,AmbientOcclusion}.jpg`
+//! (CC0, 2048 × 2048). Сборка на CPU при запуске:
 //!
 //! - `albedo_height`: RGBA8, RGB — цвет (sRGB), A — высота рельефа материала
 //!   для смешивания по высоте; на GPU формат `RGBA8Unorm_sRGB`, альфа линейная;
 //! - `normal_rough`: RGBA8 линейный, RG — нормаль в касательном пространстве
-//!   (OpenGL, +Y вверх по картинке), B — шероховатость, A — резерв (255).
+//!   (OpenGL, +Y вверх по картинке), B — шероховатость, A — затенение
+//!   материала (AO фотоскана: щели между камешками и комьями).
 //!
 //! Номера слоёв совпадают с константами `MAT_*` в `shaders/metal/terrain.metal`.
 
@@ -53,7 +54,7 @@ pub const LAYERS: [MaterialLayer; 6] = [
 ];
 
 /// Сторона каждой текстуры, пиксели.
-pub const MATERIAL_SIZE: usize = 1024;
+pub const MATERIAL_SIZE: usize = 2048;
 
 pub struct MaterialArrays {
     pub size: usize,
@@ -126,6 +127,7 @@ pub fn load(dir: &Path) -> Result<MaterialArrays, String> {
                     let normal = decode(&d.join("NormalGL.jpg"), 3).map_err(ctx)?;
                     let rough = decode(&d.join("Roughness.jpg"), 1).map_err(ctx)?;
                     let height = decode(&d.join("Displacement.jpg"), 1).map_err(ctx)?;
+                    let ao = decode(&d.join("AmbientOcclusion.jpg"), 1).map_err(ctx)?;
                     let mut ah = vec![0u8; n * 4];
                     let mut nr = vec![0u8; n * 4];
                     for i in 0..n {
@@ -139,7 +141,7 @@ pub fn load(dir: &Path) -> Result<MaterialArrays, String> {
                             normal[i * 3],
                             normal[i * 3 + 1],
                             rough[i],
-                            255,
+                            ao[i],
                         ]);
                     }
                     Ok((ah, nr))

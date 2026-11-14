@@ -201,45 +201,64 @@ struct MatSample {
     float height;
     float2 nxy;   // нормаль в касательном пространстве, [-1, 1]
     float rough;
+    float ao;     // затенение материала (щели между камешками)
 };
 
-// Выборка слоя по мировым XZ с подавлением повторов: вторая выборка в
-// повёрнутых и растянутых координатах, доля — из крупного шума.
+// Глубина рельефа слоя для параллакса, м (02.2, детализация вблизи).
+constant float MAT_DEPTH_M[6] = {0.06, 0.015, 0.03, 0.04, 0.035, 0.05};
+
+// Вторая выборка против повторов: повёрнутые и растянутые координаты.
+inline float2 rot_uv(float2 uv) {
+    return float2(0.8 * uv.x - 0.6 * uv.y, 0.6 * uv.x + 0.8 * uv.y) * 0.43 + 0.37;
+}
+inline float2 rot_grad(float2 g) {
+    return float2(0.8 * g.x - 0.6 * g.y, 0.6 * g.x + 0.8 * g.y) * 0.43;
+}
+
+// Выборка слоя с подавлением повторов; градиенты — явно: смещение параллакса
+// разрывно на краях выступов, и неявные производные дали бы искры мипов.
 inline MatSample sample_layer_uv(texture2d_array<float> albedo, texture2d_array<float> normal,
-                                 sampler s, int layer, float2 uv, float mixk) {
-    float2 uv2 = float2(0.8 * uv.x - 0.6 * uv.y, 0.6 * uv.x + 0.8 * uv.y) * 0.43 + 0.37;
-    float4 a = mix(albedo.sample(s, uv, layer), albedo.sample(s, uv2, layer), mixk);
-    float4 n = mix(normal.sample(s, uv, layer), normal.sample(s, uv2, layer), mixk);
+                                 sampler s, int layer, float2 uv, float2 gx, float2 gy,
+                                 float mixk) {
+    float2 uv2 = rot_uv(uv);
+    gradient2d g1(gx, gy), g2(rot_grad(gx), rot_grad(gy));
+    float4 a = mix(albedo.sample(s, uv, layer, g1), albedo.sample(s, uv2, layer, g2), mixk);
+    float4 n = mix(normal.sample(s, uv, layer, g1), normal.sample(s, uv2, layer, g2), mixk);
     MatSample m;
     m.albedo = a.rgb;
     m.height = a.a;
     m.nxy = n.rg * 2.0 - 1.0;
     m.rough = n.b;
+    m.ao = n.a;
     return m;
 }
 
-inline MatSample sample_layer(texture2d_array<float> albedo, texture2d_array<float> normal,
-                              sampler s, int layer, constant FrameUniforms& frame,
-                              float2 local_xz, float mixk) {
-    return sample_layer_uv(albedo, normal, s, layer, pattern_uv(frame, local_xz, MAT_TILE_M[layer]), mixk);
+// Высота слоя (0 — дно, 1 — верх) для шагов параллакса.
+inline float layer_height(texture2d_array<float> albedo, sampler s, int layer, float2 uv,
+                          float2 gx, float2 gy, float mixk) {
+    return mix(albedo.sample(s, uv, layer, gradient2d(gx, gy)).a,
+               albedo.sample(s, rot_uv(uv), layer, gradient2d(rot_grad(gx), rot_grad(gy))).a, mixk);
 }
 
 // Стены (02.9): три проекции по осям с весами |n|⁴ — текстура не тянется по
 // склону. Нормаль карты берётся только из верхней проекции.
 inline MatSample sample_layer_triplanar(texture2d_array<float> albedo, texture2d_array<float> normal,
                                         sampler s, int layer, constant FrameUniforms& frame,
-                                        float3 local, float3 n, float mixk) {
+                                        float3 local, float3 dlx, float3 dly, float3 n,
+                                        float2 top_off, float mixk) {
     float p = MAT_TILE_M[layer];
     float3 o = fract(frame.cam_hi.xyz / p);
     float3 w = pow(abs(n), 4.0);
     w /= w.x + w.y + w.z;
-    MatSample top = sample_layer_uv(albedo, normal, s, layer, o.xz + local.xz / p, mixk);
-    MatSample sx = sample_layer_uv(albedo, normal, s, layer, o.zy + local.zy / p, mixk);
-    MatSample sz = sample_layer_uv(albedo, normal, s, layer, o.xy + local.xy / p, mixk);
+    MatSample top = sample_layer_uv(albedo, normal, s, layer, o.xz + (local.xz + top_off) / p,
+                                    dlx.xz / p, dly.xz / p, mixk);
+    MatSample sx = sample_layer_uv(albedo, normal, s, layer, o.zy + local.zy / p, dlx.zy / p, dly.zy / p, mixk);
+    MatSample sz = sample_layer_uv(albedo, normal, s, layer, o.xy + local.xy / p, dlx.xy / p, dly.xy / p, mixk);
     MatSample m;
     m.albedo = top.albedo * w.y + sx.albedo * w.x + sz.albedo * w.z;
     m.height = top.height * w.y + sx.height * w.x + sz.height * w.z;
     m.rough = top.rough * w.y + sx.rough * w.x + sz.rough * w.z;
+    m.ao = top.ao * w.y + sx.ao * w.x + sz.ao * w.z;
     m.nxy = top.nxy * w.y;
     return m;
 }
@@ -374,12 +393,71 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float best = -1.0;
     float wall = smoothstep(35.0, 55.0, slope_deg);
     float3 local = in.rel + frame.cam_lo.xyz;
+    // Производные в равномерном потоке: выборки ниже идут в ветвях.
+    float3 dlx = dfdx(local), dly = dfdy(local);
+    float dist = length(in.rel);
+    float3 V0 = normalize(-in.rel);
+    float3 L0 = -frame.light_dir.xyz;
+    // Главный слой — по нему считается параллакс.
+    int dom = 0;
+    for (int i = 1; i < MAT_COUNT; ++i) {
+        dom = wl[i] > wl[dom] ? i : dom;
+    }
+    // Параллакс (02.2, детализация вблизи): луч взгляда опускается в рельеф
+    // главного слоя; смещение в метрах по XZ получают все слои. Вблизи — до
+    // 24 шагов, к 22 м эффект гаснет. Затем — самозатенение рельефа к солнцу.
+    float2 pom_off = 0.0;
+    float pom_shadow = 1.0;
+    // При скользящем взгляде смещение растёт как 1/cos и тянет полосы — гасим.
+    float vn0 = dot(V0, n);
+    float depth_m = MAT_DEPTH_M[dom] * (1.0 - smoothstep(6.0, 22.0, dist)) * (1.0 - wall)
+                  * smoothstep(0.2, 0.5, vn0);
+    if (depth_m > 0.002 && frame.view_mode == VIEW_LIT) {
+        float tile = MAT_TILE_M[dom];
+        float2 uv0 = pattern_uv(frame, lxz, tile);
+        float2 gx = dlx.xz / tile, gy = dly.xz / tile;
+        float vn = max(vn0, 0.35);
+        float2 dir = -(V0 - n * dot(V0, n)).xz / vn;  // м по XZ на метр вглубь
+        int steps = int(mix(24.0, 8.0, vn));
+        float dh = depth_m / float(steps);
+        float prev_h = 0.0;
+        float prev_d = (1.0 - layer_height(mat_albedo, s, dom, uv0, gx, gy, mixk)) * depth_m;
+        float hit = depth_m;
+        for (int k = 1; k <= steps; ++k) {
+            float h = dh * float(k);
+            float d = (1.0 - layer_height(mat_albedo, s, dom, uv0 + dir * h / tile, gx, gy, mixk)) * depth_m;
+            if (d <= h) {
+                float a0 = prev_d - prev_h, a1 = d - h;
+                hit = mix(prev_h, h, a0 / max(a0 - a1, 1e-6));
+                break;
+            }
+            prev_h = h;
+            prev_d = d;
+        }
+        pom_off = dir * hit;
+        float ln = dot(L0, n);
+        if (ln > 0.05 && dist < 14.0) {
+            float2 ldir = (L0 - n * ln).xz / ln;  // м по XZ на метр вверх
+            float occl = 0.0;
+            for (int k = 1; k <= 6; ++k) {
+                float up = hit * float(k) / 6.0;
+                float ray = hit - up;
+                float d = (1.0 - layer_height(mat_albedo, s, dom, uv0 + (pom_off + ldir * up) / tile,
+                                              gx, gy, mixk)) * depth_m;
+                occl = max(occl, saturate((ray - d) / (0.25 * depth_m)));
+            }
+            pom_shadow = 1.0 - 0.8 * occl * (1.0 - smoothstep(8.0, 14.0, dist));
+        }
+    }
     for (int i = 0; i < MAT_COUNT; ++i) {
         wl[i] /= max(total, 1e-4);
         if (wl[i] > 0.01) {
+            float tile = MAT_TILE_M[i];
             ms[i] = (i == MAT_ROCK && wall > 0.01)
-                ? sample_layer_triplanar(mat_albedo, mat_normal, s, i, frame, local, n, mixk)
-                : sample_layer(mat_albedo, mat_normal, s, i, frame, lxz, mixk);
+                ? sample_layer_triplanar(mat_albedo, mat_normal, s, i, frame, local, dlx, dly, n,
+                                         pom_off, mixk)
+                : sample_layer_uv(mat_albedo, mat_normal, s, i, pattern_uv(frame, lxz + pom_off, tile),
+                                  dlx.xz / tile, dly.xz / tile, mixk);
             best = max(best, wl[i] + 0.5 * ms[i].height);
         }
     }
@@ -387,6 +465,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float2 nxy = 0.0;
     float rough = 0.0;
     float porosity = 0.0;
+    float mat_ao = 0.0;
     float sum = 0.0;
     float final_w[MAT_COUNT];
     for (int i = 0; i < MAT_COUNT; ++i) {
@@ -401,8 +480,20 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
             albedo += ms[i].albedo * f;
             nxy += ms[i].nxy * f;
             rough += ms[i].rough * f;
+            mat_ao += ms[i].ao * f;
             porosity += MAT_POROSITY[i] * f;
         }
+    }
+    // Мелкий рельеф вблизи (02.2): нормаль главного слоя в 5,3 раза мельче,
+    // повёрнутая, гаснет к 8 м — зерно камешков и мха под ногами.
+    float fine_k = (1.0 - smoothstep(2.0, 8.0, dist)) * (frame.view_mode == VIEW_LIT ? 1.0 : 0.0);
+    if (fine_k > 0.0) {
+        float tile = MAT_TILE_M[dom] / 5.3;
+        float2 uvf = rot_uv(pattern_uv(frame, lxz + pom_off, tile));
+        gradient2d gf(rot_grad(dlx.xz / tile), rot_grad(dly.xz / tile));
+        float4 nf = mat_normal.sample(s, uvf, dom, gf);
+        nxy += (nf.rg * 2.0 - 1.0) * 0.5 * fine_k;
+        mat_ao *= mix(1.0, nf.a, 0.5 * fine_k);
     }
     // Крупная вариация тона, чтобы поле не выглядело одной плиткой.
     float macro = detail.sample(s, pattern_uv(frame, lxz, 23.0)).g;
@@ -546,7 +637,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float3 sun = sky_sun_term(skyf) * shadow * mix(1.0, sky_vis * (1.0 - 0.4 * hollow), 0.6);
     // Затенение рельефом (02.9): дно ущелий видит мало неба.
     float occ = sky_vis * sky_vis * sky_vis * (1.0 - 0.6 * hollow);
-    float3 sky = sky_ambient_term(skyf, N) * occ;
+    // Щели материала (AO фотоскана) гасят свет неба; самозатенение параллакса — солнце.
+    float3 sky = sky_ambient_term(skyf, N) * occ * mix(1.0, mat_ao, 0.8);
+    sun *= pom_shadow;
     // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
     float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);
     // Блик — физический: BRDF × освещённость (π · «солнце»).

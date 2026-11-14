@@ -9,6 +9,7 @@ mod pattern;
 mod readback;
 mod scene;
 mod tonemap;
+mod viewmodel;
 mod wet_sand;
 
 use objc2::runtime::ProtocolObject;
@@ -68,11 +69,12 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 5] = [
+static REGISTRY: [&dyn FramePass; 6] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &scene::ScenePass,
     &readback::ReadbackPass,
+    &viewmodel::ViewmodelPass,
     &tonemap::TonemapPass,
 ];
 

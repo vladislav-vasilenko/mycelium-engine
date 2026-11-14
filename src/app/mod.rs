@@ -2,7 +2,7 @@
 //!
 //! Подмодули: `args` — аргументы командной строки и загрузка мира,
 //! `cameras` — стартовые и контрольные камеры, `input` — клавиатура и мышь,
-//! `frame` — сборка и отправка кадра, `title` — заголовок окна,
+//! `frame` — сборка и отправка кадра, `hands` — руки в кадре, `title` — заголовок окна,
 //! `handler` — события winit, `setup` — создание рендерера и ресурсов сцены,
 //! `selftest` — сценарий самопроверки и сверки с эталонами.
 
@@ -10,6 +10,7 @@ mod args;
 mod cameras;
 mod frame;
 mod handler;
+mod hands;
 mod input;
 mod selftest;
 mod setup;
@@ -66,6 +67,10 @@ pub struct App {
     /// Море: волны и прибой (03.1), поле берега после загрузки рендерера.
     sea: water::SeaState,
     shore: Option<water::ShoreField>,
+    /// Руки от первого лица (этап 10), если ассет загрузился.
+    hands: Option<crate::hands::Hands>,
+    /// Руки видны (клавиша H).
+    hands_visible: bool,
     /// Длительность прошлого кадра для маски мокрого песка, с.
     frame_dt: f32,
     grabbed: bool,
@@ -129,6 +134,8 @@ impl App {
             view_mode: start_view,
             sea: water::SeaState::new(WORLD_SEED),
             shore: None,
+            hands: None,
+            hands_visible: true,
             frame_dt: 0.0,
             grabbed: false,
             last_frame: Instant::now(),

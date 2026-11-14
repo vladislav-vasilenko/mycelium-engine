@@ -53,4 +53,15 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[21] = uint((thread char*)&sp.waves - sb);
     out[22] = uint((thread char*)&sp.probe - sb);
     out[23] = sizeof(WaterLevel);
+    SkinnedVertex sv;
+    HandsUniforms hu;
+    thread char* svb = (thread char*)&sv;
+    thread char* hub = (thread char*)&hu;
+    out[24] = sizeof(SkinnedVertex);
+    out[25] = uint((thread char*)&sv.normal - svb);
+    out[26] = uint((thread char*)&sv.uv - svb);
+    out[27] = uint((thread char*)&sv.joints - svb);
+    out[28] = uint((thread char*)&sv.weights - svb);
+    out[29] = sizeof(HandsUniforms);
+    out[30] = uint((thread char*)&hu.vertex_count - hub);
 }

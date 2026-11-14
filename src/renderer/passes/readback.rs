@@ -4,12 +4,12 @@
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx, size2};
-use crate::layout::WATER_PROBES;
+use crate::layout::{SKIN_PROBES, WATER_PROBES};
 use crate::reference::PATTERN_SIZE;
-use crate::renderer::frame::{SEA_OFFSET, Table};
+use crate::renderer::frame::{HANDS_OFFSET, PALETTE_OFFSET, SEA_OFFSET, Table};
 use crate::renderer::readback::{
-    RB_DEPTH_OFFSET, RB_HDR_OFFSET, RB_PATTERN_BYTES, RB_PROBE_OFFSET, RB_WATER_OFFSET,
-    sample_pixels,
+    RB_DEPTH_OFFSET, RB_HDR_OFFSET, RB_PATTERN_BYTES, RB_PROBE_OFFSET, RB_SKIN_OFFSET,
+    RB_WATER_OFFSET, sample_pixels,
 };
 use crate::renderer::resources::label;
 
@@ -77,6 +77,18 @@ impl FramePass for ReadbackPass {
                 size2(WATER_PROBES, 1),
                 size2(WATER_PROBES, 1),
             );
+        }
+        if let (Some(_), Some(h)) = (&ctx.input.hands, &r.hands) {
+            let stable = ctx.slot.table(Table::SkinProbe);
+            unsafe {
+                stable.setAddress_atIndex(h.vertices.gpuAddress(), 0);
+                stable.setAddress_atIndex(ctx.upload_addr + HANDS_OFFSET as u64, 1);
+                stable.setAddress_atIndex(ctx.upload_addr + PALETTE_OFFSET as u64, 2);
+                stable.setAddress_atIndex(rb.gpuAddress() + RB_SKIN_OFFSET as u64, 3);
+            }
+            enc.setComputePipelineState(&r.pipelines.skin_probe);
+            enc.setArgumentTable(Some(stable));
+            enc.dispatchThreads_threadsPerThreadgroup(size2(SKIN_PROBES, 1), size2(SKIN_PROBES, 1));
         }
         enc.endEncoding();
     }

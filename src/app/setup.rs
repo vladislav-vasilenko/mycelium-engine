@@ -5,15 +5,17 @@ use std::time::Instant;
 use winit::window::Window;
 
 use super::{App, DETAIL_TEXTURE_SIZE};
+use crate::hands::Hands;
 use crate::renderer::{self, Renderer};
 use crate::{platform, scene, terrain_materials, terrain_mesh, water};
 
 impl App {
-    /// Устройство, рендерер, ландшафт и вода для окна.
+    /// Устройство, рендерер, ландшафт, вода и руки для окна. Без рук игра
+    /// работает: ошибка ассета печатается и руки не рисуются.
     pub(super) fn create_renderer(
         &self,
         window: &Window,
-    ) -> Result<(Renderer, water::ShoreField), String> {
+    ) -> Result<(Renderer, water::ShoreField, Option<Hands>), String> {
         let (device, info) = renderer::probe_device()?;
         eprintln!("{info}");
         let layer = platform::attach_metal_layer(window)?;
@@ -55,6 +57,25 @@ impl App {
             water::WATER_LEVELS,
             t_water.elapsed().as_secs_f64() * 1000.0
         );
-        Ok((r, shore))
+        let t_hands = Instant::now();
+        let hands = match Hands::load() {
+            Ok(h) => {
+                let a = &h.asset;
+                r.set_hands(&a.vertices, &a.indices, &a.albedo, a.albedo_size)?;
+                eprintln!(
+                    "руки: {} вершин, {} костей, поз {}, загружены за {:.0} мс",
+                    a.vertices.len(),
+                    a.skeleton.joints.len(),
+                    a.poses.len(),
+                    t_hands.elapsed().as_secs_f64() * 1000.0
+                );
+                Some(h)
+            }
+            Err(e) => {
+                eprintln!("руки не загружены: {e}");
+                None
+            }
+        };
+        Ok((r, shore, hands))
     }
 }

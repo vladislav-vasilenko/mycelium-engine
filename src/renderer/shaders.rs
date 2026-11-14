@@ -27,6 +27,9 @@ pub struct Pipelines {
     pub water: Obj<dyn MTLRenderPipelineState>,
     pub wet_sand: Obj<dyn MTLComputePipelineState>,
     pub water_probe: Obj<dyn MTLComputePipelineState>,
+    /// Руки со скином (проход `viewmodel`) и сверка скиннинга с CPU.
+    pub hands: Obj<dyn MTLRenderPipelineState>,
+    pub skin_probe: Obj<dyn MTLComputePipelineState>,
     /// Счётчик поколений для диагностики после перезагрузки.
     pub generation: u32,
 }
@@ -224,6 +227,7 @@ pub fn build_pipelines(
     let tonemap_lib = compile_library(device, dir, "tonemap.metal", over)?;
     let terrain_lib = compile_library(device, dir, "terrain.metal", over)?;
     let water_lib = compile_library(device, dir, "water.metal", over)?;
+    let hands_lib = compile_library(device, dir, "hands.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -265,6 +269,16 @@ pub fn build_pipelines(
         )?,
         wet_sand: compute_pipeline(compiler, &water_lib, "water.metal", "wet_sand_update")?,
         water_probe: compute_pipeline(compiler, &water_lib, "water.metal", "water_probe")?,
+        hands: render_pipeline(
+            compiler,
+            &hands_lib,
+            "hands.metal",
+            "hands",
+            ("hands_vs", "hands_fs"),
+            HDR_FORMAT,
+            false,
+        )?,
+        skin_probe: compute_pipeline(compiler, &hands_lib, "hands.metal", "skin_probe")?,
         generation,
     })
 }

@@ -11,10 +11,11 @@
 //! - `frame` — вход и итог кадра, слоты, состав проходов;
 //! - `passes` — проходы как объекты за трейтом `FramePass`;
 //! - `readback` — раскладка и разбор копий для самопроверки;
-//! - `targets`, `terrain`, `water` — цели рендера и ресурсы сцены.
+//! - `targets`, `terrain`, `water`, `hands` — цели рендера и ресурсы сцены.
 
 mod device;
 mod frame;
+mod hands;
 mod passes;
 mod readback;
 mod resources;
@@ -34,6 +35,7 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 pub use device::{DeviceInfo, probe_device};
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
+pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
 pub use terrain::TerrainTextures;
 
@@ -41,9 +43,10 @@ use crate::frame_graph::{self, FramePlan};
 use crate::layout::Vertex;
 use crate::reference::PATTERN_SIZE;
 use frame::{
-    FRAME_SLOTS, FrameSlot, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES, SEA_OFFSET,
-    SLOT_WAIT_TIMEOUT_MS, frame_passes,
+    FRAME_SLOTS, FrameSlot, HANDS_OFFSET, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES,
+    PALETTE_OFFSET, SEA_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
 };
+use hands::HandsGpu;
 use passes::{PassBarrier, PassCtx};
 use readback::{PendingReadback, RB_BYTES};
 use resources::{
@@ -86,6 +89,7 @@ pub struct Renderer {
     shader_dir: PathBuf,
     terrain: Option<TerrainGpu>,
     water: Option<WaterGpu>,
+    hands: Option<HandsGpu>,
     pub stats: Stats,
 }
 
@@ -214,6 +218,7 @@ impl Renderer {
             shader_dir,
             terrain: None,
             water: None,
+            hands: None,
             stats: Stats::default(),
         })
     }
@@ -424,6 +429,17 @@ impl Renderer {
         if let Some(w) = &input.water {
             upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
             upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
+        }
+        if let Some(h) = &input.hands {
+            let n = h.palette.len().min(MAX_JOINTS);
+            let mut u = h.uniforms;
+            u.joint_count = n as u32;
+            upload_bytes(&slot.upload, HANDS_OFFSET, bytemuck::bytes_of(&u));
+            upload_bytes(
+                &slot.upload,
+                PALETTE_OFFSET,
+                bytemuck::cast_slice(&h.palette[..n]),
+            );
         }
         let drawable_tex = drawable.texture();
         let ctx = PassCtx {

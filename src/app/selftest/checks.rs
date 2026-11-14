@@ -265,3 +265,38 @@ pub(in crate::app) fn report_readback(rb: &Readback, view: Mat4, proj: Mat4) {
         eprintln!("[readback] глубина ({x},{y}) GPU {got:.6} эталон {expected:.6}");
     }
 }
+
+/// Скиннинг на GPU (ядро `skin_probe`) совпадает с `hands::skin_position` в
+/// контрольной позе: ±0,01 мм.
+pub(in crate::app) fn verify_skin_probe(
+    t: &mut SelfTest,
+    rb: &Readback,
+    hands: Option<&crate::hands::Hands>,
+) {
+    let Some(h) = hands else {
+        t.check(false, "руки не загружены".to_string());
+        return;
+    };
+    let palette = h.control_palette();
+    let n = h.asset.vertices.len();
+    let mut worst = 0.0f32;
+    let mut bad_index = 0;
+    for (i, got) in rb.skin_probe.iter().enumerate() {
+        let idx = i * (n / crate::layout::SKIN_PROBES);
+        bad_index += (got[3] as usize != idx) as u32;
+        let want = crate::hands::skin_position(&h.asset.vertices[idx], &palette);
+        worst = worst.max(
+            (want - Vec3::new(got[0], got[1], got[2]))
+                .abs()
+                .max_element(),
+        );
+    }
+    t.check(
+        worst < 1e-5 && bad_index == 0,
+        format!(
+            "руки: скиннинг GPU совпадает с CPU в {} вершинах (макс. {:.4} мм)",
+            rb.skin_probe.len(),
+            worst * 1000.0
+        ),
+    );
+}

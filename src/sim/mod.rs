@@ -366,6 +366,11 @@ impl Sim {
         self.view_dy = self.eye_lag + bob;
     }
 
+    /// Фаза шага (рад, π на шаг) и вес покачивания 0…1 — для покачивания рук.
+    pub fn bob(&self) -> (f32, f32) {
+        (self.bob_phase, self.bob_weight)
+    }
+
     /// Камера для вида: интерполированное положение плюс сдвиг глаз `view_dy`.
     pub fn interpolated(&self, alpha: f32) -> CameraState {
         let mut c = self.prev.lerp(&self.curr, alpha);

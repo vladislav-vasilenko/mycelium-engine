@@ -19,6 +19,7 @@
 
 mod app;
 mod frame_graph;
+mod hands;
 mod layout;
 mod platform;
 mod reference;

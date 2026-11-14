@@ -20,6 +20,8 @@ pub struct Args {
     pub camera: Option<(Vec3, Vec3)>,
     /// Стартовый вид ландшафта.
     pub view: Option<TerrainView>,
+    /// Стартовая поза рук: индекс в `hands::POSE_NAMES`.
+    pub pose: Option<usize>,
 }
 
 impl Args {
@@ -53,6 +55,13 @@ impl Args {
                         eprintln!(
                             "--view: lit, height, slope, biome, substrate, coast, wetness, materials"
                         );
+                    }
+                }
+                "--pose" => {
+                    let names = crate::hands::POSE_NAMES;
+                    args.pose = it.next().and_then(|n| names.iter().position(|&p| p == n));
+                    if args.pose.is_none() {
+                        eprintln!("--pose: {}", names.join(", "));
                     }
                 }
                 other => eprintln!("неизвестный аргумент {other}"),

@@ -52,6 +52,20 @@ impl App {
             KeyCode::KeyB => {
                 self.sim.head_bob = !self.sim.head_bob;
             }
+            KeyCode::KeyH => {
+                self.hands_visible = !self.hands_visible;
+            }
+            KeyCode::Digit1 | KeyCode::Digit2 | KeyCode::Digit3 | KeyCode::Digit4 => {
+                let i = match code {
+                    KeyCode::Digit1 => 0,
+                    KeyCode::Digit2 => 1,
+                    KeyCode::Digit3 => 2,
+                    _ => 3,
+                };
+                if let Some(h) = self.hands.as_mut() {
+                    h.rig.set_pose(i);
+                }
+            }
             KeyCode::KeyT => {
                 self.scene = match self.scene {
                     SceneMode::Terrain => SceneMode::Cubes,

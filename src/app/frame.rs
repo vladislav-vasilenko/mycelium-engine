@@ -60,11 +60,14 @@ impl App {
             (false, _) => self.sim.interpolated(alpha),
         };
         let water_frame = self.water_frame(camera.position);
-        let Some(r) = self.renderer.as_mut() else {
+        let Some((w, h)) = self.renderer.as_ref().and_then(|r| r.size()) else {
+            if let Some(r) = self.renderer.as_mut() {
+                r.collect_completed();
+            }
             return;
         };
-        let Some((w, h)) = r.size() else {
-            r.collect_completed();
+        let hands = self.hands_frame(&camera, w as f32 / h as f32);
+        let Some(r) = self.renderer.as_mut() else {
             return;
         };
         let proj = sim::projection(w as f32 / h as f32);
@@ -115,6 +118,7 @@ impl App {
             readback,
             capture,
             water: water_frame,
+            hands,
         });
         if readback && outcome != FrameOutcome::Presented {
             self.readback_requested = true;

@@ -131,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -141,20 +141,21 @@ sequenceDiagram
 
 | Файл | Строк | Ответственность |
 | --- | --- | --- |
-| `app/mod.rs` | 188 | константы (`LIGHT_DIR`, `WORLD_SEED`, `WORLD_TILES`, `DETAIL_TEXTURE_SIZE`, `SKY_COLOR`, `TEST_SCENE_CLEAR`), `SceneMode`, `App` (поля состояния), `App::new`, `set_grab`, `reload_shaders`, `land`, `is_minimized` |
-| `app/args.rs` | 75 | `Args`, `Args::parse`, `load_world` |
+| `app/mod.rs` | 195 | константы (`LIGHT_DIR`, `WORLD_SEED`, `WORLD_TILES`, `DETAIL_TEXTURE_SIZE`, `SKY_COLOR`, `TEST_SCENE_CLEAR`), `SceneMode`, `App` (поля состояния), `App::new`, `set_grab`, `reload_shaders`, `land`, `is_minimized` |
+| `app/args.rs` | 84 | `Args` (в том числе `pose` — стартовая поза рук), `Args::parse`, `load_world` |
 | `app/cameras.rs` | 91 | `trail_start_camera`, `look_camera`, `island_overview_camera`, `terrain_check_camera`, `marker_posts`, `start_camera` |
-| `app/input.rs` | 74 | `tick_input` (оси из клавиш), `on_key_pressed` (команды по клавишам) |
-| `app/frame.rs` | 140 | `water_frame`, `frame` — тики, камера, `FrameUniforms`, `FrameInput`, readback |
-| `app/title.rs` | 79 | `update_title` |
-| `app/setup.rs` | 59 | `create_renderer` — устройство, рендерер, ландшафт, материалы, вода |
+| `app/input.rs` | 88 | `tick_input` (оси из клавиш), `on_key_pressed` (команды по клавишам) |
+| `app/hands.rs` | 56 | `hands_frame` — аниматор рук по камере и шагу, палитра, `HandsUniforms`; в самопроверке — контрольная поза |
+| `app/frame.rs` | 144 | `water_frame`, `frame` — тики, камера, `FrameUniforms`, руки, `FrameInput`, readback |
+| `app/title.rs` | 85 | `update_title` (с позой рук) |
+| `app/setup.rs` | 81 | `create_renderer` — устройство, рендерер, ландшафт, материалы, вода, руки (`Option<Hands>`: без ассета игра работает без рук) |
 | `app/handler.rs` | 165 | `impl ApplicationHandler for App`: `resumed`, `window_event`, `device_event`, `about_to_wait`, `exiting` |
 | `app/selftest/mod.rs` | 280 | `TestStep`, `SelfTest` (`new`, `check`), `App::selftest_step` |
-| `app/selftest/checks.rs` | 252 | `verify_readback`, `compare_terrain_depth`, `compare_terrain_raw`, `verify_terrain_readback`, `verify_water_probe`, `report_terrain_readback`, `report_readback` |
+| `app/selftest/checks.rs` | 302 | `verify_readback`, `compare_terrain_depth`, `compare_terrain_raw`, `verify_terrain_readback`, `verify_water_probe`, `verify_skin_probe`, `report_terrain_readback`, `report_readback` |
 
 Элементы ниже описаны по смыслу; файл — по таблице выше.
 
-Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы, V/Shift+V — отладочные виды ландшафта, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`.
+Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы и рук, H — показать или спрятать руки, 1–4 — позы рук (`relaxed`, `grip`, `point`, `reach`), V/Shift+V — отладочные виды ландшафта, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`, `--pose <поза>`.
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
@@ -266,11 +267,13 @@ sequenceDiagram
 | `GerstnerWave` | 32 Б, 4 | `dir [f32;2]` @0, `wavelength` @8, `amplitude` @12, `steepness` @16, `phase` @20, `omega` @24, `_pad` @28 |
 | `SeaParams` | 432 Б, 16 | `sea_level` @0, `wave_count u32` @4, `shore_wavelength` @8, `shore_amplitude` @12, `shore_omega` @16, `swash_sand_m` @20, `swash_rock_m` @24, `dry_time_s` @28, `field_size u32` @32, `field_step_m` @36, `dt` @40, `_pad` @44, `waves [GerstnerWave; 8]` @48, `probe [[f32;4]; 8]` @304 |
 | `WaterLevel` | 32 Б, 4 | `origin [f32;2]` @0, `cell` @8, `morph_edge u32` @12, `inner_min [f32;2]` @16, `inner_max [f32;2]` @24 |
+| `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
+| `HandsUniforms` | 144 Б, 16 | `proj [[f32;4];4]` @0 (проекция рук, reversed-Z), `view_to_world [[f32;4];4]` @64 (поворот глаз → мир), `vertex_count u32` @128, `joint_count u32` @132, `_pad [u32;2]` @136 |
 
 | Элемент | Описание |
 | --- | --- |
-| `expected_probe() -> [u32; 24]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
-| `LAYOUT_PROBE_LEN = 24`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8` | Длина и имена полей для диагностики |
+| `expected_probe() -> [u32; 31]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
+| `LAYOUT_PROBE_LEN = 31`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8`, `SKIN_PROBES = 8` | Длина и имена полей для диагностики |
 
 Изменение любой структуры требует правки `common.h` в той же правке; несовпадение ловят тест `cpu_layout_matches_msl_rules` и самопроверка.
 
@@ -298,17 +301,18 @@ sequenceDiagram
 
 | Файл | Строк | Ответственность |
 | --- | --- | --- |
-| `mod.rs` | 468 | `Renderer` и публичный API: `new`, `size`, `pipeline_generation`, `frame_index`, `shader_dir`, `plan_summary`, `resize`, `reload_shaders`, `collect_completed`, `take_readbacks`, `wait_idle`, `render`; приватные `retire`, `upload_textures`, `encode_frame` (upload слота, `PassCtx`, цикл по плану с поиском прохода в реестре); `depth_state` |
+| `mod.rs` | 484 | `Renderer` и публичный API: `new`, `size`, `pipeline_generation`, `frame_index`, `shader_dir`, `plan_summary`, `resize`, `reload_shaders`, `collect_completed`, `take_readbacks`, `wait_idle`, `render`; приватные `retire`, `upload_textures`, `encode_frame` (upload слота с руками и палитрой, `PassCtx`, цикл по плану с поиском прохода в реестре); `depth_state` |
 | `device.rs` | 103 | `DeviceInfo`, `probe_device`, `start_capture`, `stop_capture` |
 | `resources.rs` | 310 | `label`, `to_mtl_stages`, `as_allocation`, `f16_to_f32`, `shared_buffer`, `buffer_with`, `upload_bytes`, `sampled_texture(_usage)`, `private_texture`, `TextureUpload`, `upload_textures`, `DeferredRelease` (`push`, `collect`) — очередь отложенного освобождения |
-| `frame.rs` | 186 | константы слота и upload, `ResourceId` проходов, `FrameOutcome`, `FrameInput`, `WaterFrame`, `Stats`, `Table` (индекс таблицы аргументов), `FrameSlot` (`new`, `table`), `frame_passes` |
-| `readback.rs` | 111 | `RB_*`, `DEPTH_SAMPLES`, `sample_pixels`, `Readback`, `PendingReadback::decode` |
+| `frame.rs` | 204 | константы слота и upload, `ResourceId` проходов, `FrameOutcome`, `FrameInput` (в том числе `hands: Option<HandsFrame>`), `WaterFrame`, `Stats`, `Table` (индекс таблицы аргументов), `FrameSlot` (`new`, `table`), `frame_passes` |
+| `readback.rs` | 119 | `RB_*`, `DEPTH_SAMPLES`, `sample_pixels`, `Readback` (в том числе `skin_probe`), `PendingReadback::decode` |
 | `targets.rs` | 41 | `Targets::new` — HDR и глубина |
 | `terrain.rs` | 145 | `TerrainGpu`, `TerrainTextures`, `Renderer::set_terrain` |
 | `water.rs` | 52 | `WaterGpu`, `Renderer::set_water` |
-| `passes/mod.rs` | 95 | трейт `FramePass` (`name`, `encode`), `PassCtx` (рендерер, слот, upload, цели, drawable, вход, readback, вода), `PassBarrier` (`apply`, `apply_always`), реестр `REGISTRY`, `find`, `size2` |
-| `passes/pattern.rs`, `wet_sand.rs`, `scene.rs`, `readback.rs`, `tonemap.rs` | 34–165 | по проходу: `PatternPass`, `WetSandPass`, `ScenePass` (`draw_terrain`, `draw_cubes`, `draw_water`), `ReadbackPass`, `TonemapPass` |
-| `shaders.rs` | 270 | компиляция MSL и pipeline |
+| `hands.rs` | 72 | `MAX_JOINTS` = 64, `HandsGpu` (вершины, индексы, `index_count`, альбедо кожи sRGB с mip), `HandsFrame { uniforms, palette }`, `Renderer::set_hands(vertices, indices, albedo, size)` |
+| `passes/mod.rs` | 97 | трейт `FramePass` (`name`, `encode`), `PassCtx` (рендерер, слот, upload, цели, drawable, вход, readback, вода), `PassBarrier` (`apply`, `apply_always`), реестр `REGISTRY`, `find`, `size2` |
+| `passes/pattern.rs`, `wet_sand.rs`, `scene.rs`, `readback.rs`, `viewmodel.rs`, `tonemap.rs` | 38–165 | по проходу: `PatternPass`, `WetSandPass`, `ScenePass` (`draw_terrain`, `draw_cubes`, `draw_water`), `ReadbackPass` (с ядрами `water_probe` и `skin_probe`), `ViewmodelPass` (HDR — загрузка, глубина — очистка в 0, обход против часовой, без отсечения граней), `TonemapPass` |
+| `shaders.rs` | 284 | компиляция MSL и pipeline |
 
 Описание констант и типов ниже сохранено; файл — по таблице.
 
@@ -318,11 +322,12 @@ sequenceDiagram
 | --- | --- | --- |
 | `FRAME_SLOTS` | 2 | Кадров в полёте |
 | `SLOT_WAIT_TIMEOUT_MS` | 100 | Таймаут ожидания слота, после — пропуск кадра |
-| `UPLOAD_BYTES` | 8192 | Upload-буфер слота |
+| `UPLOAD_BYTES` | 12 544 | Upload-буфер слота |
 | `INSTANCE_OFFSET`, `INSTANCE_END` | 256, 4096 | Диапазон экземпляров в upload |
 | `MAX_INSTANCES` | 48 | `(4096 − 256) / 80` |
-| `SEA_OFFSET`, `LEVELS_OFFSET` | 4096, 4608 | `SeaParams` и `WaterLevel[11]` в upload |
-| `RES_PATTERN … RES_WETNESS` | 1…6 | `ResourceId` для планировщика; 6 — маска мокрого песка |
+| `SEA_OFFSET`, `LEVELS_OFFSET` | 4096, 4608 | `SeaParams` и `WaterLevel[13]` в upload |
+| `HANDS_OFFSET`, `PALETTE_OFFSET` | 8192, 8448 | `HandsUniforms` и палитра костей `float4x4[MAX_JOINTS]` в upload |
+| `RES_PATTERN … RES_WETNESS` | 1…6 | `ResourceId` для планировщика; 6 — маска мокрого песка. `viewmodel` пишет `RES_HDR` и `RES_DEPTH` |
 | `RB_*`, `DEPTH_SAMPLES` | см. [раздел 6](#раскладка-буферов) | Раскладка readback и 9 точек проверки глубины |
 
 Публичные типы:
@@ -342,9 +347,10 @@ sequenceDiagram
 | Тип | Поля и смысл |
 | --- | --- |
 | `PendingReadback` | `signal_value` (значение события, после которого можно читать), `frame`, `pattern_time`, `width`, `height`, `pixels` (точки глубины) |
-| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 8]` (pattern, scene, readback, tonemap, terrain, wet sand, water, water probe), `upload: MTLBuffer`, `signal_value: u64` |
+| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 10]` (pattern, scene, readback, tonemap, terrain, wet sand, water, water probe, hands, skin probe), `upload: MTLBuffer`, `signal_value: u64` |
 | `TerrainGpu` | вершины, индексы, `detail`, `albedo`, `normal`, `wetness` (R16Float, read/write) |
 | `WaterGpu` | `field` (RGBA32Float 1025²), `indices`, `index_count` |
+| `HandsGpu` | `vertices` (`SkinnedVertex`), `indices` (u16), `index_count`, `albedo` |
 | `TextureUpload` | `texture`, `data`, `pixel_bytes`, `mips` — элемент `upload_textures` |
 | `TerrainGpu` | `vertices` (все тайлы), `indices` (одна сетка 65 × 65), `index_count`, `tile_count`, `detail` (текстура с mip) |
 | `Targets` | `width`, `height`, `hdr` (`RGBA16Float`), `depth` (`Depth32Float`), обе `Private` |
@@ -422,7 +428,7 @@ sequenceDiagram
 | --- | --- |
 | `Obj<T>` | `Retained<ProtocolObject<T>>` — владеющая ссылка на объект Metal |
 | `HDR_FORMAT`, `DEPTH_FORMAT`, `DRAWABLE_FORMAT`, `PATTERN_FORMAT` | `RGBA16Float`, `Depth32Float`, `BGRA8Unorm_sRGB`, `RGBA8Unorm` |
-| `Pipelines` | `pattern`, `layout_probe` (compute), `scene`, `tonemap`, `terrain` (render), `generation` |
+| `Pipelines` | `pattern`, `layout_probe`, `wet_sand`, `water_probe`, `skin_probe` (compute), `scene`, `tonemap`, `terrain`, `water`, `hands` (render), `generation` |
 | `ShaderError { file, stage, message }` | Стадии: `read`, `compile MSL`, `entry point`, `compute pipeline`, `render pipeline` |
 | `SourceOverride<'a>` | `Option<(файл, текст)>` — подмена исходника в памяти для самопроверки |
 | `shader_dir()` | `ECHO_SHADER_DIR`, иначе `Contents/Resources/shaders/metal` при запуске из бандла, иначе `shaders/metal` рядом с `Cargo.toml` |
@@ -493,6 +499,18 @@ sequenceDiagram
 | `yakushima.py fetch` | скачивает источники из `assets/source/geo/sources.json` в `assets/source/geo/cache/` и сверяет SHA-256 |
 | `yakushima.py far` | дальний рельеф всего острова: сетка 1025², шаг 30 м, локальная касательная проекция WGS84 (центр 30,335° с. ш., 130,525° в. д.); суша — связная область у центра; знаковое расстояние до кромки (EDT); дно — процедурный шельф до −250 м до батиметрии GEBCO; тип берега по уклону; влажность и температура по высоте; маркеры мест; слои формата 3 и `world.json` с `geo` в `assets/world/yakushima/far/`. Повторный запуск даёт те же файлы |
 
+### 4.9d. `src/hands/` — руки от первого лица
+
+Пространство рук — пространство глаза: начало в глазу, взгляд −Z, вверх +Y ([AD-44](#ad-44-руки-скелет-на-cpu-скиннинг-в-вершинном-шейдере-отдельный-проход-с-очищенной-глубиной)).
+
+| Файл | Строк | Элементы |
+| --- | --- | --- |
+| `mod.rs` | 80 | `asset_path()`, `VIEWMODEL_FOV_DEG` = 60, `VIEWMODEL_NEAR_M` = 0,01, `projection(aspect)` (reversed-Z), `CONTROL_POSE` = `point`; `Hands { asset, rig }`: `load()` (позы `POSE_NAMES` и кости `hand.L/R` обязательны), `palette(&RigInput)`, `control_palette()` |
+| `asset.rs` | 239 | `HandsAsset { vertices, indices, skeleton, poses, albedo, albedo_size }`, `pose(name)`; `load(path)` — `gltf::Gltf::from_slice`, буферы из блока GLB; суставы скина с родителями и неподвижными узлами между ними (`pre`), обратные матрицы привязки; одна сетка с одним примитивом, веса нормируются; позы — первый ключ каждого канала анимации поверх позы покоя; PNG текстуры → RGBA8 |
+| `skeleton.rs` | 132 | `Trs { t, r, s }` (`to_mat4`, `blend` — lerp и slerp), `Joint { name, parent, pre, rest, inverse_bind }`, `Skeleton` (`new` — топологический порядок, `rest_pose`, `joint`, `globals`, `palette(pose, root)`), `Pose(Vec<Trs>)` (`blend`), `skin_position` — CPU-эталон скиннинга |
+| `rig.rs` | 132 | `POSE_NAMES` (`relaxed`, `grip`, `point`, `reach`), `POSE_BLEND_S` = 0,25; `RigInput { dt, yaw, pitch, bob_phase, bob_weight, view_dy }`; `HandRig` (`new`, `target`, `set_pose` — переход из текущей смешанной позы, `pose` — smoothstep-смешивание, `update` — прогресс, отставание `lag` от поворота (доля 0,6, τ 0,07 с, ≤ 0,08 рад), сглаженный `view_dy` (τ 0,12 с), `root` — сдвиг покачивания (8 мм вбок, 6 мм вниз по фазе шага), проседание ×0,6 и поворот отставания вокруг глаза) |
+| `tests.rs` | 166 | ассет и веса; суставы всех поз против эталона Blender (±1 мм); кисть перед глазом и в кадре, длина 8–25 см; непрерывность смешивания; переход, отставание и выключение покачивания; конечность скиннинга |
+
 ### 4.10. Сборка `.app`
 
 `scripts/bundle-app.sh [--open]` собирает `target/release/Echo.app`:
@@ -514,7 +532,7 @@ sequenceDiagram
 
 ### 4.11. Ассеты и инструменты Blender
 
-Ассеты собираются скриптами из неизменённых исходников; результат лежит в `assets/models/` и в движок пока не загружается ([этап 10](../specs/10-first-person-hands.md)).
+Ассеты собираются скриптами из неизменённых исходников; результат лежит в `assets/models/` и загружается модулем `src/hands/` ([этап 10](../specs/10-first-person-hands.md)).
 
 | Путь | Назначение |
 | --- | --- |
@@ -530,12 +548,13 @@ sequenceDiagram
 
 | Файл | Функции | Назначение |
 | --- | --- | --- |
-| `common.h` | `FrameUniforms`, `InstanceData`, `Vertex`, `TerrainVertex`, `GerstnerWave`, `SeaParams`, `WaterLevel`, `pattern_color` | Общие типы и эталонная функция узора |
+| `common.h` | `FrameUniforms`, `InstanceData`, `Vertex`, `TerrainVertex`, `GerstnerWave`, `SeaParams`, `WaterLevel`, `SkinnedVertex`, `HandsUniforms`, `SKIN_PROBES`, `pattern_color` | Общие типы и эталонная функция узора |
 | `pattern.metal` | `pattern_main` (kernel), `layout_probe` (kernel) | Диагностический узор; запись размеров и смещений структур |
 | `scene.metal` | `scene_vs`, `scene_fs` | Вершины из буфера по `vertex_id`, экземпляры по `instance_id`; ambient + Ламберт с текстурой узора |
 | `terrain.metal` | `terrain_vs`, `terrain_fs`, `sample_layer`, `ramp` | Вершина `instance_id × 4225 + vertex_id`; 5 слоёв материалов ambientCG по весам, типу берега, уклону, тропе, руслу и дну, смешивание по высоте рельефа материала, карты нормалей, мокрый песок по маске, солнце (Ламберт + GGX) и небо; отладочные виды по `view_mode`. См. [02-terrain.md](02-terrain.md#4-отрисовка) |
 | `water.h` | `ShoreSample`, `field_bilinear`, `shore_at`, `alongshore_phase`, `WaveOut`, `wave_at` | Функция волн, общая для отрисовки, маски и проверки. См. [03-water.md](03-water.md) |
 | `water.metal` | `water_vs`, `water_fs`, `wet_sand_update` (kernel), `water_probe` (kernel), `level_point`, `sky_color` | Кольцевая сетка воды, цвет, пена, мокрый песок, проверка CPU ↔ GPU |
+| `hands.metal` | `skin`, `hands_vs`, `hands_fs`, `skin_probe` (kernel) | Скиннинг по 4 весам (позиция и нормаль), проекция рук; кожа: альбедо, «обёрнутый» Ламберт, красноватый край терминатора, слабый широкий блик; нормаль задних граней разворачивается по `front_facing`; сверка скиннинга с CPU |
 | `tonemap.metal` | `tonemap_vs`, `tonemap_fs` | Полноэкранный треугольник без буфера; экспозиция и ACES (Narkowicz) |
 
 Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 4 буферов и 4 текстур):
@@ -549,6 +568,8 @@ sequenceDiagram
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
 | `readback` | `readback_buf` + `RB_PROBE_OFFSET` | — | — | — (копии: узор, глубина и HDR в 9 точках) | compute |
+| `skin probe` (в проходе `readback`) | вершины рук | upload @8192: `HandsUniforms` | upload @8448: палитра; `buffer(3)` `readback_buf` + `RB_SKIN_OFFSET` | — | compute |
+| `hands` (проход `viewmodel`) | вершины рук | upload @8192: `HandsUniforms` | upload @8448: палитра; `buffer(3)` upload: `FrameUniforms` | альбедо кожи | vertex, fragment |
 | `tonemap` | — | upload: `FrameUniforms` | — | `hdr` (sample) | vertex, fragment |
 
 Сэмплеры заданы в MSL через `constexpr sampler`, отдельные объекты сэмплеров не используются.
@@ -577,13 +598,16 @@ sequenceDiagram
 
 | Буфер | Диапазон | Содержимое |
 | --- | --- | --- |
-| upload слота (8192 Б) | 0..128 | `FrameUniforms` |
+| upload слота (12 544 Б) | 0..128 | `FrameUniforms` |
 | | 256..4096 | до 48 `InstanceData` |
 | | 4096..4528 | `SeaParams` |
-| | 4608..4960 | `WaterLevel[11]` |
+| | 4608..5024 | `WaterLevel[13]` |
+| | 8192..8336 | `HandsUniforms` |
+| | 8448..12 544 | палитра костей, до 64 × `float4x4` |
 | `readback_buf` (262 656 Б) | 0..262 144 | узор RGBA8, строка 1024 Б |
 | | 262 144..262 400 | глубина `f32` в 9 точках `DEPTH_SAMPLES` |
-| | 262 400..262 656 | 13 значений `u32` из `layout_probe` |
+| | 262 400..262 656 | 31 значение `u32` из `layout_probe` |
+| | далее по 256 Б | HDR в 9 точках (`RB_HDR_OFFSET`), `water_probe` (`RB_WATER_OFFSET`), `skin_probe` — 8 × float4: позиция и индекс вершины (`RB_SKIN_OFFSET`) |
 
 `readback_buf` один на приложение, поэтому в полёте не больше одного readback. Данные читаются после сигнала кадра, в котором стоят копии.
 
@@ -608,6 +632,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | `pattern` | `FRAGMENT \| BLIT` | `DISPATCH` | WAR `pattern` (чтения прошлого кадра) |
 | `scene` | `FRAGMENT \| DISPATCH \| BLIT` | `FRAGMENT` | RAW `pattern`, WAR `hdr`, WAR `depth` |
 | `readback` | `FRAGMENT \| DISPATCH \| BLIT` | `DISPATCH \| BLIT` | RAW `pattern`, RAW `depth`, WAW `readback` |
+| `viewmodel` | `BLIT` (и `FRAGMENT` без readback) | `FRAGMENT` | WAR `hdr`, WAR `depth` после копий readback; без readback — WAW после `scene`. Без рук в кадре проход не кодируется: следующий барьер ждёт те же стадии очереди |
 | `tonemap` | `FRAGMENT` | `FRAGMENT` | RAW `hdr`, WAW `drawable` |
 
 План «обычный кадр после кадра с readback»: `pattern` — after `FRAGMENT | BLIT`, `scene` — after `FRAGMENT | DISPATCH | BLIT`, `tonemap` без изменений.
@@ -629,10 +654,10 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | `Resize` | Размер изменился и прошло 4 кадра | Новые цели, запрос readback |
 | `ReadbackB` | Готов readback | Те же проверки при новом размере; сцена переключается на ландшафт |
 | `TerrainView` | 3 кадра с контрольной камерой ландшафта | Запрос readback |
-| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), раскладка 17 полей |
+| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), вид `Raw`, волны `water_probe`, скиннинг `skin_probe` в контрольной позе `point` (±0,01 мм), раскладка 31 поля |
 | `Done` | — | Статистика, `SELFTEST PASSED` и код 0 или `SELFTEST FAILED` и код 1. Предохранитель — 1000 кадров. Кадры, пришедшие после `exit()`, игнорируются, итог печатается один раз |
 
-Итог — 18 проверок. Модульные тесты (`cargo test`, 43 и 1 ручной `export_first_map`): планировщик (6), раскладка (1), симуляция и ходьба (17, включая бота на тропе в сгенерированном мире и в мире из слоёв), эталоны (2), куб (1), шум (2), генератор (1), мир (6), слои (4), сетка ландшафта (3).
+Итог — 21 проверка. Модульные тесты (`cargo test`, 43 и 1 ручной `export_first_map`): планировщик (6), раскладка (1), симуляция и ходьба (17, включая бота на тропе в сгенерированном мире и в мире из слоёв), эталоны (2), куб (1), шум (2), генератор (1), мир (6), слои (4), сетка ландшафта (3).
 
 ## 9. Соответствие спецификациям
 
@@ -684,7 +709,10 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.7 · Импорт Якусимы: данные и лицензии, весь остров 30 м | `tools/geo/yakushima.py`, `assets/world/yakushima/far/`, `World.step_m`, `coast_distance.png`, `GeoRef` | Частично (AD-42, AD-43): Copernicus, дно процедурное |
 | 02.7 · Реки по стоку, пояса растительности, игровая зона 1 м (GSI DEM1A) | — | Не начато |
 | 10.1 · CC0-ассет рук, метры, начало в глазу, запечённые позы, проверка повторным импортом | `tools/blender/export_arms.py`, `check_arms.py`, `assets/models/fps-arms.glb` | Выполнено |
-| 10.2–10.5 · glTF и скиннинг, проход `viewmodel`, движение, кожа и волосы | — | Не начато |
+| 10.2 · glTF и скиннинг, сверка GPU ↔ CPU | `src/hands/{asset,skeleton}.rs`, `hands.metal` (`skin`, `skin_probe`), `SkinnedVertex` в `layout_probe` | Выполнено (AD-44) |
+| 10.3 · Проход `viewmodel` | `ViewmodelPass`, `hands::projection` (60°, 1 см), `frame_passes` | Выполнено; стоимость в GPU capture не замерена |
+| 10.4 · Движение | `HandRig` (смешивание поз 0,25 с, отставание, покачивание, проседание), клавиши 1–4, H, B | Частично: сгиб пальцев по параметрам не сделан |
+| 10.5 · Кожа, волосы, рукав | `hands_fs` — временный свет | Не начато |
 | 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs`, `plan_after` | Выполнено, включая смену состава проходов между кадрами; стадия indirect — в 02 |
 
 ## 10. Архитектурные решения и причины
@@ -976,6 +1004,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Текстурные координаты материалов по-прежнему мировые: в 15 км от начала их точность ~0,5 текселя; нужен сдвиг начала текстур относительно камеры.
 - **Пересмотреть.** В 08.1 — floating origin для всего движка.
 
+### AD-44. Руки: скелет на CPU, скиннинг в вершинном шейдере, отдельный проход с очищенной глубиной
+
+- **Решение.** glTF читается крейтом `gltf` без загрузки изображений (`utils`, `names`); PNG кожи декодирует уже подключённый `png`. Позы — локальные `Trs` суставов; смешивание (lerp сдвига и масштаба, slerp поворота) и палитра `root × глобальная × обратная привязки` считаются на CPU каждый кадр, палитра (до 64 матриц) идёт в upload слота. Вершинный шейдер смешивает 4 матрицы по весам. Руки рисует отдельный проход `viewmodel` после `readback`: HDR загружается, глубина очищается, своя проекция 60° с ближней плоскостью 1 см. Движение (отставание, покачивание, проседание) — один корневой сдвиг и поворот в пространстве глаза, а не изменение поз костей. Сверка GPU ↔ CPU — ядро `skin_probe` в контрольной позе.
+- **Почему.** 51 кость и 4600 вершин — CPU-палитра стоит микросекунды и проверяется тестами без GPU. Очищенная глубина гарантирует, что руки не уходят в склон при любом рельефе, а отдельная проекция — что их не обрезает ближняя плоскость мира (5 см). Проход после `readback` оставляет проверки сцены без рук. Стандартная схема FPS-движков (viewmodel).
+- **Отброшено.** Скиннинг в compute с записью в буфер — нужен при многих персонажах (этап 14), для одной сетки лишний проход. Рисовать руки в проходе `scene` с подменой диапазона глубины — проще, но руки пересекают близкие склоны. `gltf` с функцией `import` — тянет крейт `image`. Двойные кватернионы — без пользы при отсутствии сильных скручиваний.
+- **Цена.** Руки не отбрасывают тень на мир и не получают тень от мира (до этапа 04). Глубина мира после `viewmodel` потеряна: проход, которому она нужна после рук, должен идти раньше.
+- **Пересмотреть.** Этап 14 (много персонажей со скином — compute-скиннинг), этап 04 (тени рук), шаг 10.5 (шейдер кожи).
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1020,3 +1056,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.7 | после `7ae05e0` | Спецификация 02.7 «Импорт реального рельефа: Якусима»: источники и лицензии, два уровня мира (остров 30 м и зона 1 м), сток, пояса, планируемые изменения контракта 02.1. Код не менялся |
 | 2026-11-14 | 02.8, 14 | после `51debc3` | Спецификации: 02.8 «Растения: конвейер ассетов и листва», 14 «Жизнь в лесу»; таблица соответствия дополнена. Код не менялся |
 | 2026-11-14 | 02.7 | после `3932e70` | AD-42, AD-43: `tools/geo/` (импорт Якусимы), `assets/world/yakushima/far/`, `World.step_m`/`geo`/`tile_origin`/`tile_size_m`, `FieldGrid.step_m`, `Fields.coast_d`, слои формата 3 (`coast_distance.png`, `GeoRef`, диапазон высот по данным), камера начала тропы по маркерам, обзорная камера по размеру карты, маска мокрого песка по сетке, `WATER_LEVELS` = 13, `rel` в шейдере ландшафта, вид `Raw` относительно камеры, `pixel_ray` от камеры, проверка уклона по грани под квадратом 2 × 2 |
+| 2026-11-14 | 10 | после `4d981fd` | AD-44: модуль `src/hands/` (`asset`, `skeleton`, `rig`, тесты), `app/hands.rs`, `renderer/hands.rs`, проход `viewmodel`, `hands.metal`, `SkinnedVertex` и `HandsUniforms` (раскладка 31 поле), upload 12 544 Б, таблицы 10, `RB_SKIN_OFFSET`, `Readback.skin_probe`, `Sim::bob`, клавиши H и 1–4, `--pose`; зависимость `gltf` 1.4 |

@@ -12,7 +12,7 @@ use winit::event_loop::ActiveEventLoop;
 use super::{App, SceneMode};
 use crate::platform;
 use crate::renderer::Readback;
-use checks::{verify_readback, verify_terrain_readback, verify_water_probe};
+use checks::{verify_readback, verify_skin_probe, verify_terrain_readback, verify_water_probe};
 
 /// Сценарий самопроверки. Шаги идут по очереди, каждый ждёт своё условие.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -247,6 +247,7 @@ impl App {
                 if let Some(rb) = readbacks.first() {
                     verify_terrain_readback(&mut t, rb, view, proj, &self.world);
                     verify_water_probe(&mut t, rb, water_frame, self.shore.as_ref());
+                    verify_skin_probe(&mut t, rb, self.hands.as_ref());
                     t.step = TestStep::Done;
                 }
             }

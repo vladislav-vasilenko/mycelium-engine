@@ -13,14 +13,17 @@ use crate::water::WATER_LEVELS;
 pub(super) const FRAME_SLOTS: usize = 2;
 pub(super) const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
 // Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
-// SeaParams @4096, WaterLevel[] @4608.
-pub(super) const UPLOAD_BYTES: usize = 8192;
+// SeaParams @4096, WaterLevel[] @4608, HandsUniforms @8192,
+// палитра костей float4x4[MAX_JOINTS] @8448..12544.
+pub(super) const UPLOAD_BYTES: usize = 12544;
 pub(super) const INSTANCE_OFFSET: usize = 256;
 pub(super) const INSTANCE_END: usize = 4096;
 pub(super) const MAX_INSTANCES: usize =
     (INSTANCE_END - INSTANCE_OFFSET) / size_of::<InstanceData>();
 pub(super) const SEA_OFFSET: usize = 4096;
 pub(super) const LEVELS_OFFSET: usize = 4608;
+pub(super) const HANDS_OFFSET: usize = 8192;
+pub(super) const PALETTE_OFFSET: usize = 8448;
 
 // Ресурсы для планировщика проходов.
 const RES_PATTERN: ResourceId = ResourceId(1);
@@ -50,6 +53,8 @@ pub struct FrameInput<'a> {
     pub capture: Option<PathBuf>,
     /// Море: параметры и уровни сетки вокруг камеры. `None` — без воды.
     pub water: Option<WaterFrame>,
+    /// Руки: параметры и палитра. `None` — без рук.
+    pub hands: Option<super::hands::HandsFrame>,
 }
 
 /// Вода в кадре (03.1).
@@ -78,9 +83,11 @@ pub(super) enum Table {
     WetSand,
     Water,
     WaterProbe,
+    Hands,
+    SkinProbe,
 }
 
-const TABLE_NAMES: [&str; 8] = [
+const TABLE_NAMES: [&str; 10] = [
     "pattern",
     "scene",
     "readback",
@@ -89,6 +96,8 @@ const TABLE_NAMES: [&str; 8] = [
     "wet sand",
     "water",
     "water probe",
+    "hands",
+    "skin probe",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -96,7 +105,7 @@ const TABLE_NAMES: [&str; 8] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 8],
+    tables: [Obj<dyn MTL4ArgumentTable>; 10],
     pub upload: Obj<dyn MTLBuffer>,
     pub signal_value: u64,
 }
@@ -130,7 +139,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("8 таблиц")),
+                .unwrap_or_else(|_| unreachable!("10 таблиц")),
             upload,
             signal_value: 0,
         })
@@ -178,6 +187,13 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_READBACK, Stages::DISPATCH | Stages::BLIT)],
         });
     }
+    // Руки поверх сцены: пишут HDR и очищают глубину после копий readback.
+    passes.push(PassDecl {
+        name: "viewmodel",
+        kind: PassKind::Render,
+        reads: vec![],
+        writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
+    });
     passes.push(PassDecl {
         name: "tonemap",
         kind: PassKind::Render,

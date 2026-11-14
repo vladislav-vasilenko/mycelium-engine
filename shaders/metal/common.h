@@ -88,3 +88,23 @@ inline float3 pattern_color(uint2 p, uint size, float t) {
     float stripe = 0.5 + 0.5 * precise::sin(t * 2.0 + float(p.x + p.y) * 0.05);
     return float3(u * k, v * k, stripe * k);
 }
+
+// Вершина рук со скином (src/layout.rs, SkinnedVertex), 52 байта, всё упаковано.
+struct SkinnedVertex {
+    packed_float3 position;
+    packed_float3 normal;
+    packed_float2 uv;
+    uchar4 joints;
+    packed_float4 weights;
+};
+
+// Параметры прохода viewmodel (src/layout.rs, HandsUniforms), 144 байта.
+struct HandsUniforms {
+    float4x4 proj;           // проекция рук, reversed-Z
+    float4x4 view_to_world;  // поворот глаз → мир для нормалей
+    uint vertex_count;
+    uint joint_count;
+    uint2 _pad;
+};
+
+constant uint SKIN_PROBES = 8;

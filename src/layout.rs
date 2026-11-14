@@ -116,6 +116,36 @@ pub struct WaterLevel {
     pub inner_max: [f32; 2],
 }
 
+/// Вершина рук со скином (этап 10), 52 байта: `packed_float3` позиции и
+/// нормали, `packed_float2` UV, `uchar4` индексов костей, `packed_float4` весов.
+/// Всё упаковано: выравнивание 4, без хвостов.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct SkinnedVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub joints: [u8; 4],
+    pub weights: [f32; 4],
+}
+
+/// Параметры прохода `viewmodel`, 144 байта. Палитра костей лежит отдельно,
+/// сразу после них в upload (`float4x4[joint_count]`).
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct HandsUniforms {
+    /// Проекция рук (свой угол обзора и ближняя плоскость), reversed-Z.
+    pub proj: [[f32; 4]; 4],
+    /// Поворот пространства глаза в мир: нормали для освещения.
+    pub view_to_world: [[f32; 4]; 4],
+    pub vertex_count: u32,
+    pub joint_count: u32,
+    pub _pad: [u32; 2],
+}
+
+/// Сколько вершин рук проверяет ядро `skin_probe`: вершины `i × (n / SKIN_PROBES)`.
+pub const SKIN_PROBES: usize = 8;
+
 /// Ожидаемые значения, которые ядро `layout_probe` записывает в буфер.
 /// Порядок полей совпадает с порядком записи в MSL.
 pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
@@ -144,10 +174,17 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(SeaParams, waves) as u32,
         offset_of!(SeaParams, probe) as u32,
         size_of::<WaterLevel>() as u32,
+        size_of::<SkinnedVertex>() as u32,
+        offset_of!(SkinnedVertex, normal) as u32,
+        offset_of!(SkinnedVertex, uv) as u32,
+        offset_of!(SkinnedVertex, joints) as u32,
+        offset_of!(SkinnedVertex, weights) as u32,
+        size_of::<HandsUniforms>() as u32,
+        offset_of!(HandsUniforms, vertex_count) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 24;
+pub const LAYOUT_PROBE_LEN: usize = 31;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -174,6 +211,13 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "SeaParams.waves",
     "SeaParams.probe",
     "sizeof(WaterLevel)",
+    "sizeof(SkinnedVertex)",
+    "SkinnedVertex.normal",
+    "SkinnedVertex.uv",
+    "SkinnedVertex.joints",
+    "SkinnedVertex.weights",
+    "sizeof(HandsUniforms)",
+    "HandsUniforms.vertex_count",
 ];
 
 #[cfg(test)]
@@ -187,7 +231,7 @@ mod tests {
             expected_probe(),
             [
                 128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28,
-                32, 432, 48, 304, 32
+                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128
             ]
         );
     }

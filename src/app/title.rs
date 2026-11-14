@@ -69,8 +69,14 @@ impl App {
             (SceneMode::Cubes, _) | (_, TerrainView::Lit) => String::new(),
             (_, v) => format!(" · вид: {}", v.name()),
         };
+        let hands = match &self.hands {
+            Some(h) if self.hands_visible && self.sim.mode == MoveMode::Walk => {
+                format!(" · руки: {}", crate::hands::POSE_NAMES[h.rig.target()])
+            }
+            _ => String::new(),
+        };
         window.set_title(&format!(
-            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}",
+            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}{hands}",
             r.info.name, r.stats.cpu_encode_ms
         ));
         self.title_timer = Instant::now();

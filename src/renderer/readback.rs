@@ -1,6 +1,6 @@
 //! Readback: раскладка буфера копий и разбор результата на CPU.
 
-use crate::layout::{LAYOUT_PROBE_LEN, WATER_PROBES};
+use crate::layout::{LAYOUT_PROBE_LEN, SKIN_PROBES, WATER_PROBES};
 use crate::reference::PATTERN_SIZE;
 
 use super::resources::f16_to_f32;
@@ -13,7 +13,9 @@ pub(super) const RB_PROBE_OFFSET: usize = RB_DEPTH_OFFSET + 256;
 pub(super) const RB_HDR_OFFSET: usize = RB_PROBE_OFFSET + 256;
 /// Результаты ядра `water_probe`: `WATER_PROBES` × float4.
 pub(super) const RB_WATER_OFFSET: usize = RB_HDR_OFFSET + 256;
-pub(super) const RB_BYTES: usize = RB_WATER_OFFSET + 256;
+/// Результаты ядра `skin_probe`: `SKIN_PROBES` × float4 (позиция, индекс вершины).
+pub(super) const RB_SKIN_OFFSET: usize = RB_WATER_OFFSET + 256;
+pub(super) const RB_BYTES: usize = RB_SKIN_OFFSET + 256;
 
 /// Точки проверки глубины в долях кадра для стартовой камеры самопроверки:
 /// куб A, куб B (ближе к камере, перекрывает A) и фон.
@@ -55,6 +57,8 @@ pub struct Readback {
     /// Ядро `water_probe`: смещённая точка поверхности и пена в точках `SeaParams.probe`.
     pub water_probe: [[f32; 4]; WATER_PROBES],
     pub probe: [u32; LAYOUT_PROBE_LEN],
+    /// Ядро `skin_probe`: позиция после скиннинга и индекс вершины; нули без рук.
+    pub skin_probe: [[f32; 4]; SKIN_PROBES],
 }
 
 /// Readback в полёте: читать можно после сигнала `signal_value`.
@@ -96,8 +100,12 @@ impl PendingReadback {
         let water_probe = std::array::from_fn(|i| {
             std::array::from_fn(|c| f32_at(RB_WATER_OFFSET + i * 16 + c * 4))
         });
+        let skin_probe = std::array::from_fn(|i| {
+            std::array::from_fn(|c| f32_at(RB_SKIN_OFFSET + i * 16 + c * 4))
+        });
         Readback {
             water_probe,
+            skin_probe,
             frame: self.frame,
             pattern_time: self.pattern_time,
             width: self.width,

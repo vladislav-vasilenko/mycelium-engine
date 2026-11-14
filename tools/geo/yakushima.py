@@ -56,6 +56,9 @@ WORLD_SEED = 0x5A4B  # для процедурных частей движка (
 GENERATOR_VERSION = 4
 FORMAT_VERSION = 3
 
+# Поле высот полного разрешения для кластерного рельефа (02.3): 4097², 7,5 м.
+FINE_NODES = 4097
+FINE_STEP_M = (NODES - 1) * STEP_M / (FINE_NODES - 1)
 # Пляж Нагата Инакахама: в OSM нет точки — приблизительные координаты.
 NAGATA_BEACH = (30.4156, 130.4353)
 # Русло начинается с площади водосбора 0,25 км².
@@ -265,6 +268,8 @@ def build_far():
     lo = math.floor(height.min() / 10.0) * 10.0 - 10.0
     hi = math.ceil(height.max() / 10.0) * 10.0 + 10.0
     write_png16(OUT_FAR / "height.png", quantize(height, lo, hi, 65535))
+    if mosaic is not None:
+        write_fine(mosaic, height, land, lo, hi)
     write_png16(OUT_FAR / "coast_distance.png", quantize(coast_d, *COAST_RANGE_M, 65535))
     zero = np.zeros_like(height)
     # Тропы и реки уже текселя сетки рисуются попиксельно по features.png;
@@ -303,6 +308,7 @@ def build_far():
         "markers": markers,
         "coast_distance_range_m": list(COAST_RANGE_M),
         "features": {"file": "features.json"},
+        "height_fine": {"file": "height_fine.png", "size": FINE_NODES, "step_m": FINE_STEP_M},
         "geo": {
             "center_lat": CENTER_LAT,
             "center_lon": CENTER_LON,
@@ -414,6 +420,26 @@ def wetland_mask(feats, n):
     for _, outline in feats.wetlands:
         draw.polygon([(x / STEP_M, z / STEP_M) for x, z in outline], fill=255)
     return np.asarray(img, dtype=np.float64) / 255.0
+
+
+def write_fine(mosaic, coarse, coarse_land, lo, hi):
+    """height_fine.png: грунт GSI с шагом 7,5 м; море и всё вне суши острова —
+    дно грубой сетки (билинейно), не выше −0,3 м, чтобы у кромки не было
+    ложных островков из сглаженной суши."""
+    idx = np.arange(FINE_NODES) * FINE_STEP_M
+    xs, zs = np.meshgrid(idx, idx)
+    lat, lon = world_to_geo(xs, zs)
+    g = sample_gsi(mosaic, lat, lon, FINE_STEP_M)
+    gx, gz = xs / STEP_M, zs / STEP_M
+    base = ndimage.map_coordinates(coarse, [gz, gx], order=1, mode="nearest")
+    island = ndimage.map_coordinates(coarse_land.astype(np.float32), [gz, gx], order=0) > 0.5
+    land = np.isfinite(g) & (g > 0.0) & ndimage.binary_dilation(island, iterations=4)
+    fine = np.where(land, g, np.minimum(base, -0.3))
+    write_png16(OUT_FAR / "height_fine.png", quantize(fine, lo, hi, 65535))
+    print(
+        f"поле 7,5 м: {FINE_NODES}², суша {land.sum() * FINE_STEP_M**2 / 1e6:.1f} км², "
+        f"высшая точка {fine.max():.0f} м"
+    )
 
 
 def snap_to_shore(x, z, coast_d, lo=8.0, hi=40.0):

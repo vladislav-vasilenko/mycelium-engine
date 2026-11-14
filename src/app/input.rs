@@ -52,6 +52,10 @@ impl App {
             KeyCode::KeyB => {
                 self.sim.head_bob = !self.sim.head_bob;
             }
+            KeyCode::KeyL => {
+                self.use_clusters = !self.use_clusters;
+                self.update_title(true);
+            }
             KeyCode::KeyH => {
                 self.hands_visible = !self.hands_visible;
             }

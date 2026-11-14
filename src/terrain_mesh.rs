@@ -67,6 +67,40 @@ pub fn vertices(world: &World) -> Vec<TerrainVertex> {
     out
 }
 
+/// Слои атрибутов на сетке мира (узел — тексель) для кластерного рельефа:
+/// веса (лес, торф, берег, тропа) и материал (субстрат, русло, влажность,
+/// тип берега) — те же байты, что в `TerrainVertex`. Сетка квадратная.
+pub fn attribute_layers(world: &World) -> (u32, Vec<u8>, Vec<u8>) {
+    let n = world.tiles_x as usize * (TILE_SAMPLES - 1) + 1;
+    let mut weights = vec![0u8; n * n * 4];
+    let mut material = vec![0u8; n * n * 4];
+    for tile in &world.tiles {
+        let (ox, oz) = (
+            tile.id.x as usize * (TILE_SAMPLES - 1),
+            tile.id.z as usize * (TILE_SAMPLES - 1),
+        );
+        for j in 0..TILE_SAMPLES {
+            for i in 0..TILE_SAMPLES {
+                let s = tile.at(i, j);
+                let k = ((oz + j) * n + ox + i) * 4;
+                weights[k..k + 4].copy_from_slice(&[
+                    unorm8(s.weights.forest),
+                    unorm8(s.weights.peat),
+                    unorm8(s.weights.shore),
+                    unorm8(s.trail),
+                ]);
+                material[k..k + 4].copy_from_slice(&[
+                    s.substrate as u8,
+                    unorm8(s.river),
+                    unorm8(s.moisture),
+                    unorm8(s.rocky),
+                ]);
+            }
+        }
+    }
+    (n as u32, weights, material)
+}
+
 /// Детальная текстура грунта: бесшовный шум, RGBA8, `size × size`.
 /// R — мелкая зернистость, G — крупные пятна, B — трещины/камешки.
 pub fn detail_texture(seed: u64, size: usize) -> Vec<u8> {

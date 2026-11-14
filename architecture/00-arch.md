@@ -155,7 +155,7 @@ sequenceDiagram
 
 Элементы ниже описаны по смыслу; файл — по таблице выше.
 
-Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы и рук, H — показать или спрятать руки, 1–4 — позы рук (`relaxed`, `grip`, `point`, `reach`), V/Shift+V — отладочные виды ландшафта, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`, `--pose <поза>`.
+Связывает подсистемы. Управление: клик — захват мыши, WASD, Shift — бег, Space — прыжок (в полёте вверх), G — ходьба/полёт (над водой и за картой — на начало тропы), R — на начало тропы, E/Q — вверх/вниз в полёте, B — покачивание головы и рук, L — рельеф кластерами или тайлами, H — показать или спрятать руки, 1–4 — позы рук (`relaxed`, `grip`, `point`, `reach`), V/Shift+V — отладочные виды ландшафта, T — ландшафт/тестовые кубы, Esc, ⌘M — свернуть окно, F5 — перезагрузка MSL, F9 — readback, F12 — GPU capture. Аргументы: `--selftest`, `--overview` (старт в полёте над морем с видом на весь остров), `--capture-frame N`, `--world DIR` (мир из слоёв PNG), `--export-world DIR` (записать слои и выйти), `--camera x,y,z,tx,ty,tz`, `--view <вид>`, `--pose <поза>`, `--tiles` (рельеф тайлами уровня 0 для сравнения).
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
@@ -260,7 +260,7 @@ sequenceDiagram
 
 | Структура | Размер, выравнивание | Поля и смещения |
 | --- | --- | --- |
-| `FrameUniforms` | 128 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108, `view_mode u32` @112 (`TerrainView`), `map_size_m f32` @116, `_pad [f32;2]` @120 |
+| `FrameUniforms` | 128 Б, 16 | `view_proj [[f32;4];4]` @0, `camera_pos [f32;4]` @64, `light_dir [f32;4]` @80, `time f32` @96, `exposure f32` @100, `pattern_time f32` @104, `frame_index u32` @108, `view_mode u32` @112 (`TerrainView`), `map_size_m f32` @116, `grid_nx u32` @120, `grid_step_m f32` @124 (поле высот кластерного рельефа) |
 | `InstanceData` | 80 Б, 16 | `model [[f32;4];4]` @0, `tint [f32;4]` @64 |
 | `Vertex` | 32 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24. В MSL — `packed_float3`, `packed_float3`, `float2` |
 | `TerrainVertex` | 32 Б, 4 | `position [f32;3]` @0 (мировые м), `normal [f32;3]` @12, `weights [u8;4]` @24 (лес, торф, берег, тропа), `material [u8;4]` @28 (субстрат, русло, влажность, тип берега 0 песок … 255 камень). В MSL — `packed_float3`, `packed_float3`, `uchar4`, `uchar4` |
@@ -268,13 +268,14 @@ sequenceDiagram
 | `SeaParams` | 432 Б, 16 | `sea_level` @0, `wave_count u32` @4, `shore_wavelength` @8, `shore_amplitude` @12, `shore_omega` @16, `swash_sand_m` @20, `swash_rock_m` @24, `dry_time_s` @28, `field_size u32` @32, `field_step_m` @36, `dt` @40, `_pad` @44, `waves [GerstnerWave; 8]` @48, `probe [[f32;4]; 8]` @304 |
 | `WaterLevel` | 32 Б, 4 | `origin [f32;2]` @0, `cell` @8, `morph_edge u32` @12, `inner_min [f32;2]` @16, `inner_max [f32;2]` @24 |
 | `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
+| `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
 | `HandsUniforms` | 144 Б, 16 | `proj [[f32;4];4]` @0 (проекция рук, reversed-Z), `view_to_world [[f32;4];4]` @64 (поворот глаз → мир), `vertex_count u32` @128, `joint_count u32` @132, `_pad [u32;2]` @136 |
 
 | Элемент | Описание |
 | --- | --- |
-| `expected_probe() -> [u32; 34]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
-| `LAYOUT_PROBE_LEN = 34`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8`, `SKIN_PROBES = 8` | Длина и имена полей для диагностики |
+| `expected_probe() -> [u32; 36]` | Ожидаемые размеры и смещения в порядке записи ядра `layout_probe` |
+| `LAYOUT_PROBE_LEN = 36`, `LAYOUT_PROBE_NAMES`, `SEA_WAVES = 8`, `WATER_PROBES = 8`, `SKIN_PROBES = 8` | Длина и имена полей для диагностики |
 
 Изменение любой структуры требует правки `common.h` в той же правке; несовпадение ловят тест `cpu_layout_matches_msl_rules` и самопроверка.
 
@@ -310,6 +311,7 @@ sequenceDiagram
 | `targets.rs` | 41 | `Targets::new` — HDR и глубина |
 | `terrain.rs` | 145 | `TerrainGpu`, `TerrainTextures`, `Renderer::set_terrain` |
 | `water.rs` | 52 | `WaterGpu`, `Renderer::set_water` |
+| `terrain_clusters.rs` | 99 | `MAX_VISIBLE_CLUSTERS` = 2¹⁸, `CLUSTER_VERTEX_COUNT` = 384, `ClustersGpu` (поле высот, кластеры, вершины, треугольники, слои весов и материала RGBA8), `ClusterData`, `Renderer::set_terrain_clusters` |
 | `hands.rs` | 72 | `MAX_JOINTS` = 64, `HandsGpu` (вершины, индексы, `index_count`, альбедо кожи sRGB с mip), `HandsFrame { uniforms, palette }`, `Renderer::set_hands(vertices, indices, albedo, size)` |
 | `passes/mod.rs` | 97 | трейт `FramePass` (`name`, `encode`), `PassCtx` (рендерер, слот, upload, цели, drawable, вход, readback, вода), `PassBarrier` (`apply`, `apply_always`), реестр `REGISTRY`, `find`, `size2` |
 | `passes/pattern.rs`, `wet_sand.rs`, `scene.rs`, `readback.rs`, `viewmodel.rs`, `tonemap.rs` | 38–165 | по проходу: `PatternPass`, `WetSandPass`, `ScenePass` (`draw_terrain`, `draw_cubes`, `draw_water`), `ReadbackPass` (с ядрами `water_probe` и `skin_probe`), `ViewmodelPass` (HDR — загрузка, глубина — очистка в 0, обход против часовой, без отсечения граней), `TonemapPass` |
@@ -348,7 +350,7 @@ sequenceDiagram
 | Тип | Поля и смысл |
 | --- | --- |
 | `PendingReadback` | `signal_value` (значение события, после которого можно читать), `frame`, `pattern_time`, `width`, `height`, `pixels` (точки глубины) |
-| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 10]` (pattern, scene, readback, tonemap, terrain, wet sand, water, water probe, hands, skin probe), `upload: MTLBuffer`, `signal_value: u64` |
+| `FrameSlot` | `allocator: MTL4CommandAllocator`, `cmd: MTL4CommandBuffer`, `tables: [MTL4ArgumentTable; 10]` (до 16 буферов и 8 текстур), `visible` (видимые кластеры кадра, 1 МБ), (pattern, scene, readback, tonemap, terrain, wet sand, water, water probe, hands, skin probe), `upload: MTLBuffer`, `signal_value: u64` |
 | `TerrainGpu` | вершины, индексы, `detail`, `albedo`, `normal`, `wetness` (R16Float, read/write) |
 | `WaterGpu` | `field` (RGBA32Float 1025²), `indices`, `index_count` |
 | `HandsGpu` | `vertices` (`SkinnedVertex`), `indices` (u16), `index_count`, `albedo` |
@@ -429,7 +431,7 @@ sequenceDiagram
 | --- | --- |
 | `Obj<T>` | `Retained<ProtocolObject<T>>` — владеющая ссылка на объект Metal |
 | `HDR_FORMAT`, `DEPTH_FORMAT`, `DRAWABLE_FORMAT`, `PATTERN_FORMAT` | `RGBA16Float`, `Depth32Float`, `BGRA8Unorm_sRGB`, `RGBA8Unorm` |
-| `Pipelines` | `pattern`, `layout_probe`, `wet_sand`, `water_probe`, `skin_probe` (compute), `scene`, `tonemap`, `terrain`, `water`, `hands` (render), `generation` |
+| `Pipelines` | `pattern`, `layout_probe`, `wet_sand`, `water_probe`, `skin_probe` (compute), `scene`, `tonemap`, `terrain`, `terrain_clusters` (`terrain_cluster_vs` + `terrain_fs`), `water`, `hands` (render), `generation` |
 | `ShaderError { file, stage, message }` | Стадии: `read`, `compile MSL`, `entry point`, `compute pipeline`, `render pipeline` |
 | `SourceOverride<'a>` | `Option<(файл, текст)>` — подмена исходника в памяти для самопроверки |
 | `shader_dir()` | `ECHO_SHADER_DIR`, иначе `Contents/Resources/shaders/metal` при запуске из бандла, иначе `shaders/metal` рядом с `Cargo.toml` |
@@ -515,6 +517,17 @@ sequenceDiagram
 | `rig.rs` | 132 | `POSE_NAMES` (`relaxed`, `grip`, `point`, `reach`), `POSE_BLEND_S` = 0,25; `RigInput { dt, yaw, pitch, bob_phase, bob_weight, view_dy }`; `HandRig` (`new`, `target`, `set_pose` — переход из текущей смешанной позы, `pose` — smoothstep-смешивание, `update` — прогресс, отставание `lag` от поворота (доля 0,6, τ 0,07 с, ≤ 0,08 рад), сглаженный `view_dy` (τ 0,12 с), `root` — сдвиг покачивания (8 мм вбок, 6 мм вниз по фазе шага), проседание ×0,6 и поворот отставания вокруг глаза) |
 | `tests.rs` | 166 | ассет и веса; суставы всех поз против эталона Blender (±1 мм); кисть перед глазом и в кадре, длина 8–25 см; непрерывность смешивания; переход, отставание и выключение покачивания; конечность скиннинга |
 
+### 4.9e. `src/terrain_clusters/` — кластерный рельеф в духе Nanite
+
+Подробно — [02-terrain.md](02-terrain.md#4a-кластерный-рельеф) и [AD-46](#ad-46-рельеф--кластерная-сетка-в-духе-nanite-вместо-cdlod), [AD-47](#ad-47-кластеры-рельефа-через-meshoptclusterlod-вершина--номер-узла-поля-высот).
+
+| Файл | Строк | Элементы |
+| --- | --- | --- |
+| `mod.rs` | 176 | `MAX_TRIANGLES` = 128, `NODE_WIDTH` = 8; `Bounds { center, radius, error }` (`INFINITY` — терминальная группа); `ClusterInfo { group, refined, bounds }`; `Node { bounds, group, child_offset, child_count }`; `ClusterSet { groups, info, gpu, vertices, triangles, levels, group_clusters, nodes }` (`triangle_count`, тестовый `cluster_triangles`); `build(&HeightField)` — `meshopt::clod_build` с `clod_default_config(128)`, локальные индексы `clod_local_indices`, лес деревьев `clod_build_hierarchy` |
+| `select.rs` | 143 | `View { camera, pixels_per_unit, znear, planes, threshold_px }` (`new(view, proj, height_px, znear, threshold)`, `projected_error`, `sphere_visible`), `SelectStats { clusters, triangles, culled }`, `select` — обход деревьев над группами с отбрасыванием поддеревьев по ошибке, правило «группа груба, а источник точен», отсечение сферой кластера; тестовый `select_all` — перебор |
+| `cache.rs` | 201 | `key(&HeightField)` — хеш поля и версии, `load_or_build` — `target/terrain-cache/clusters-<ключ>.bin` или сборка с записью; формат `ECLU`, версия 1 |
+| `tests.rs` | 219 | покрытие уровня 0, монотонность ошибок и повторяемость, водонепроницаемый срез с 6 камер, уровень 0 у глаз, отсечение за спиной, обход = перебор |
+
 ### 4.10. Сборка `.app`
 
 `scripts/bundle-app.sh [--open]` собирает `target/release/Echo.app`:
@@ -562,13 +575,13 @@ sequenceDiagram
 | `hands.metal` | `skin`, `hands_vs`, `hands_fs`, `skin_probe` (kernel) | Скиннинг по 4 весам (позиция и нормаль), проекция рук; кожа: альбедо, «обёрнутый» Ламберт, красноватый край терминатора, слабый широкий блик; нормаль задних граней разворачивается по `front_facing`; сверка скиннинга с CPU |
 | `tonemap.metal` | `tonemap_vs`, `tonemap_fs` | Полноэкранный треугольник без буфера; экспозиция и ACES (Narkowicz) |
 
-Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 8 буферов и 8 текстур):
+Таблицы аргументов (`MTL4ArgumentTable`, по одной на проход в каждом слоте, до 16 буферов и 8 текстур):
 
 | Проход | `buffer(0)` | `buffer(1)` | `buffer(2)` | `texture(0)` | Стадии |
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины ландшафта | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые; `texture(4)` веса, `texture(5)` материал | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
 | `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
@@ -659,7 +672,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | `Resize` | Размер изменился и прошло 4 кадра | Новые цели, запрос readback |
 | `ReadbackB` | Готов readback | Те же проверки при новом размере; сцена переключается на ландшафт |
 | `TerrainView` | 3 кадра с контрольной камерой ландшафта | Запрос readback |
-| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), вид `Raw`, волны `water_probe`, скиннинг `skin_probe` в контрольной позе `point` (±0,01 мм), раскладка 34 полей |
+| `TerrainReadback` | Готов readback | Глубина ландшафта против луча по `sample_ground` (≥ 4 точек на грунте), вид `Raw`, волны `water_probe`, скиннинг `skin_probe` в контрольной позе `point` (±0,01 мм), раскладка 36 полей. В самопроверке порог среза кластеров −1: рисуется только уровень 0, вид `Raw` сверяет его с CPU точно |
 | `Done` | — | Статистика, `SELFTEST PASSED` и код 0 или `SELFTEST FAILED` и код 1. Предохранитель — 1000 кадров. Кадры, пришедшие после `exit()`, игнорируются, итог печатается один раз |
 
 Итог — 21 проверка. Модульные тесты (`cargo test`, 43 и 1 ручной `export_first_map`): планировщик (6), раскладка (1), симуляция и ходьба (17, включая бота на тропе в сгенерированном мире и в мире из слоёв), эталоны (2), куб (1), шум (2), генератор (1), мир (6), слои (4), сетка ландшафта (3).
@@ -692,7 +705,7 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 02.1 · Проход по тропе от начала до каменистого берега | Бот в тесте `bot_walks_whole_trail_from_start_to_shore`, брод (AD-33) | Выполнено |
 | 02.1 · Маска типа берега: песчаные бухты и каменистые мысы | `Generator::rocky`, `coast_type.png`, тест `coast_alternates_sand_and_rock` | Выполнено (AD-37) |
 | 02.2 · Texture arrays, `TerrainMaterials`, `TerrainView`, мокрый песок, материалы берега | `terrain_materials.rs`, `Renderer::set_terrain`/`set_wetness`, `terrain.metal`, вид `Raw` в самопроверке | Выполнено (AD-38); 5 слоёв вместо 4 |
-| 02.3 · Кластерный рельеф: `HeightField`, сборка иерархии кластеров, срез по экранной ошибке на CPU | — | Не начато (план AD-46) |
+| 02.3 · Кластерный рельеф: `HeightField`, сборка иерархии кластеров, срез по экранной ошибке на CPU | `world/heightfield.rs`, `layers/fine.rs`, `terrain_clusters/`, `renderer/terrain_clusters.rs`, `terrain_cluster_vs` | Выполнено (AD-46, AD-47): шаги 1–5; GPU-выбор — 02.5 |
 | 02.4 · `Placement`, группы экземпляров, береговой декор | — | Не начато |
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
@@ -1034,6 +1047,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Недели вместо дней до детального острова; офлайн-сборка (минуты для 33 млн треугольников); объём данных больше одной текстуры высот (вершины и индексы всех уровней ~2× уровня 0); до 02.5 выбор на CPU стоит до 2 мс.
 - **Пересмотреть.** Если выбор на GPU (02.5) не уложится в бюджет на M3 Max или память кластеров острова превысит бюджет 08.1 до стриминга.
 
+### AD-47. Кластеры рельефа через `meshopt::clusterlod`; вершина — номер узла поля высот
+
+- **Решение.** Иерархию строит `clod_build` из `meshopt` 0.7 (порт clusterlod Арсения Капулкина по докладу Nanite): кластеры ≤ 128 треугольников, разбиение на группы по ~16, упрощение с замороженной границей группы (permissive, запасной путь — sloppy), ошибки по правилу слияния, лес деревьев над группами по уровням. Вершина кластера — номер узла поля высот (4 байта): вершинный шейдер берёт позицию и нормаль из поля, поэтому кластер — 4 Б на вершину и 4 Б на треугольник. На CPU срез обходит деревья групп и отбрасывает поддеревья, у которых наибольшая ошибка уже меньше порога. Готовая иерархия кэшируется на диске по хешу поля.
+- **Почему.** Своя сборка DAG (группировка по смежности, METIS-подобное разбиение, учёт ошибок) — недели отладки; clusterlod — проверенная реализация того же алгоритма. Упрощение сохраняет исходные узлы, поэтому вершины всех уровней — узлы поля, и позиция не хранится. Обход деревьев даёт на острове 548 тыс. кластеров выбор за 1,4 мс в отладочной сборке вместо ~15 мс перебора.
+- **Отброшено.** Своя сборка DAG; вершины с копией позиции и нормали (в 4 раза больше памяти); сборка при каждом запуске (45 с на острове 7,5 м).
+- **Цена.** Зависимость на C-код (meshoptimizer, MIT); 456 МБ иерархии острова на GPU; кэш 474 МБ в `target/`; срез на CPU до 02.5.
+- **Пересмотреть.** 02.5 — тот же лес деревьев на GPU; 08.1 — страницы кластеров вместо одного буфера; 08.3 — вершины произвольных мешей вместо номеров узлов.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1082,3 +1103,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.7 | после `c05863c` | AD-45: `tools/geo/osm.py`, `hydrology.py`, запрос Overpass; `features.json`, `flow.png`, маркеры по OSM; `world/features.rs`, `World.features`, `FeatureSegment` (раскладка 34 поля), `features.h`, буферы объектов в таблице `terrain` (до 8 буферов и текстур в таблице), попиксельные тропы, дороги, русла |
 | 2026-11-14 | 02.7 | после `a43d324` | `tools/geo/gsi.py`, рельеф `far` из GSI DEM5A вместо Copernicus, архив GSI в `sources.json` (ручное скачивание) |
 | 2026-11-14 | 02.3, 02.5, 02.6, 08.3, 08.4, 16 | после `7c73cd5` | AD-46: спецификации переписаны под кластерный рельеф в духе Nanite (вместо CDLOD); код не менялся |
+| 2026-11-14 | 02.3 | после `e05965e` | AD-47: `world/heightfield.rs` (`World.heightfield`, ходьба по нему), `layers/fine.rs` (`height_fine.png`), `terrain_clusters/` (`build`, `select`, `cache`), `renderer/terrain_clusters.rs`, `terrain_cluster_vs`, виды «кластеры» и «уровни», `TerrainCluster` (раскладка 36 полей), `FrameUniforms.grid_nx/grid_step_m`, буфер видимых кластеров слота, таблицы до 16 буферов, клавиша L и `--tiles`; зависимость `meshopt` 0.7 |

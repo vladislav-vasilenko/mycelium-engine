@@ -16,6 +16,7 @@
 | [02.3. Отсечение и уровни детализации](../specs/02-3-terrain-lod.md) | не начат | — | Весь подэтап |
 | [02.4. Растительность и береговой декор](../specs/02-4-vegetation.md) | не начат | — | Весь подэтап |
 | [02.5. Отсечение на GPU, indirect и импосторы](../specs/02-5-terrain-gpu-culling.md) | не начат | — | Весь подэтап |
+| [02.3. Кластерный рельеф в духе Nanite](../specs/02-3-terrain-lod.md) | `partial` | [02-3-terrain-lod.md](02-3-terrain-lod.md) | запись облёта, GPU-время |
 | [02.7. Импорт реального рельефа: Якусима](../specs/02-7-real-terrain-yakushima.md) | `partial` | [02-7-real-terrain-yakushima.md](02-7-real-terrain-yakushima.md) | GSI, OSM, реки, пояса, игровая зона |
 
 | Критерий сквозной проверки | Статус | Доказательство |

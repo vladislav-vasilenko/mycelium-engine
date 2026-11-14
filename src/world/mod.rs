@@ -10,6 +10,7 @@
 
 pub mod features;
 pub mod generator;
+pub mod heightfield;
 pub mod layers;
 pub mod noise;
 
@@ -179,6 +180,9 @@ pub struct World {
     /// Поля мировой сетки, из которых собраны тайлы. Нужны экспорту слоёв:
     /// маски торфяника и берега есть только здесь, а не в `Sample`.
     pub fields: Vec<Fields>,
+    /// Поле высот полного разрешения: кластеры рельефа и ходьба (02.3). У
+    /// генератора — та же сетка, что `fields`.
+    pub heightfield: heightfield::HeightField,
     /// Тропы, дороги и реки уже шага сетки (`features.json`), если есть.
     pub features: Option<features::FeatureSet>,
 }
@@ -292,6 +296,12 @@ impl World {
             generator,
             tiles,
             markers: Vec::new(),
+            heightfield: heightfield::HeightField::new(
+                nx,
+                nz,
+                grid.step_m,
+                grid.fields.iter().map(|f| f.height).collect(),
+            ),
             fields: grid.fields,
             features: None,
         };
@@ -391,27 +401,9 @@ impl Ground for World {
         };
         let tile = self.tile(id)?;
         let local = (Vec2::new(x, z) - self.tile_origin(id)) / self.step_m;
-        let i = (local.x.floor() as usize).min(TILE_SAMPLES - 2);
-        let j = (local.y.floor() as usize).min(TILE_SAMPLES - 2);
-        let (fx, fz) = (local.x - i as f32, local.y - j as f32);
-        let a = tile.at(i, j);
-        let b = tile.at(i + 1, j);
-        let c = tile.at(i + 1, j + 1);
-        let d = tile.at(i, j + 1);
-        let s = self.step_m;
-        let (height, normal) = if fx >= fz {
-            // Треугольник (a, c, b).
-            let h = a.height + fx * (b.height - a.height) + fz * (c.height - b.height);
-            let n =
-                Vec3::new(s, c.height - a.height, s).cross(Vec3::new(s, b.height - a.height, 0.0));
-            (h, n.normalize())
-        } else {
-            // Треугольник (a, d, c).
-            let h = a.height + fz * (d.height - a.height) + fx * (c.height - d.height);
-            let n =
-                Vec3::new(0.0, d.height - a.height, s).cross(Vec3::new(s, c.height - a.height, s));
-            (h, n.normalize())
-        };
+        // Высота и нормаль — по треугольникам поля высот полного разрешения:
+        // это уровень 0 кластеров, видимый вблизи.
+        let (height, normal) = self.heightfield.sample(x, z)?;
         // Нечисловые свойства — от ближайшей точки сетки.
         let near = tile.at(
             (local.x.round() as usize).min(TILE_SAMPLES - 1),

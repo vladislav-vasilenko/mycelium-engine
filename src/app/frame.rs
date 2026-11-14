@@ -93,8 +93,30 @@ impl App {
                 self.view_mode as u32
             },
             map_size_m: self.world.size_m().x,
-            _pad: [0.0; 2],
+            grid_nx: self.world.heightfield.nx as u32,
+            grid_step_m: self.world.heightfield.step_m,
         };
+        // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3).
+        let use_clusters =
+            self.use_clusters && self.scene == SceneMode::Terrain && self.clusters.is_some();
+        if use_clusters {
+            let set = self.clusters.as_ref().unwrap();
+            // Самопроверка вида Raw сверяет кластеры уровня 0 с CPU точно:
+            // отрицательный порог пропускает только исходную сетку (в ровных
+            // местах ошибка упрощения почти нулевая, и малый порог её не держит).
+            let threshold = if selftest { -1.0 } else { 1.0 };
+            let v = crate::terrain_clusters::View::new(
+                view,
+                proj,
+                h as f32,
+                sim::NEAR_PLANE_M,
+                threshold,
+            );
+            let t = Instant::now();
+            self.cluster_stats =
+                crate::terrain_clusters::select(set, &v, true, &mut self.visible_clusters);
+            self.cluster_select_ms = t.elapsed().as_secs_f64() * 1000.0;
+        }
         let instances = match self.scene {
             SceneMode::Cubes => scene::instances().to_vec(),
             SceneMode::Terrain => marker_posts(&self.world),
@@ -119,6 +141,7 @@ impl App {
             capture,
             water: water_frame,
             hands,
+            clusters: use_clusters.then_some(&self.visible_clusters[..]),
         });
         if readback && outcome != FrameOutcome::Presented {
             self.readback_requested = true;

@@ -55,6 +55,8 @@ pub struct FrameInput<'a> {
     pub water: Option<WaterFrame>,
     /// Руки: параметры и палитра. `None` — без рук.
     pub hands: Option<super::hands::HandsFrame>,
+    /// Кластерный рельеф: видимые кластеры среза. `None` — тайлы уровня 0.
+    pub clusters: Option<&'a [u32]>,
 }
 
 /// Вода в кадре (03.1).
@@ -107,6 +109,8 @@ pub(super) struct FrameSlot {
     pub cmd: Obj<dyn MTL4CommandBuffer>,
     tables: [Obj<dyn MTL4ArgumentTable>; 10],
     pub upload: Obj<dyn MTLBuffer>,
+    /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
+    pub visible: Obj<dyn MTLBuffer>,
     pub signal_value: u64,
 }
 
@@ -121,7 +125,7 @@ impl FrameSlot {
         cmd.setLabel(Some(&label(&format!("frame slot {index}"))));
         let table = |name: &str| -> Result<Obj<dyn MTL4ArgumentTable>, String> {
             let d = MTL4ArgumentTableDescriptor::new();
-            d.setMaxBufferBindCount(8);
+            d.setMaxBufferBindCount(16);
             d.setMaxTextureBindCount(8);
             d.setLabel(Some(&label(&format!("{name} args, slot {index}"))));
             device
@@ -134,6 +138,12 @@ impl FrameSlot {
         }
         let upload = shared_buffer(device, UPLOAD_BYTES, &format!("upload slot {index}"));
         residency.addAllocation(as_allocation(&*upload));
+        let visible = shared_buffer(
+            device,
+            super::terrain_clusters::MAX_VISIBLE_CLUSTERS * 4,
+            &format!("visible clusters slot {index}"),
+        );
+        residency.addAllocation(as_allocation(&*visible));
         Ok(FrameSlot {
             allocator,
             cmd,
@@ -141,6 +151,7 @@ impl FrameSlot {
                 .try_into()
                 .unwrap_or_else(|_| unreachable!("10 таблиц")),
             upload,
+            visible,
             signal_value: 0,
         })
     }

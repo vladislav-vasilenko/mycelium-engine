@@ -71,6 +71,11 @@
   "features": {
     "file": "features.json"
   },
+  "height_fine": {
+    "file": "height_fine.png",
+    "size": 4097,
+    "step_m": 7.5
+  },
   "geo": {
     "center_lat": 30.335,
     "center_lon": 130.525,

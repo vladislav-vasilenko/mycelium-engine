@@ -32,9 +32,10 @@ impl ApplicationHandler for App {
         };
         let result = self.create_renderer(&window);
         match result {
-            Ok((mut r, shore, hands)) => {
+            Ok((mut r, shore, hands, clusters)) => {
                 self.shore = Some(shore);
                 self.hands = hands;
+                self.clusters = Some(clusters);
                 let size = window.inner_size();
                 r.resize(size.width, size.height, window.scale_factor());
                 eprintln!(

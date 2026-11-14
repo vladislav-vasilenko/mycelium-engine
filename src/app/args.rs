@@ -22,6 +22,8 @@ pub struct Args {
     pub view: Option<TerrainView>,
     /// Стартовая поза рук: индекс в `hands::POSE_NAMES`.
     pub pose: Option<usize>,
+    /// Рельеф тайлами уровня 0 вместо кластеров (сравнение, 02.3).
+    pub tiles: bool,
 }
 
 impl Args {
@@ -57,6 +59,7 @@ impl Args {
                         );
                     }
                 }
+                "--tiles" => args.tiles = true,
                 "--pose" => {
                     let names = crate::hands::POSE_NAMES;
                     args.pose = it.next().and_then(|n| names.iter().position(|&p| p == n));

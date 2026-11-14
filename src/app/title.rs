@@ -69,6 +69,21 @@ impl App {
             (SceneMode::Cubes, _) | (_, TerrainView::Lit) => String::new(),
             (_, v) => format!(" · вид: {}", v.name()),
         };
+        let terrain = if self.scene == SceneMode::Terrain {
+            if self.use_clusters && self.clusters.is_some() {
+                let s = self.cluster_stats;
+                format!(
+                    " · рельеф: {} кл., {:.2} млн тр., выбор {:.2} мс",
+                    s.clusters,
+                    s.triangles as f64 / 1e6,
+                    self.cluster_select_ms
+                )
+            } else {
+                " · рельеф: тайлы".to_string()
+            }
+        } else {
+            String::new()
+        };
         let hands = match &self.hands {
             Some(h) if self.hands_visible && self.sim.mode == MoveMode::Walk => {
                 format!(" · руки: {}", crate::hands::POSE_NAMES[h.rig.target()])
@@ -76,7 +91,7 @@ impl App {
             _ => String::new(),
         };
         window.set_title(&format!(
-            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}{hands}",
+            "Эхо мицелия · {} · {size} · {fps:.0} fps · CPU {:.2} мс · {status}{place}{view}{terrain}{hands}",
             r.info.name, r.stats.cpu_encode_ms
         ));
         self.title_timer = Instant::now();

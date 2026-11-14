@@ -13,7 +13,8 @@ struct FrameUniforms {
     uint frame_index;
     uint view_mode;        // TerrainView, 0 — с освещением
     float map_size_m;      // сторона карты: XZ → координаты маски влажности
-    float2 _pad;
+    uint grid_nx;          // поле высот кластерного рельефа: узлов по x
+    float grid_step_m;     // и шаг, м
 };
 
 struct InstanceData {
@@ -116,4 +117,12 @@ struct FeatureSegment {
     float half_width;
     uint kind;          // 0 тропа, 1 река, 2 дорога
     float2 _pad;
+};
+
+// Кластер рельефа (src/layout.rs, TerrainCluster), 16 байт.
+struct TerrainCluster {
+    uint vertex_offset;
+    uint triangle_offset;
+    uint triangle_count;
+    uint depth;
 };

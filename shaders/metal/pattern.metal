@@ -69,4 +69,7 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[31] = sizeof(FeatureSegment);
     out[32] = uint((thread char*)&fs.half_width - fsb);
     out[33] = uint((thread char*)&fs.kind - fsb);
+    TerrainCluster tc;
+    out[34] = sizeof(TerrainCluster);
+    out[35] = uint((thread char*)&tc.depth - (thread char*)&tc);
 }

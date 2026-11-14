@@ -180,12 +180,16 @@ pub enum TerrainView {
     WaterDirection = 9,
     /// Вода: пена, заплеск, береговая волна.
     Surf = 10,
+    /// Кластеры рельефа разными цветами (02.3).
+    Clusters = 11,
+    /// Уровень иерархии кластера: синий — исходная сетка, красный — грубый.
+    Levels = 12,
     /// HDR = (высота над камерой м, уклон градусы, индекс доминирующего биома, тип берега).
     Raw = 15,
 }
 
 impl TerrainView {
-    const CYCLE: [TerrainView; 11] = [
+    const CYCLE: [TerrainView; 13] = [
         TerrainView::Lit,
         TerrainView::Height,
         TerrainView::Slope,
@@ -197,6 +201,8 @@ impl TerrainView {
         TerrainView::WaterDepth,
         TerrainView::WaterDirection,
         TerrainView::Surf,
+        TerrainView::Clusters,
+        TerrainView::Levels,
     ];
 
     /// Следующий вид по клавише V (`back` — Shift+V).
@@ -220,6 +226,8 @@ impl TerrainView {
             "water-depth" => TerrainView::WaterDepth,
             "water-dir" => TerrainView::WaterDirection,
             "surf" => TerrainView::Surf,
+            "clusters" => TerrainView::Clusters,
+            "levels" => TerrainView::Levels,
             _ => return None,
         })
     }
@@ -237,6 +245,8 @@ impl TerrainView {
             TerrainView::WaterDepth => "вода: глубина",
             TerrainView::WaterDirection => "вода: направление к берегу",
             TerrainView::Surf => "вода: пена и заплеск",
+            TerrainView::Clusters => "кластеры",
+            TerrainView::Levels => "уровни кластеров",
             TerrainView::Raw => "числа (самопроверка)",
         }
     }

@@ -10,6 +10,7 @@ publish = false
 bytemuck = { version = "1.25.2", features = ["derive"] }
 glam = "0.30"
 gltf = { version = "1.4", default-features = false, features = ["names", "utils"] }
+meshopt = "0.7.0"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["objc2-quartz-core"] }
 objc2-foundation = "0.3"

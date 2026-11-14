@@ -22,6 +22,7 @@ mod resources;
 pub mod shaders;
 mod targets;
 mod terrain;
+mod terrain_clusters;
 mod water;
 
 use std::any::Any;
@@ -38,6 +39,7 @@ pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
 pub use terrain::{FeatureBuffers, TerrainTextures};
+pub use terrain_clusters::{ClusterData, MAX_VISIBLE_CLUSTERS};
 
 use crate::frame_graph::{self, FramePlan};
 use crate::layout::Vertex;
@@ -56,6 +58,7 @@ use resources::{
 use shaders::{Obj, Pipelines, ShaderError, SourceOverride};
 use targets::Targets;
 use terrain::TerrainGpu;
+use terrain_clusters::ClustersGpu;
 use water::WaterGpu;
 
 pub struct Renderer {
@@ -90,6 +93,7 @@ pub struct Renderer {
     terrain: Option<TerrainGpu>,
     water: Option<WaterGpu>,
     hands: Option<HandsGpu>,
+    clusters: Option<ClustersGpu>,
     pub stats: Stats,
 }
 
@@ -219,6 +223,7 @@ impl Renderer {
             terrain: None,
             water: None,
             hands: None,
+            clusters: None,
             stats: Stats::default(),
         })
     }
@@ -429,6 +434,10 @@ impl Renderer {
         if let Some(w) = &input.water {
             upload_bytes(&slot.upload, SEA_OFFSET, bytemuck::bytes_of(&w.params));
             upload_bytes(&slot.upload, LEVELS_OFFSET, bytemuck::cast_slice(&w.levels));
+        }
+        if let Some(list) = input.clusters {
+            let n = list.len().min(MAX_VISIBLE_CLUSTERS);
+            upload_bytes(&slot.visible, 0, bytemuck::cast_slice(&list[..n]));
         }
         if let Some(h) = &input.hands {
             let n = h.palette.len().min(MAX_JOINTS);

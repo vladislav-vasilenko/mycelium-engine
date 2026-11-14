@@ -17,6 +17,8 @@ struct TerrainVaryings {
     float3 normal;
     float4 weights;   // лес, торф, берег, тропа
     float4 material;  // субстрат (индекс), русло, влажность почвы, тип берега
+    uint cluster [[flat]];  // номер кластера (02.3), 0 — тайлы уровня 0
+    uint depth [[flat]];    // уровень иерархии кластера
 };
 
 vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
@@ -32,6 +34,70 @@ vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
     out.weights = float4(v.weights) / 255.0;
     out.material = float4(float(v.material.x), float(v.material.y) / 255.0,
                           float(v.material.z) / 255.0, float(v.material.w) / 255.0);
+    out.cluster = 0;
+    out.depth = 0;
+    return out;
+}
+
+// Кластерный рельеф (02.3): экземпляр — видимый кластер, вершина — номер узла
+// поля высот. Позиция и нормаль — из поля (нормаль центральными разностями,
+// как HeightField::normal_at), веса и материал — из слоёв мира по XZ.
+vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
+                                          uint iid [[instance_id]],
+                                          device const float* heights [[buffer(0)]],
+                                          constant FrameUniforms& frame [[buffer(1)]],
+                                          device const TerrainCluster* clusters [[buffer(5)]],
+                                          device const uint* cluster_vertices [[buffer(6)]],
+                                          device const uint* cluster_triangles [[buffer(7)]],
+                                          device const uint* visible [[buffer(8)]],
+                                          texture2d<float> layer_weights [[texture(4)]],
+                                          texture2d<float> layer_material [[texture(5)]]) {
+    uint cid = visible[iid];
+    TerrainCluster c = clusters[cid];
+    uint tri = vid / 3;
+    TerrainVaryings out;
+    out.cluster = cid;
+    out.depth = c.depth;
+    if (tri >= c.triangle_count) {
+        // Лишние треугольники экземпляра схлопываются в точку и не растеризуются.
+        out.position = float4(0.0, 0.0, 0.0, 1.0);
+        out.world = 0.0;
+        out.rel = 0.0;
+        out.normal = float3(0, 1, 0);
+        out.weights = 0.0;
+        out.material = 0.0;
+        return out;
+    }
+    uint packed = cluster_triangles[c.triangle_offset + tri];
+    uint local = (packed >> (8 * (vid % 3))) & 0xff;
+    uint node = cluster_vertices[c.vertex_offset + local];
+    uint nx = frame.grid_nx;
+    int i = int(node % nx);
+    int j = int(node / nx);
+    int nz = int(frame.map_size_m / frame.grid_step_m + 0.5) + 1;
+    auto h = [&](int a, int b) {
+        a = clamp(a, 0, int(nx) - 1);
+        b = clamp(b, 0, nz - 1);
+        return heights[uint(b) * nx + uint(a)];
+    };
+    float s = frame.grid_step_m;
+    float3 world = float3(float(i) * s, heights[node], float(j) * s);
+    float dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
+    float dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
+    out.world = world;
+    out.rel = world - frame.camera_pos.xyz;
+    out.position = frame.view_proj * float4(world, 1.0);
+    out.normal = normalize(float3(-dx, 1.0, -dz));
+    // Слои мира: тексель на узел сетки биомов, центр текселя — узел.
+    constexpr sampler ls(filter::linear, address::clamp_to_edge);
+    float2 uv = (world.xz / frame.map_size_m * float(layer_weights.get_width() - 1) + 0.5)
+                / float(layer_weights.get_width());
+    out.weights = layer_weights.sample(ls, uv, level(0));
+    float4 m = layer_material.sample(ls, uv, level(0));
+    // Субстрат — индекс: берём ближайший узел, как CPU.
+    uint w = layer_material.get_width();
+    uint2 near = uint2(clamp(world.xz / frame.map_size_m * float(w - 1) + 0.5, 0.0, float(w - 1)));
+    out.material = float4(round(layer_material.read(near).x * 255.0), m.y, m.z, m.w);
     return out;
 }
 
@@ -60,6 +126,8 @@ constant uint VIEW_SUBSTRATE = 4;
 constant uint VIEW_COAST = 5;
 constant uint VIEW_WETNESS = 6;
 constant uint VIEW_MATERIALS = 7;
+constant uint VIEW_CLUSTERS = 11;
+constant uint VIEW_LEVELS = 12;
 constant uint VIEW_RAW = 15;
 
 struct MatSample {
@@ -207,6 +275,16 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float3 b = normalize(float3(0, 0, -1) + n * n.z);
     float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
     float3 N = normalize(t * nxy.x + b * nxy.y + n * nz);
+
+    if (frame.view_mode == VIEW_CLUSTERS || frame.view_mode == VIEW_LEVELS) {
+        // Кластеры — случайный цвет по номеру, уровни — от синего (0) к красному.
+        uint hsh = in.cluster * 2654435761u;
+        float3 c = frame.view_mode == VIEW_CLUSTERS
+            ? float3((hsh >> 8) & 255, (hsh >> 16) & 255, (hsh >> 24) & 255) / 255.0 * 0.8 + 0.2
+            : ramp(float(in.depth) / 8.0, float3(0.1, 0.3, 1.0), float3(0.2, 0.9, 0.3), float3(1.0, 0.2, 0.1));
+        float shade = 0.35 + 0.65 * saturate(dot(n, -frame.light_dir.xyz));
+        return float4(c * shade, 1.0);
+    }
 
     switch (frame.view_mode) {
         case VIEW_HEIGHT: {

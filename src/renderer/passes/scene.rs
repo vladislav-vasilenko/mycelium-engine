@@ -7,6 +7,7 @@ use objc2_metal::*;
 use super::{FramePass, PassBarrier, PassCtx};
 use crate::renderer::frame::{INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, Table};
 use crate::renderer::resources::label;
+use crate::renderer::terrain_clusters::{CLUSTER_VERTEX_COUNT, MAX_VISIBLE_CLUSTERS};
 use crate::water::WATER_LEVELS;
 
 pub(in crate::renderer) struct ScenePass;
@@ -78,11 +79,15 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
     enc
 }
 
-/// Все тайлы ландшафта одним instanced draw.
+/// Рельеф: кластеры среза (02.3) или все тайлы уровня 0 одним instanced draw.
 fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
     let Some(terrain) = &ctx.r.terrain else {
         return;
     };
+    if let (Some(list), Some(c)) = (ctx.input.clusters, &ctx.r.clusters) {
+        draw_clusters(ctx, enc, terrain, c, list.len().min(MAX_VISIBLE_CLUSTERS));
+        return;
+    }
     let table = ctx.slot.table(Table::Terrain);
     unsafe {
         table.setAddress_atIndex(terrain.vertices.gpuAddress(), 0);
@@ -106,6 +111,51 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
             terrain.indices.gpuAddress(),
             terrain.indices.length(),
             terrain.tile_count,
+        );
+    }
+    enc.popDebugGroup();
+}
+
+/// Экземпляр — видимый кластер; вершинный шейдер берёт его треугольники из
+/// общего буфера и позиции узлов из поля высот. Лишние вершины (у кластера
+/// меньше 128 треугольников) схлопываются в точку.
+fn draw_clusters(
+    ctx: &PassCtx,
+    enc: &RenderEncoder,
+    terrain: &crate::renderer::terrain::TerrainGpu,
+    c: &crate::renderer::terrain_clusters::ClustersGpu,
+    count: usize,
+) {
+    if count == 0 {
+        return;
+    }
+    let table = ctx.slot.table(Table::Terrain);
+    unsafe {
+        table.setAddress_atIndex(c.heights.gpuAddress(), 0);
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
+        table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
+        table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
+        table.setAddress_atIndex(c.clusters.gpuAddress(), 5);
+        table.setAddress_atIndex(c.vertices.gpuAddress(), 6);
+        table.setAddress_atIndex(c.triangles.gpuAddress(), 7);
+        table.setAddress_atIndex(ctx.slot.visible.gpuAddress(), 8);
+        table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);
+        table.setTexture_atIndex(terrain.albedo.gpuResourceID(), 1);
+        table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
+        table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
+        table.setTexture_atIndex(c.weights.gpuResourceID(), 4);
+        table.setTexture_atIndex(c.material.gpuResourceID(), 5);
+    }
+    enc.pushDebugGroup(&label(&format!("terrain: {count} clusters")));
+    enc.setRenderPipelineState(&ctx.r.pipelines.terrain_clusters);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            CLUSTER_VERTEX_COUNT,
+            count,
         );
     }
     enc.popDebugGroup();

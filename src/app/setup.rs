@@ -15,7 +15,15 @@ impl App {
     pub(super) fn create_renderer(
         &self,
         window: &Window,
-    ) -> Result<(Renderer, water::ShoreField, Option<Hands>), String> {
+    ) -> Result<
+        (
+            Renderer,
+            water::ShoreField,
+            Option<Hands>,
+            crate::terrain_clusters::ClusterSet,
+        ),
+        String,
+    > {
         let (device, info) = renderer::probe_device()?;
         eprintln!("{info}");
         let layer = platform::attach_metal_layer(window)?;
@@ -62,6 +70,36 @@ impl App {
             materials.layers,
             t0.elapsed().as_secs_f64() * 1000.0
         );
+        // Кластерный рельеф (02.3): иерархия из поля высот полного разрешения.
+        let t_clusters = Instant::now();
+        let (clusters, cached) = crate::terrain_clusters::load_or_build(&self.world.heightfield);
+        let (layer_size, weights_rgba, material_rgba) = terrain_mesh::attribute_layers(&self.world);
+        r.set_terrain_clusters(&renderer::ClusterData {
+            heights: &self.world.heightfield.heights,
+            clusters: &clusters.gpu,
+            vertices: &clusters.vertices,
+            triangles: &clusters.triangles,
+            layer_size,
+            weights_rgba: &weights_rgba,
+            material_rgba: &material_rgba,
+        })?;
+        eprintln!(
+            "кластеры рельефа: {} кластеров, {} групп, {} уровней, {} треугольников (уровень 0 — {}), {:.1} МБ, {} за {:.0} мс",
+            clusters.gpu.len(),
+            clusters.groups.len(),
+            clusters.levels,
+            clusters.triangle_count(),
+            (self.world.heightfield.nx - 1) * (self.world.heightfield.nz - 1) * 2,
+            (clusters.vertices.len() * 4 + clusters.triangles.len() * 4 + clusters.gpu.len() * 16)
+                as f64
+                / 1e6,
+            if cached {
+                "из кэша"
+            } else {
+                "собраны"
+            },
+            t_clusters.elapsed().as_secs_f64() * 1000.0
+        );
         let t_water = Instant::now();
         let shore = water::ShoreField::from_world(&self.world);
         r.set_water(&shore)?;
@@ -91,6 +129,6 @@ impl App {
                 None
             }
         };
-        Ok((r, shore, hands))
+        Ok((r, shore, hands, clusters))
     }
 }

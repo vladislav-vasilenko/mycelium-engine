@@ -22,7 +22,9 @@ pub struct FrameUniforms {
     pub view_mode: u32,
     /// Сторона карты, м: мировые XZ → координаты маски влажности.
     pub map_size_m: f32,
-    pub _pad: [f32; 2],
+    /// Поле высот кластерного рельефа (02.3): узлов по x и шаг, м.
+    pub grid_nx: u32,
+    pub grid_step_m: f32,
 }
 
 #[repr(C, align(16))]
@@ -156,6 +158,19 @@ pub struct FeatureSegment {
     pub _pad: [f32; 2],
 }
 
+/// Кластер рельефа для вершинного шейдера (02.3), 16 байт. Вершины кластера —
+/// номера узлов поля высот в `cluster_vertices[vertex_offset..]`, треугольники —
+/// по три локальных индекса u8 в `cluster_triangles[triangle_offset..]` (u32 на треугольник).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct TerrainCluster {
+    pub vertex_offset: u32,
+    pub triangle_offset: u32,
+    pub triangle_count: u32,
+    /// Уровень иерархии (0 — исходная сетка).
+    pub depth: u32,
+}
+
 /// Сколько вершин рук проверяет ядро `skin_probe`: вершины `i × (n / SKIN_PROBES)`.
 pub const SKIN_PROBES: usize = 8;
 
@@ -197,10 +212,12 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<FeatureSegment>() as u32,
         offset_of!(FeatureSegment, half_width) as u32,
         offset_of!(FeatureSegment, kind) as u32,
+        size_of::<TerrainCluster>() as u32,
+        offset_of!(TerrainCluster, depth) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 34;
+pub const LAYOUT_PROBE_LEN: usize = 36;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -237,6 +254,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FeatureSegment)",
     "FeatureSegment.half_width",
     "FeatureSegment.kind",
+    "sizeof(TerrainCluster)",
+    "TerrainCluster.depth",
 ];
 
 #[cfg(test)]
@@ -250,7 +269,7 @@ mod tests {
             expected_probe(),
             [
                 128, 16, 64, 80, 96, 100, 104, 108, 112, 116, 80, 64, 32, 12, 24, 32, 12, 24, 28,
-                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20
+                32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16, 12
             ]
         );
     }

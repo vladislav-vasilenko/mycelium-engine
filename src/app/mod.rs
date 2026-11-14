@@ -71,6 +71,12 @@ pub struct App {
     hands: Option<crate::hands::Hands>,
     /// Руки видны (клавиша H).
     hands_visible: bool,
+    /// Кластерный рельеф (02.3): иерархия, срез кадра, режим (клавиша L).
+    clusters: Option<crate::terrain_clusters::ClusterSet>,
+    visible_clusters: Vec<u32>,
+    use_clusters: bool,
+    cluster_stats: crate::terrain_clusters::SelectStats,
+    cluster_select_ms: f64,
     /// Длительность прошлого кадра для маски мокрого песка, с.
     frame_dt: f32,
     grabbed: bool,
@@ -120,6 +126,7 @@ impl App {
         if !args.selftest && !args.overview && args.camera.is_none() {
             sim.set_mode(MoveMode::Walk, &world);
         }
+        let tiles_only = args.tiles;
         App {
             args,
             world,
@@ -136,6 +143,11 @@ impl App {
             shore: None,
             hands: None,
             hands_visible: true,
+            clusters: None,
+            visible_clusters: Vec::new(),
+            use_clusters: !tiles_only,
+            cluster_stats: Default::default(),
+            cluster_select_ms: 0.0,
             frame_dt: 0.0,
             grabbed: false,
             last_frame: Instant::now(),

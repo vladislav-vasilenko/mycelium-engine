@@ -240,3 +240,20 @@ fn yakushima_layers_have_trails_and_rivers() {
     let h = w.sample_ground(jomon.x, jomon.z).unwrap().height;
     assert!((1250.0..1380.0).contains(&h), "Дзёмон-суги на {h} м");
 }
+
+/// Поле высот генератора совпадает с сеткой тайлов: те же высоты и нормали
+/// (нормаль поля — расчёт вершинного шейдера кластеров).
+#[test]
+fn heightfield_matches_tiles() {
+    let w = World::generate(0xEC40, 4, 4);
+    let hf = &w.heightfield;
+    for tile in &w.tiles {
+        for (i, j) in [(0, 0), (13, 40), (64, 64), (32, 7)] {
+            let gi = tile.id.x as usize * 64 + i;
+            let gj = tile.id.z as usize * 64 + j;
+            let s = tile.at(i, j);
+            assert_eq!(hf.position(gi, gj).y, s.height);
+            assert!((hf.normal_at(gi, gj) - s.normal).length() < 1e-5);
+        }
+    }
+}

@@ -26,6 +26,7 @@ mod reference;
 mod renderer;
 mod scene;
 mod sim;
+mod terrain_clusters;
 mod terrain_materials;
 mod terrain_mesh;
 mod water;

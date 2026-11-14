@@ -14,6 +14,15 @@
       "snapshot": "2026-11-14",
       "sha256": "14dd666c7d488ee3fdafcebb5fbcd8933bdc51f633144ea9640158a8a016588d",
       "attribution": "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0"
+    },
+    {
+      "file": "20261114170714344-001.zip",
+      "dir": "assets/source/geo/gsi/raw",
+      "manual": true,
+      "url": "https://service.gsi.go.jp/kiban/ (基盤地図情報 → 数値標高モデル → 屋久島町, DEM1A/5A/10B)",
+      "snapshot": "2026-11-14",
+      "sha256": "70dbf0f3530731e699c4d6ba23af0f7c041a5cbb46e9af7836c863ff8a4c689a",
+      "attribution": "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)"
     }
   ]
 }

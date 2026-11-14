@@ -1,6 +1,6 @@
 # Мир «Якусима»
 
-Мир построен по реальным данным острова Якусима (Япония) скриптом [tools/geo/yakushima.py](../../../tools/geo/yakushima.py). Источники и лицензии — [assets/source/geo/LICENSE.md](../../source/geo/LICENSE.md). Файлы здесь не правятся вручную.
+Мир построен по реальным данным острова Якусима (Япония) скриптом [tools/geo/yakushima.py](../../../tools/geo/yakushima.py): рельеф грунта — GSI DEM5A (без крон), за его охватом — Copernicus; тропы, реки и места — OpenStreetMap. Источники и лицензии — [assets/source/geo/LICENSE.md](../../source/geo/LICENSE.md). Файлы здесь не правятся вручную.
 
 | Каталог | Что | Сетка |
 | --- | --- | --- |
@@ -15,7 +15,7 @@
 
 ```sh
 python3 -m venv .venv-geo && .venv-geo/bin/pip install -r tools/geo/requirements.txt
-.venv-geo/bin/python tools/geo/yakushima.py fetch
+.venv-geo/bin/python tools/geo/yakushima.py fetch   # архив GSI — вручную в assets/source/geo/gsi/raw/
 .venv-geo/bin/python tools/geo/yakushima.py far
 cargo run -- --world assets/world/yakushima/far --overview
 ```

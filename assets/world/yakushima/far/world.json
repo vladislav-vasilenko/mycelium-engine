@@ -54,7 +54,7 @@
     {
       "name": "устье реки Анбо",
       "kind": "RiverMouth",
-      "x": 27900.0,
+      "x": 27870.0,
       "z": 17790.0
     },
     {
@@ -81,7 +81,8 @@
     "projection": "local tangent plane WGS84: x — восток, z — юг, метры",
     "sources": [
       "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
-      "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0"
+      "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0",
+      "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)"
     ]
   }
 }

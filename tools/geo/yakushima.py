@@ -29,6 +29,7 @@ import tifffile
 from PIL import Image
 from scipy import ndimage
 
+import gsi
 import hydrology
 import osm
 
@@ -36,6 +37,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = ROOT / "assets/source/geo/sources.json"
 CACHE = ROOT / "assets/source/geo/cache"
 OUT_FAR = ROOT / "assets/world/yakushima/far"
+# Архив GSI скачивается вручную в браузере (сервер отвечает 403 скрипту).
+GSI_DIR = ROOT / "assets/source/geo/gsi/raw"
+GSI_BBOX = (30.20, 130.36, 30.48, 130.69)
 
 # Центр локальной проекции: середина острова.
 CENTER_LAT = 30.335
@@ -93,7 +97,10 @@ def fetch():
     sources = json.loads(SOURCES.read_text())
     CACHE.mkdir(parents=True, exist_ok=True)
     for s in sources["files"]:
-        path = CACHE / s["file"]
+        path = (ROOT / s["dir"] if "dir" in s else CACHE) / s["file"]
+        if s.get("manual") and not path.exists():
+            print(f"{s['file']}: скачайте вручную ({s['url']}) в {path.parent}")
+            continue
         if not path.exists():
             print(f"скачиваю {s['url']}")
             if "query" in s:
@@ -133,6 +140,56 @@ def sample_dem(dem, lat, lon):
     return (a * (1 - fc) + b * fc) * (1 - fr) + (cc * (1 - fc) + d * fc) * fr
 
 
+def load_gsi():
+    """Мозаика GSI DEM5A (шаг 0,2″ ≈ 5 м) по архивам в `GSI_DIR`; кэш — .npy."""
+    archives = sorted(GSI_DIR.glob("*.zip"))
+    if not archives:
+        return None
+    key = hashlib.sha256("".join(f"{a.name}:{a.stat().st_size}" for a in archives).encode())
+    cache = CACHE / f"gsi_DEM5A_{key.hexdigest()[:12]}.npy"
+    if cache.exists():
+        return np.load(cache)
+    m, n = gsi.mosaic(archives, "DEM5A", GSI_BBOX, 0.2)
+    print(f"GSI DEM5A: тайлов {n}, мозаика {m.shape[1]} × {m.shape[0]}")
+    CACHE.mkdir(parents=True, exist_ok=True)
+    np.save(cache, m)
+    return m
+
+
+def sample_gsi(m, lat, lon, step_m):
+    """Высота GSI в узлах мира: среднее по окну ≈ шагу мира (без наложения
+    частот), затем билинейно; NaN там, где данных нет (море)."""
+    d = 0.2 / 3600.0
+    k = max(1, int(round(step_m / 5.0)))
+    valid = np.isfinite(m)
+    s = ndimage.uniform_filter(np.where(valid, m, 0.0).astype(np.float64), k)
+    c = ndimage.uniform_filter(valid.astype(np.float64), k)
+    avg = np.where(c > 0.5, s / np.maximum(c, 1e-9), np.nan)
+    south, west, north, _ = GSI_BBOX
+    r = (north - lat) / d - 0.5
+    col = (lon - west) / d - 0.5
+    inside = (r >= 0) & (col >= 0) & (r < m.shape[0] - 1) & (col < m.shape[1] - 1)
+    r0 = np.clip(np.floor(r).astype(int), 0, m.shape[0] - 2)
+    c0 = np.clip(np.floor(col).astype(int), 0, m.shape[1] - 2)
+    fr, fc = r - r0, col - c0
+    v = (avg[r0, c0] * (1 - fc) + avg[r0, c0 + 1] * fc) * (1 - fr) + (
+        avg[r0 + 1, c0] * (1 - fc) + avg[r0 + 1, c0 + 1] * fc
+    ) * fr
+    return np.where(inside, v, np.nan)
+
+
+def compare_dem(cop, g, ok):
+    """Отчёт: Copernicus (поверхность с кронами) минус GSI (грунт) по поясам."""
+    diff = cop - g
+    for lo, hi, name in [(5, 600, "0–600 м"), (600, 1600, "600–1600 м"), (1600, 2000, "выше 1600 м")]:
+        sel = ok & (g >= lo) & (g < hi)
+        if sel.any():
+            print(
+                f"Copernicus − GSI, {name}: медиана {np.median(diff[sel]):+.1f} м, "
+                f"90 % {np.percentile(diff[sel], 90):+.1f} м"
+            )
+
+
 def smoothstep(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
     return t * t * (3 - 2 * t)
@@ -156,9 +213,20 @@ def build_far():
     xs, zs = np.meshgrid(idx, idx)  # строка — z, столбец — x
     lat, lon = world_to_geo(xs, zs)
     h = sample_dem(dem, lat, lon)
+    mosaic = load_gsi()
+    if mosaic is not None:
+        # Грунт GSI вместо поверхности Copernicus; за охватом GSI — Copernicus.
+        g = sample_gsi(mosaic, lat, lon, STEP_M)
+        ok = np.isfinite(g)
+        compare_dem(h, g, ok)
+        land = ok & (g > 0.0)
+        h = np.where(ok, g, h)
+        print("рельеф: GSI DEM5A (грунт), за охватом — Copernicus")
+    else:
+        land = h > 0.5
+        print("рельеф: Copernicus (поверхность с кронами); архива GSI нет")
 
     # Суша — связная область, содержащая центр (отсекаем шум и соседние острова).
-    land = h > 0.5
     labels, _ = ndimage.label(land)
     center = labels[NODES // 2, NODES // 2]
     land = labels == center

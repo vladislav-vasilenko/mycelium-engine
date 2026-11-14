@@ -9,6 +9,7 @@ use winit::event_loop::ActiveEventLoop;
 
 use super::cameras::{marker_posts, start_camera, terrain_check_camera};
 use super::selftest::checks::{report_readback, report_terrain_readback};
+use super::shadows;
 use super::{App, LIGHT_DIR, SKY_COLOR, SceneMode, TEST_SCENE_CLEAR};
 use crate::layout::FrameUniforms;
 use crate::renderer::{self, FrameInput, FrameOutcome};
@@ -168,6 +169,23 @@ impl App {
                 crate::terrain_clusters::select(set, &v, true, &mut self.visible_clusters);
             self.cluster_select_ms = t.elapsed().as_secs_f64() * 1000.0;
         }
+        // Каскады теней (04.2): списки кластеров каскадов — после основного.
+        let shadows = match (&sky, use_clusters) {
+            (Some(s), true) => shadows::shadow_frame(
+                self.clusters.as_ref().unwrap(),
+                camera.position,
+                self.world.size_m().x,
+                s.light_to,
+                renderer::MAX_VISIBLE_CLUSTERS
+                    - self
+                        .visible_clusters
+                        .len()
+                        .min(renderer::MAX_VISIBLE_CLUSTERS),
+                &mut self.shadow_clusters,
+                &mut self.shadow_scratch,
+            ),
+            _ => None,
+        };
         let instances = match self.scene {
             SceneMode::Cubes => scene::instances().to_vec(),
             SceneMode::Terrain => marker_posts(&self.world),
@@ -198,6 +216,8 @@ impl App {
             water: water_frame,
             hands,
             clusters: use_clusters.then_some(&self.visible_clusters[..]),
+            shadows,
+            shadow_clusters: &self.shadow_clusters,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {

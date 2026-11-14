@@ -42,6 +42,71 @@ vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
     return out;
 }
 
+// Позиция и нормаль узла кластера: узел поля острова или игровой зоны (02.7,
+// шаг 5); нормаль — центральные разности по своей сетке.
+static float3 node_position(uint node, device const float* heights, device const float* zone_heights,
+                            constant TerrainZone& zone, constant FrameUniforms& frame,
+                            thread float3& normal) {
+    float3 world;
+    float dx, dz;
+    if (node >= zone.far_count) {
+        uint k = node - zone.far_count;
+        int zn = int(zone.n);
+        int a = int(k % zone.n);
+        int b = int(k / zone.n);
+        auto zh = [&](int x, int y) {
+            x = clamp(x, 0, zn - 1);
+            y = clamp(y, 0, zn - 1);
+            return zone_heights[uint(y) * zone.n + uint(x)];
+        };
+        float s = zone.step_m;
+        world = float3(zone.origin_x + float(a) * s, zone_heights[k], zone.origin_z + float(b) * s);
+        dx = (zh(a + 1, b) - zh(a - 1, b)) / (2.0 * s);
+        dz = (zh(a, b + 1) - zh(a, b - 1)) / (2.0 * s);
+    } else {
+        uint nx = frame.grid_nx;
+        int i = int(node % nx);
+        int j = int(node / nx);
+        int nz = int(frame.map_size_m / frame.grid_step_m + 0.5) + 1;
+        auto h = [&](int a, int b) {
+            a = clamp(a, 0, int(nx) - 1);
+            b = clamp(b, 0, nz - 1);
+            return heights[uint(b) * nx + uint(a)];
+        };
+        float s = frame.grid_step_m;
+        world = float3(float(i) * s, heights[node], float(j) * s);
+        dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
+        dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
+    }
+    normal = normalize(float3(-dx, 1.0, -dz));
+    return world;
+}
+
+// Тени (04.2): глубина кластеров в каскад карты теней. Экземпляр — кластер из
+// списка каскада; матрица каскада — относительно камеры, как у кадра.
+vertex float4 terrain_shadow_vs(uint vid [[vertex_id]],
+                                uint iid [[instance_id]],
+                                device const float* heights [[buffer(0)]],
+                                constant FrameUniforms& frame [[buffer(1)]],
+                                device const TerrainCluster* clusters [[buffer(5)]],
+                                device const uint* cluster_vertices [[buffer(6)]],
+                                device const uint* cluster_triangles [[buffer(7)]],
+                                device const uint* visible [[buffer(8)]],
+                                device const float* zone_heights [[buffer(10)]],
+                                constant TerrainZone& zone [[buffer(11)]],
+                                constant float4x4& cascade_vp [[buffer(12)]]) {
+    TerrainCluster c = clusters[visible[iid]];
+    uint tri = vid / 3;
+    if (tri >= c.triangle_count) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    uint packed = cluster_triangles[c.triangle_offset + tri];
+    uint node = cluster_vertices[c.vertex_offset + ((packed >> (8 * (vid % 3))) & 0xff)];
+    float3 nrm;
+    float3 world = node_position(node, heights, zone_heights, zone, frame, nrm);
+    return cascade_vp * float4(camera_relative(frame, world), 1.0);
+}
+
 // Кластерный рельеф (02.3): экземпляр — видимый кластер, вершина — номер узла
 // поля высот. Позиция и нормаль — из поля (нормаль центральными разностями,
 // как HeightField::normal_at), веса и материал — из слоёв мира по XZ.
@@ -78,42 +143,12 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
     uint packed = cluster_triangles[c.triangle_offset + tri];
     uint local = (packed >> (8 * (vid % 3))) & 0xff;
     uint node = cluster_vertices[c.vertex_offset + local];
-    float3 world;
-    float dx, dz;
-    if (node >= zone.far_count) {
-        // Узел игровой зоны (02.7, шаг 5): своё поле высот ~1 м.
-        uint k = node - zone.far_count;
-        int zn = int(zone.n);
-        int a = int(k % zone.n);
-        int b = int(k / zone.n);
-        auto zh = [&](int x, int y) {
-            x = clamp(x, 0, zn - 1);
-            y = clamp(y, 0, zn - 1);
-            return zone_heights[uint(y) * zone.n + uint(x)];
-        };
-        float s = zone.step_m;
-        world = float3(zone.origin_x + float(a) * s, zone_heights[k], zone.origin_z + float(b) * s);
-        dx = (zh(a + 1, b) - zh(a - 1, b)) / (2.0 * s);
-        dz = (zh(a, b + 1) - zh(a, b - 1)) / (2.0 * s);
-    } else {
-        uint nx = frame.grid_nx;
-        int i = int(node % nx);
-        int j = int(node / nx);
-        int nz = int(frame.map_size_m / frame.grid_step_m + 0.5) + 1;
-        auto h = [&](int a, int b) {
-            a = clamp(a, 0, int(nx) - 1);
-            b = clamp(b, 0, nz - 1);
-            return heights[uint(b) * nx + uint(a)];
-        };
-        float s = frame.grid_step_m;
-        world = float3(float(i) * s, heights[node], float(j) * s);
-        dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * s);
-        dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * s);
-    }
+    float3 nrm;
+    float3 world = node_position(node, heights, zone_heights, zone, frame, nrm);
     out.world = world;
     out.rel = camera_relative(frame, world);
     out.position = frame.view_proj_rel * float4(out.rel, 1.0);
-    out.normal = normalize(float3(-dx, 1.0, -dz));
+    out.normal = nrm;
     // Слои мира: тексель на узел сетки биомов, центр текселя — узел.
     constexpr sampler ls(filter::linear, address::clamp_to_edge);
     float2 uv = (world.xz / frame.map_size_m * float(layer_weights.get_width() - 1) + 0.5)
@@ -198,7 +233,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            device const FeatureSegment* feat_segs [[buffer(2)]],
                            device const uint2* feat_cells [[buffer(3)]],
                            device const uint* feat_list [[buffer(4)]],
-                           device const SkyFrame& skyf [[buffer(9)]]) {
+                           device const SkyFrame& skyf [[buffer(9)]],
+                           constant ShadowUniforms& shadows [[buffer(12)]],
+                           depth2d_array<float> shadow_map [[texture(7)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -437,7 +474,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
     float F = 0.04 + 0.96 * pow(1.0 - saturate(dot(H, V)), 5.0);
     float spec = D * G * F / (4.0 * nv + 1e-4);
-    float3 sun = sky_sun_term(skyf);
+    // Тень от светила (04.2): каскады вокруг камеры и карта всего острова.
+    float shadow = shadow_factor(shadows, shadow_map, in.rel, normalize(in.normal), L);
+    float3 sun = sky_sun_term(skyf) * shadow;
     float3 sky = sky_ambient_term(skyf, N);
     // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
     float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);

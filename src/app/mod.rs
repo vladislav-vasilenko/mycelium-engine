@@ -14,6 +14,7 @@ mod hands;
 mod input;
 mod selftest;
 mod setup;
+mod shadows;
 mod sky;
 mod title;
 
@@ -75,6 +76,9 @@ pub struct App {
     /// Кластерный рельеф (02.3): иерархия, срез кадра, режим (клавиша L).
     clusters: Option<crate::terrain_clusters::ClusterSet>,
     visible_clusters: Vec<u32>,
+    /// Кластеры каскадов теней подряд (04.2) и список одного каскада.
+    shadow_clusters: Vec<u32>,
+    shadow_scratch: Vec<u32>,
     use_clusters: bool,
     cluster_stats: crate::terrain_clusters::SelectStats,
     cluster_select_ms: f64,
@@ -153,6 +157,8 @@ impl App {
             hands_visible: true,
             clusters: None,
             visible_clusters: Vec::new(),
+            shadow_clusters: Vec::new(),
+            shadow_scratch: Vec::new(),
             use_clusters: !tiles_only,
             cluster_stats: Default::default(),
             cluster_select_ms: 0.0,

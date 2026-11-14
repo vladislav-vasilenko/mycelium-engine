@@ -203,3 +203,33 @@ inline float underwater_light(device const SkyFrame& f) {
     float3 e = sky_sun_term(f) * max(f.light_dir.y, 0.0) + sky_ambient_term(f, float3(0, 1, 0));
     return dot(e, float3(0.2126, 0.7152, 0.0722)) / 0.42;
 }
+
+// Каскадные тени (04.2): выбор каскада по расстоянию, смещение по нормали на
+// пару текселей, PCF 3 × 3 аппаратным сравнением (по 4 выборки на тап).
+inline float shadow_factor(constant ShadowUniforms& sh, depth2d_array<float> map, float3 rel,
+                           float3 n, float3 to_light) {
+    if (sh.params.x < 0.5) {
+        return 1.0;
+    }
+    float d = length(rel);
+    uint c = d < sh.splits.x ? 0u : (d < sh.splits.y ? 1u : (d < sh.splits.z ? 2u : 3u));
+    float texel = sh.texel_m[c];
+    // Смещение по нормали и к свету: склоны под скользящим светом без «прыщей».
+    float nl = saturate(dot(n, to_light));
+    float3 p = rel + n * texel * (1.5 + 2.0 * (1.0 - nl)) + to_light * texel * 0.5;
+    float4 clip = sh.vp_rel[c] * float4(p, 1.0);
+    float3 ndc = clip.xyz / clip.w;
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (any(uv < 0.0) || any(uv > 1.0) || ndc.z > 1.0) {
+        return 1.0;
+    }
+    constexpr sampler cmp(filter::linear, address::clamp_to_edge, compare_func::less_equal);
+    float size = float(map.get_width());
+    float sum = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            sum += map.sample_compare(cmp, uv + float2(x, y) / size, c, ndc.z);
+        }
+    }
+    return sum / 9.0;
+}

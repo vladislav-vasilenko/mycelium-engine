@@ -20,6 +20,9 @@ pub struct View {
     pub planes: [Vec4; 6],
     /// Порог экранной ошибки, пиксели.
     pub threshold_px: f32,
+    /// Ортографическая камера (карта теней): ошибка в текселях не зависит от
+    /// расстояния, `pixels_per_unit` — текселей на метр.
+    pub ortho: bool,
 }
 
 impl View {
@@ -49,6 +52,37 @@ impl View {
                 norm(r2),
             ],
             threshold_px,
+            ortho: false,
+        }
+    }
+
+    /// Ортографическая камера света: `view_proj` в мировых осях с глубиной
+    /// [0, 1] (0 — ближе к свету), `texels_per_m` — разрешение карты теней.
+    pub fn ortho(view_proj: Mat4, texels_per_m: f32, threshold_texels: f32) -> View {
+        let m = view_proj.transpose();
+        let (r0, r1, r2, r3) = (m.x_axis, m.y_axis, m.z_axis, m.w_axis);
+        let norm = |p: Vec4| {
+            let l = p.truncate().length();
+            if l > 1e-9 {
+                p / l
+            } else {
+                Vec4::new(0.0, 0.0, 0.0, 1.0)
+            }
+        };
+        View {
+            camera: Vec3::ZERO,
+            pixels_per_unit: texels_per_m,
+            znear: 0.0,
+            planes: [
+                norm(r3 + r0),
+                norm(r3 - r0),
+                norm(r3 + r1),
+                norm(r3 - r1),
+                norm(r2),
+                norm(r3 - r2),
+            ],
+            threshold_px: threshold_texels,
+            ortho: true,
         }
     }
 
@@ -57,6 +91,9 @@ impl View {
     pub fn projected_error(&self, b: &Bounds) -> f32 {
         if b.error.is_infinite() {
             return f32::INFINITY;
+        }
+        if self.ortho {
+            return b.error * self.pixels_per_unit;
         }
         let d = ((b.center - self.camera).length() - b.radius).max(self.znear);
         b.error / d * self.pixels_per_unit
@@ -73,7 +110,8 @@ impl View {
 pub struct SelectStats {
     pub clusters: u32,
     pub triangles: u32,
-    /// Отброшено пирамидой видимости среди выбранных по ошибке.
+    /// Отброшено пирамидой видимости среди выбранных по ошибке (только
+    /// кластеры, дошедшие до проверки: невидимые поддеревья не считаются).
     pub culled: u32,
 }
 
@@ -88,6 +126,12 @@ pub fn select(set: &ClusterSet, view: &View, cull: bool, out: &mut Vec<u32>) -> 
     while let Some(n) = stack.pop() {
         let node = &set.nodes[n as usize];
         if view.projected_error(&node.bounds) <= t {
+            continue;
+        }
+        // Сфера узла охватывает сферы всех его групп, а вершины кластеров —
+        // подмножество вершин группы: невидимое поддерево не обходим (узкий
+        // каскад теней иначе спускался до уровня 0 по всему острову).
+        if cull && !view.sphere_visible(node.bounds.center, node.bounds.radius) {
             continue;
         }
         if node.group >= 0 {

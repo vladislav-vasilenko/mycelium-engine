@@ -50,6 +50,8 @@ pub struct Pipelines {
     pub sky_ambient: Obj<dyn MTLComputePipelineState>,
     pub sky: Obj<dyn MTLRenderPipelineState>,
     pub exposure_meter: Obj<dyn MTLComputePipelineState>,
+    /// Глубина кластеров рельефа в каскады теней (04.2), без фрагментного шейдера.
+    pub terrain_shadow: Obj<dyn MTLRenderPipelineState>,
     /// Звёзды точками с аддитивным смешиванием (04.1).
     pub stars: Obj<dyn MTLRenderPipelineState>,
     /// Счётчик поколений для диагностики после перезагрузки.
@@ -199,6 +201,27 @@ fn compute_pipeline(
         })
 }
 
+/// Конвейер только глубины: вершинный шейдер, без цвета и фрагментного шейдера.
+fn depth_only_pipeline(
+    compiler: &ProtocolObject<dyn MTL4Compiler>,
+    lib: &ProtocolObject<dyn MTLLibrary>,
+    file: &str,
+    label: &str,
+    vs: &str,
+) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
+    require_function(lib, file, vs)?;
+    let desc = MTL4RenderPipelineDescriptor::new();
+    desc.setLabel(Some(&NSString::from_str(label)));
+    desc.setVertexFunctionDescriptor(Some(&function(lib, vs)));
+    compiler
+        .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
+        .map_err(|e| ShaderError {
+            file: file.to_string(),
+            stage: "render pipeline",
+            message: e.localizedDescription().to_string(),
+        })
+}
+
 fn render_pipeline(
     compiler: &ProtocolObject<dyn MTL4Compiler>,
     lib: &ProtocolObject<dyn MTLLibrary>,
@@ -337,6 +360,13 @@ pub fn build_pipelines(
         sky_view_moon: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_view_lut_moon")?,
         sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
         exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
+        terrain_shadow: depth_only_pipeline(
+            compiler,
+            &terrain_lib,
+            "terrain.metal",
+            "terrain shadow",
+            "terrain_shadow_vs",
+        )?,
         stars: render_pipeline(
             compiler,
             &sky_lib,

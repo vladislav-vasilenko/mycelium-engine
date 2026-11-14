@@ -203,6 +203,20 @@ pub struct TerrainZone {
     pub _pad: [f32; 3],
 }
 
+/// Каскадные тени (04.2), 304 байта.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct ShadowUniforms {
+    /// Свет: проекция × вид относительно камеры (позиция = мир − камера), глубина [0, 1].
+    pub vp_rel: [[[f32; 4]; 4]; 4],
+    /// Дальние границы каскадов 0–2, м; каскад 3 — весь остров.
+    pub splits: [f32; 4],
+    /// Размер текселя каждого каскада, м.
+    pub texel_m: [f32; 4],
+    /// x — тени включены (1) или нет (0).
+    pub params: [f32; 4],
+}
+
 /// Входы неба от CPU (04.1), 176 байт; на GPU — `SkyInputs` в `common.h`.
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -272,10 +286,12 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(SkyInputs, params) as u32,
         offset_of!(SkyInputs, inv_view_proj_rel) as u32,
         size_of::<TerrainZone>() as u32,
+        size_of::<ShadowUniforms>() as u32,
+        offset_of!(ShadowUniforms, splits) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 43;
+pub const LAYOUT_PROBE_LEN: usize = 45;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -321,6 +337,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "SkyInputs.params",
     "SkyInputs.inv_view_proj_rel",
     "sizeof(TerrainZone)",
+    "sizeof(ShadowUniforms)",
+    "ShadowUniforms.splits",
 ];
 
 #[cfg(test)]
@@ -335,7 +353,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96, 32
+                12, 176, 80, 96, 32, 304, 256
             ]
         );
     }

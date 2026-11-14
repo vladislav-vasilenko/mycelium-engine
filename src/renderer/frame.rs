@@ -15,7 +15,7 @@ pub(super) const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
 // Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
 // SeaParams @4096, WaterLevel[] @4608, HandsUniforms @8192,
 // палитра костей float4x4[MAX_JOINTS] @8448..12544, SkyInputs @12544..12704.
-pub(super) const UPLOAD_BYTES: usize = 12800;
+pub(super) const UPLOAD_BYTES: usize = 13312;
 pub(super) const INSTANCE_OFFSET: usize = 256;
 pub(super) const INSTANCE_END: usize = 4096;
 pub(super) const MAX_INSTANCES: usize =
@@ -26,6 +26,8 @@ pub(super) const HANDS_OFFSET: usize = 8192;
 pub(super) const PALETTE_OFFSET: usize = 8448;
 /// `SkyInputs` (04.1) после палитры костей.
 pub(super) const SKY_OFFSET: usize = 12544;
+/// `ShadowUniforms` (04.2) после входов неба.
+pub(super) const SHADOW_OFFSET: usize = 12800;
 
 // Ресурсы для планировщика проходов.
 const RES_PATTERN: ResourceId = ResourceId(1);
@@ -38,6 +40,8 @@ const RES_WETNESS: ResourceId = ResourceId(6);
 const RES_SKY: ResourceId = ResourceId(7);
 /// Состояние экспозиции между кадрами (04.1).
 const RES_EXPOSURE: ResourceId = ResourceId(8);
+/// Каскады карты теней (04.2).
+const RES_SHADOW: ResourceId = ResourceId(9);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -65,6 +69,10 @@ pub struct FrameInput<'a> {
     pub clusters: Option<&'a [u32]>,
     /// Небо (04.1): солнце, луна, звёзды. `None` — без неба (тестовые кубы).
     pub sky: Option<crate::layout::SkyInputs>,
+    /// Каскадные тени (04.2): матрицы и диапазоны списков кластеров каскадов.
+    pub shadows: Option<super::shadows::ShadowFrame>,
+    /// Кластеры каскадов подряд; ложатся в буфер слота после `clusters`.
+    pub shadow_clusters: &'a [u32],
 }
 
 /// Вода в кадре (03.1).
@@ -98,9 +106,10 @@ pub(super) enum Table {
     Sky,
     SkyDraw,
     Exposure,
+    Shadow,
 }
 
-const TABLE_NAMES: [&str; 13] = [
+const TABLE_NAMES: [&str; 14] = [
     "pattern",
     "scene",
     "readback",
@@ -114,6 +123,7 @@ const TABLE_NAMES: [&str; 13] = [
     "sky",
     "sky draw",
     "exposure",
+    "shadow",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -121,7 +131,7 @@ const TABLE_NAMES: [&str; 13] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 13],
+    tables: [Obj<dyn MTL4ArgumentTable>; 14],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -163,7 +173,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("13 таблиц")),
+                .unwrap_or_else(|_| unreachable!("14 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -197,12 +207,19 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_SKY, Stages::DISPATCH)],
         },
         PassDecl {
+            name: "shadows",
+            kind: PassKind::Render,
+            reads: vec![],
+            writes: vec![(RES_SHADOW, Stages::FRAGMENT)],
+        },
+        PassDecl {
             name: "scene",
             kind: PassKind::Render,
             reads: vec![
                 (RES_PATTERN, Stages::FRAGMENT),
                 (RES_WETNESS, Stages::FRAGMENT),
                 (RES_SKY, Stages::FRAGMENT),
+                (RES_SHADOW, Stages::FRAGMENT),
             ],
             writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
         },

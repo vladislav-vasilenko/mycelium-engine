@@ -214,6 +214,23 @@ fn hierarchy_traversal_matches_brute_force() {
         a.sort_unstable();
         b.sort_unstable();
         assert_eq!(a, b, "камера {eye}, порог {threshold}");
-        assert_eq!(sa, sb);
+        assert_eq!((sa.clusters, sa.triangles), (sb.clusters, sb.triangles));
+    }
+    // Камеры света каскадов теней (04.2): узкая и широкая, наклонный свет.
+    let l = glam::Vec3::new(0.4, 0.7, -0.3).normalize();
+    for (center, r) in [
+        (Vec3::new(40.0, 0.0, 70.0), 10.0),
+        (Vec3::new(64.0, 0.0, 64.0), 90.0),
+    ] {
+        let vp = glam::Mat4::orthographic_rh(-r, r, -r, r, -500.0, 500.0)
+            * glam::Mat4::look_to_rh(center, -l, Vec3::Y);
+        let v = select::View::ortho(vp, 1024.0 / r, 1.0);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        select(&set, &v, true, &mut a);
+        select::select_all(&set, &v, true, &mut b);
+        a.sort_unstable();
+        b.sort_unstable();
+        assert!(!a.is_empty());
+        assert_eq!(a, b, "каскад {center}, {r} м");
     }
 }

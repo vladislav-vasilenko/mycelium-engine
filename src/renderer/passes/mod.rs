@@ -9,6 +9,7 @@ mod exposure;
 mod pattern;
 mod readback;
 mod scene;
+mod shadows;
 mod sky_lut;
 mod tonemap;
 mod viewmodel;
@@ -71,10 +72,11 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 8] = [
+static REGISTRY: [&dyn FramePass; 9] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
+    &shadows::ShadowsPass,
     &scene::ScenePass,
     &readback::ReadbackPass,
     &viewmodel::ViewmodelPass,

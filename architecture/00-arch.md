@@ -131,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -270,6 +270,7 @@ sequenceDiagram
 | `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
 | `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
+| `ShadowUniforms` | 304 Б, 16 | `vp_rel [[[f32;4];4];4]` @0 (проекция света × вид относительно камеры, глубина [0, 1], 0 — у света), `splits` @256 (дальние границы каскадов 0–2, м; 3 — ∞), `texel_m` @272, `params` @288 (x — тени включены) |
 | `TerrainZone` | 32 Б, 4 | `far_count u32` @0 (узлов поля острова; `u32::MAX` — зоны нет), `n u32` @4, `step_m` @8, `origin_x` @12, `origin_z` @16 (отдельные `f32`: `float2` в MSL выравнивается по 8), `_pad [f32;3]` @20 |
 | `SkyInputs` | 176 Б, 16 | `sun_dir` @0, `moon_dir` @16 (w — освещённая доля), `star_rot [[f32;4];3]` @32, `params` @80 (фикс. экспозиция, dt, время, E☉), `inv_view_proj_rel` @96, `view` @160 (телесный угол пикселя) |
 | `HandsUniforms` | 144 Б, 16 | `proj [[f32;4];4]` @0 (проекция рук, reversed-Z), `view_to_world [[f32;4];4]` @64 (поворот глаз → мир), `vertex_count u32` @128, `joint_count u32` @132, `_pad [u32;2]` @136 |
@@ -544,6 +545,16 @@ sequenceDiagram
 | `shaders/metal/sky.h`, `sky.metal` | атмосфера (Рэлей, Ми, озон), отображения LUT, `sample_skyview`, `sh_irradiance`, `sky_sun_term`, `sky_ambient_term`, `underwater_light`, `MOON_K`; ядра `sky_transmittance_lut`, `sky_multiscatter_lut`, `sky_view_lut(_moon)`, `sky_ambient`, `exposure_meter`; `sky_vs`/`sky_fs` (небо, солнце, луна), `stars_vs`/`stars_fs` (точки, аддитивно) |
 | `assets/sky/stars.bin`, `tools/sky/stars.py` | 9096 звёзд BSC5: направление J2000, V, B−V |
 
+### 4.9g. Каскадные тени (04.2)
+
+| Файл | Элементы |
+| --- | --- |
+| `src/app/shadows.rs` | `CASCADE_RADII_M` = [30, 150, 800], `light_view_proj(center, radius, to_light) -> DMat4` (орто-камера света в f64, центр привязан к сетке текселей в осях света, глубина ±(R + 4000 м)), `shadow_frame(set, camera, map_size_m, to_light, budget, visible, scratch) -> Option<ShadowFrame>` (каскады 0–2 вокруг камеры, 3 — весь остров с центром карты; `vp_rel = vp · translate(камера)`; срез кластеров `View::ortho` с порогом 1 тексель; `None`, если светило под горизонтом) |
+| `src/renderer/shadows.rs` | `CASCADES` = 4, `SHADOW_SIZE` = 2048, `ShadowFrame { uniforms: ShadowUniforms, ranges: [(u32, u32); 4] }`, `ShadowGpu { map (Depth32Float, 2D-массив × 4, Private), depth_state (LessEqual, запись) }`, `ShadowGpu::new` |
+| `passes/shadows.rs` | `ShadowsPass`: на каскад — кодировщик с очисткой слоя (1,0), таблица `shadow` (буферы как у кластеров + `buffer(12)` матрица каскада), конвейер `terrain_shadow` (только вершины), смещение глубины по наклону 1,5 (clamp 0,01), без отсечения граней |
+| `terrain_clusters/select.rs` | `View.ortho`, `View::ortho(view_proj, texels_per_m, threshold_texels)`: ошибка в текселях без деления на расстояние, плоскости из строк орто-матрицы (ближняя z ≥ 0, дальняя z ≤ w); обход иерархии отсекает узлы по сфере (`sphere_visible`) |
+| `shaders/metal/terrain.metal`, `sky.h` | `node_position` (общая позиция и нормаль узла для кластеров и теней), `terrain_shadow_vs`; `shadow_factor(sh, map, rel, n, to_light)`: каскад по расстоянию до камеры, смещение по нормали (1,5–3,5 текселя) и к свету (0,5), PCF 3 × 3 по `sample_compare` с билинейной фильтрацией; множитель солнечного члена в `terrain_fs` |
+
 ### 4.10. Сборка `.app`
 
 `scripts/bundle-app.sh [--open]` собирает `target/release/Echo.app`:
@@ -597,7 +608,7 @@ sequenceDiagram
 | --- | --- | --- | --- | --- | --- |
 | `pattern` | upload: `FrameUniforms` | — | — | `pattern_tex` (write) | compute |
 | `scene` | `vertex_buf` | upload: `FrameUniforms` | upload + 256: `InstanceData[]` | `pattern_tex` (sample) | vertex, fragment |
-| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые, `buffer(10)` высоты зоны, `buffer(11)` `TerrainZone`; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
+| `terrain` (в проходе `scene`) | вершины тайлов или поле высот (кластеры) | upload: `FrameUniforms` | `FeatureSegment[]`; `buffer(3)` ячейки, `buffer(4)` списки; кластеры: `buffer(5)` `TerrainCluster[]`, `buffer(6)` вершины, `buffer(7)` треугольники, `buffer(8)` видимые, `buffer(10)` высоты зоны, `buffer(11)` `TerrainZone`; `buffer(12)` `ShadowUniforms`; `texture(4)` веса, `texture(5)` материал, `texture(6)` пояса, `texture(7)` карта теней (`depth2d_array`) | детальная текстура; `texture(1)` альбедо + высота (массив 5 слоёв, sRGB), `texture(2)` нормаль + шероховатость (массив), `texture(3)` маска мокрого песка R16Float | vertex, fragment |
 | `wet sand` (проход `wet_sand`) | — | upload: `FrameUniforms` | upload @4096: `SeaParams` | `texture(0)` маска (read_write), `texture(1)` поле берега | compute |
 | `water` (в проходе `scene`) | — | upload: `FrameUniforms` | `buffer(2)` `SeaParams`, `buffer(3)` `WaterLevel[]` | `texture(0)` поле берега, `texture(1)` детальная текстура | vertex, fragment |
 | `water probe` (в проходе `readback`) | `readback_buf` + `RB_WATER_OFFSET` | — | `buffer(2)` `SeaParams` | `texture(0)` поле берега | compute |
@@ -632,12 +643,16 @@ sequenceDiagram
 
 | Буфер | Диапазон | Содержимое |
 | --- | --- | --- |
-| upload слота (12 544 Б) | 0..128 | `FrameUniforms` |
+| upload слота (13 312 Б) | 0..240 | `FrameUniforms` |
 | | 256..4096 | до 48 `InstanceData` |
 | | 4096..4528 | `SeaParams` |
 | | 4608..5024 | `WaterLevel[13]` |
 | | 8192..8336 | `HandsUniforms` |
 | | 8448..12 544 | палитра костей, до 64 × `float4x4` |
+| | 12 544..12 720 | `SkyInputs` (04.1) |
+| | 12 800..13 104 | `ShadowUniforms` (04.2); без теней — нули (`params.x` = 0) |
+| видимые кластеры слота (`MAX_VISIBLE_CLUSTERS` × 4 Б) | 0..4·n | основной срез кадра (n ≤ 2¹⁸) |
+| | далее | списки каскадов теней подряд, `ShadowFrame.ranges` — относительно конца основного среза |
 | `readback_buf` (262 656 Б) | 0..262 144 | узор RGBA8, строка 1024 Б |
 | | 262 144..262 400 | глубина `f32` в 9 точках `DEPTH_SAMPLES` |
 | | 262 400..262 656 | 31 значение `u32` из `layout_probe` |
@@ -726,6 +741,9 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 03.1 · Море до горизонта, волны Герстнера, мелководье, разворот к берегу, обрушение, накат, мокрый песок, пена | `water.rs`, `water.h`, `water.metal`, `Renderer::set_water`, проход `wet_sand`, самопроверка `волны моря` | Выполнено (AD-39, AD-40); брызги у камней — только пена |
 | 03.2–03.4 · Река, устье и вихрь, плывущий мусор | — | Не начато |
 | 04.1 · Время суток, солнце, луна, звёзды, атмосфера, свет неба, экспозиция, управление временем | `src/sky/`, `app/sky.rs`, `renderer/sky.rs`, `sky_lut`, `exposure`, `sky.metal`, `stars.bin` | Частично (AD-51): нет текстуры луны, консоли, GPU-замера |
+| 04.2 · п. 1 прямой свет солнца или луны | `sky_sun_term` (04.1), Ламберт + GGX в `terrain_fs` | Выполнено в 04.1 |
+| 04.2 · п. 2 каскадные тени | `app/shadows.rs`, `renderer/shadows.rs`, `passes/shadows.rs`, `View::ortho`, `terrain_shadow_vs`, `shadow_factor` | Частично (AD-53): тени от рельефа; отклонение — каскады 30/150/800 м + весь остров вместо конца на 300–500 м; тени на воде и руках — нет |
+| 04.2 · п. 3–4 туман, воздушная перспектива, bloom | — | Не начато |
 | 04.2–04.4 · Тени и туман, погода и осадки, ночное свечение | — | Не начато |
 | 11 · Глобальное освещение: видимость неба, пробы освещённости, отражения | — | Не начато |
 | 12 · Звук: микшер, окружение, шаги, 3D-звук | — | Не начато |
@@ -1112,6 +1130,15 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Сборка иерархии 68 с (кэш 1,1 с), 709 МБ кластеров; кольцо из узких треугольников веера; экспорт слоёв пока не пишет зону; материалы и вода остаются на сетке 30 м.
 - **Пересмотреть.** 08.1 — зоны по требованию вокруг игрока; 08.4 — тесселяция вблизи.
 
+
+### AD-53. Каскадные тени: три каскада вокруг камеры и один на весь остров, срез кластеров на каждый каскад
+
+- **Решение.** Карта теней — `Depth32Float`, 2D-массив 4 × 2048². Каскады 0–2 — квадраты ±30, ±150, ±800 м вокруг камеры, каскад 3 — весь остров (≈ 21 м на тексель). Матрицы света считаются в f64, центр каскада привязан к сетке текселей в осях света, на GPU уходит `vp_rel` (относительно камеры, как в AD-43/AD-49). Геометрия теней — тот же кластерный рельеф: на каждый каскад свой CPU-срез по ошибке в текселях (`View::ortho`, порог 1 тексель), списки каскадов идут в буфер видимых кластеров после основного среза. Каскад выбирается по расстоянию до камеры; PCF 3 × 3 с аппаратным сравнением, смещение по наклону при записи и по нормали при чтении. Обход иерархии теперь отсекает узлы по сфере: без этого узкий каскад (порог 3 см) спускался до уровня 0 по всему острову — 23 к/с вместо 118.
+- **Почему.** Рельеф Якусимы — горы до 1936 м: утренние и вечерние тени хребтов тянутся на километры, и каскад до 300–500 м (как в спецификации) их не даёт. Грубый каскад острова стоит ~900 кластеров и закрывает эту дыру до далёких теней по полям расстояний (08.5). Срез на каждый каскад даёт тени из той же геометрии, что видна, без отдельного LOD.
+- **Отброшено.** Логарифмическое разбиение по пирамиде камеры — привязка к текселям сложнее, а квадраты вокруг камеры не «дышат» при повороте. Карта высот горизонта (horizon map) для дальних теней — только рельеф, без будущих деревьев и камней. Одна карта на весь остров — 21 м на тексель у ног.
+- **Цена.** Четыре прохода глубины (~4–10 тыс. кластеров), 64 МБ карты; CPU-срез четырёх каскадов; на стыке каскадов виден скачок резкости (без смешивания); тени только на рельефе — вода и руки пока без них.
+- **Пересмотреть.** При переносе выбора на GPU (02.5) — каскады тем же компьютным срезом; при появлении леса (02.4/02.8) — бюджет каскада 0 и альфа-тест листвы; дальние тени — 08.5.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1166,3 +1193,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-14 | 02.7 | после `79d0ca5` | AD-50: пояса растительности — `tools/geo/cover.py`, `cover.png`, `layers/cover.rs`, `World.cover` (`CoverLayer::at`), текстура поясов `texture(6)`, шестой материал `Grass004`, пояса, полог вдали и тень полога в `terrain.metal`, `FrameUniforms.canopy_eye` и тень на руках, вид «пояса», `--at view` |
 | 2026-11-14 | 04.1 | после `264783c` | AD-51: модуль `src/sky/` (`celestial`, `time`, тесты), `app/sky.rs`, `renderer/sky.rs`, проходы `sky_lut` и `exposure`, `sky.h`/`sky.metal`, небо и звёзды в `scene`, `SkyInputs` (176 Б) в upload @12544 (upload 12 800 Б), `FrameUniforms.pre_exposure`, ресурсы `RES_SKY`/`RES_EXPOSURE`, 13 таблиц, конвейеры неба и звёзд (`Blend::Additive`), свет неба в рельефе, воде, руках, экспозиция в тонмаппинге; `--date`, `--time`, `--timescale`, `--exposure`, клавиши времени; `assets/sky/stars.bin` |
 | 2026-11-14 | 02.7 | после `f7657b1` | AD-52: игровая зона Сиратани ~1 м — `tools/geo/zone.py`, `gsi.mosaic(keep)`, `height_zone.png`, `world/zone.rs` (`ZoneField`, `combined_mesh`, `CombinedMesh`), `World.zone`, `fine::import_zone`, `terrain_clusters::build_world`/`build_mesh`, ключ кэша `world_key` (версия 2), `TerrainZone` (раскладка 43 поля), высоты зоны в вершинном шейдере кластеров |
+| 2026-11-14 | 04.2 | после `5d2a75e` | AD-53: каскадные тени — `app/shadows.rs`, `renderer/shadows.rs` (`ShadowGpu`, `ShadowFrame`, `CASCADES`, `SHADOW_SIZE`), проход `shadows` и ресурс `RES_SHADOW`, таблица `shadow` (14 таблиц), конвейер `terrain_shadow` (`depth_only_pipeline`), `ShadowUniforms` (304 Б, раскладка 45 полей) в upload @12800 (upload 13 312 Б), `FrameInput.shadows`/`shadow_clusters`, `View::ortho`, отсечение узлов иерархии по сфере, `node_position`, `terrain_shadow_vs`, `shadow_factor`; `buffer(12)` и `texture(7)` таблицы `terrain` |

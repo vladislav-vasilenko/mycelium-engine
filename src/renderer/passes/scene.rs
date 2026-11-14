@@ -5,7 +5,9 @@ use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx};
-use crate::renderer::frame::{INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, SKY_OFFSET, Table};
+use crate::renderer::frame::{
+    INSTANCE_OFFSET, LEVELS_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, Table,
+};
 use crate::renderer::resources::label;
 use crate::renderer::terrain_clusters::{CLUSTER_VERTEX_COUNT, MAX_VISIBLE_CLUSTERS};
 use crate::water::WATER_LEVELS;
@@ -98,6 +100,8 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(terrain.normal.gpuResourceID(), 2);
         table.setTexture_atIndex(terrain.wetness.gpuResourceID(), 3);
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
+        table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
+        table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
         table.setAddress_atIndex(terrain.feat_list.gpuAddress(), 4);
@@ -143,6 +147,8 @@ fn draw_clusters(
         table.setAddress_atIndex(c.triangles.gpuAddress(), 7);
         table.setAddress_atIndex(ctx.slot.visible.gpuAddress(), 8);
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
+        table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
+        table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
         table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
         table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);
         table.setTexture_atIndex(terrain.detail.gpuResourceID(), 0);

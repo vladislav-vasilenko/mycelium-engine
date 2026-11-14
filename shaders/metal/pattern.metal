@@ -81,4 +81,7 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[40] = uint((thread char*)&si.params - sib);
     out[41] = uint((thread char*)&si.inv_view_proj_rel - sib);
     out[42] = sizeof(TerrainZone);
+    ShadowUniforms shu;
+    out[43] = sizeof(ShadowUniforms);
+    out[44] = uint((thread char*)&shu.splits - (thread char*)&shu);
 }

@@ -185,3 +185,11 @@ struct TerrainZone {
     float origin_z;
     float _pad[3];
 };
+
+// Каскадные тени (src/layout.rs, ShadowUniforms), 304 байта.
+struct ShadowUniforms {
+    float4x4 vp_rel[4];  // свет: проекция × вид относительно камеры, глубина [0, 1]
+    float4 splits;       // дальние границы каскадов 0–2, м (каскад 3 — весь остров)
+    float4 texel_m;      // размер текселя каскада, м
+    float4 params;       // x — тени включены
+};

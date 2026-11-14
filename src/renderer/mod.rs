@@ -20,6 +20,7 @@ mod passes;
 mod readback;
 mod resources;
 pub mod shaders;
+mod shadows;
 mod sky;
 mod targets;
 mod terrain;
@@ -39,6 +40,7 @@ pub use device::{DeviceInfo, probe_device};
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
+pub use shadows::{CASCADES, SHADOW_SIZE, ShadowFrame};
 pub use terrain::{FeatureBuffers, TerrainTextures};
 pub use terrain_clusters::{ClusterData, MAX_VISIBLE_CLUSTERS};
 
@@ -47,7 +49,7 @@ use crate::layout::Vertex;
 use crate::reference::PATTERN_SIZE;
 use frame::{
     FRAME_SLOTS, FrameSlot, HANDS_OFFSET, INSTANCE_OFFSET, LEVELS_OFFSET, MAX_INSTANCES,
-    PALETTE_OFFSET, SEA_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
+    PALETTE_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS, frame_passes,
 };
 use hands::HandsGpu;
 use passes::{PassBarrier, PassCtx};
@@ -97,6 +99,8 @@ pub struct Renderer {
     clusters: Option<ClustersGpu>,
     /// Небо (04.1): LUT, свет неба, экспозиция.
     sky: sky::SkyGpu,
+    /// Каскадные тени (04.2).
+    shadows: shadows::ShadowGpu,
     pub stats: Stats,
 }
 
@@ -172,6 +176,7 @@ impl Renderer {
         );
 
         let sky = sky::SkyGpu::new(&device, &residency);
+        let shadows = shadows::ShadowGpu::new(&device, &residency)?;
         let slots = (0..FRAME_SLOTS)
             .map(|i| FrameSlot::new(&device, &residency, i))
             .collect::<Result<Vec<_>, _>>()?;
@@ -229,6 +234,7 @@ impl Renderer {
             hands: None,
             clusters: None,
             sky,
+            shadows,
             stats: Stats::default(),
         })
     }
@@ -443,9 +449,21 @@ impl Renderer {
         if let Some(s) = &input.sky {
             upload_bytes(&slot.upload, SKY_OFFSET, bytemuck::bytes_of(s));
         }
+        // Без теней шейдеры видят params.x = 0 и тень не берут.
+        let shadow_u = input
+            .shadows
+            .as_ref()
+            .map_or_else(bytemuck::Zeroable::zeroed, |s| s.uniforms);
+        upload_bytes(&slot.upload, SHADOW_OFFSET, bytemuck::bytes_of(&shadow_u));
         if let Some(list) = input.clusters {
             let n = list.len().min(MAX_VISIBLE_CLUSTERS);
             upload_bytes(&slot.visible, 0, bytemuck::cast_slice(&list[..n]));
+            let m = input.shadow_clusters.len().min(MAX_VISIBLE_CLUSTERS - n);
+            upload_bytes(
+                &slot.visible,
+                n * 4,
+                bytemuck::cast_slice(&input.shadow_clusters[..m]),
+            );
         }
         if let Some(h) = &input.hands {
             let n = h.palette.len().min(MAX_JOINTS);

@@ -267,10 +267,22 @@ kernel void wet_sand_update(texture2d<float, access::read_write> wet [[texture(0
     if (gid.x >= wet.get_width() || gid.y >= wet.get_height()) {
         return;
     }
-    float2 p = (float2(gid) + 0.5) * (frame.map_size_m / float(wet.get_width()));
+    // Окно N × N м вокруг камеры, 1 м на тексель, кольцевая адресация: тексель
+    // gid хранит ту клетку мира с номером ≡ gid (mod N), что попадает в окно.
+    // G — метка оборота окна: при сдвиге окна на тексель приходит новая клетка,
+    // и её влажность начинается с оценки по расстоянию до кромки.
+    int n = int(wet.get_width());
+    int2 c0 = int2(floor(frame.camera_pos.xz)) - n / 2;
+    int2 rel = (int2(gid) - c0) % n;
+    rel += select(int2(0), int2(n), rel < 0);
+    int2 cell = c0 + rel;
+    int2 lap = (cell - int2(gid)) / n;
+    float tag = float((lap.x & 63) * 64 + (lap.y & 63) + 1);
+    float2 p = float2(cell) + 0.5;
     float4 f = field_bilinear(field, sp, p);
     float coast_d = f.g;
-    float v = wet.read(gid).r;
+    float2 old = wet.read(gid).rg;
+    float v = old.g == tag ? old.r : smoothstep(3.0, 0.0, coast_d);
     // Все переходы растянуты на несколько текселей: двоичная маска при
     // билинейной выборке рисует ступени 1 м. Под водой мокро всегда.
     float under = smoothstep(-1.0, -6.0, coast_d);
@@ -280,7 +292,7 @@ kernel void wet_sand_update(texture2d<float, access::read_write> wet [[texture(0
         v = max(covered, v - sp.dt / sp.dry_time_s);
     }
     v = max(v, under);
-    wet.write(float4(v), gid);
+    wet.write(float4(v, tag, 0.0, 0.0), gid);
 }
 
 // Проверка функции волн: точки (x, z, t) из SeaParams.probe → смещённая точка и пена.

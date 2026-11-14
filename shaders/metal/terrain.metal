@@ -327,7 +327,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float trail = max(has_belts ? 0.0 : smoothstep(0.1, 0.6, in.weights.w), trail_px);
     float moist = in.material.z;
     // Маска непрерывная: smoothstep даёт гладкую границу мокрого песка.
-    float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(clamp_s, xz / frame.map_size_m).r);
+    // Маска — окно 1 м на тексель вокруг камеры с кольцевой адресацией: мировые
+    // XZ / сторону окна с повтором; к краю окна маска гаснет.
+    constexpr sampler wrap_s(filter::linear, address::repeat);
+    float wet_n = float(wetness_mask.get_width());
+    float wet_edge = 1.0 - smoothstep(0.38 * wet_n, 0.48 * wet_n,
+                                      max(abs(in.rel.x), abs(in.rel.z)));
+    float wet_mask = smoothstep(0.1, 0.9, wetness_mask.sample(wrap_s, xz / wet_n).r) * wet_edge;
     // Крупная детализация (02.9): тексель — узел поля высот острова.
     float mn = float(macro_tex.get_width());
     float4 mc = macro_tex.sample(clamp_s, (xz / frame.map_size_m * (mn - 1.0) + 0.5) / mn);

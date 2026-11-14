@@ -102,7 +102,7 @@ impl Renderer {
         )?;
         let wetness = sampled_texture_usage(
             &self.device,
-            MTLPixelFormat::R16Float,
+            MTLPixelFormat::RG16Float,
             tex.wetness_size,
             1,
             false,
@@ -144,8 +144,8 @@ impl Renderer {
         ] {
             self.residency.addAllocation(a);
         }
-        // Сухо: половинная точность, ноль — нулевые байты.
-        let dry = vec![0u8; (tex.wetness_size * tex.wetness_size * 2) as usize];
+        // Сухо и «не записано» (G = 0): нулевые байты половинной точности.
+        let dry = vec![0u8; (tex.wetness_size * tex.wetness_size * 4) as usize];
         self.upload_textures(&[
             TextureUpload {
                 texture: &detail,
@@ -168,7 +168,7 @@ impl Renderer {
             TextureUpload {
                 texture: &wetness,
                 data: &dry,
-                pixel_bytes: 2,
+                pixel_bytes: 4,
                 mips: false,
             },
         ])?;

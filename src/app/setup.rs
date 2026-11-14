@@ -38,7 +38,9 @@ impl App {
         // Маска мокрого песка — тексель на шаг сетки (1 м у генератора, 30 м у острова).
         let empty = crate::world::features::FeatureSet::empty(self.world.size_m().x);
         let features = self.world.features.as_ref().unwrap_or(&empty);
-        let wet_size = (self.world.tiles_x as u32) * (crate::world::TILE_SAMPLES as u32 - 1);
+        // Маска мокрого песка — окно 1024 × 1024 м вокруг игрока, 1 м на тексель
+        // (кольцевая адресация), на карте любого размера.
+        let wet_size = 1024;
         r.set_terrain(
             &terrain,
             &terrain_mesh::tile_indices(),

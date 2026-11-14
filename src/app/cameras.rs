@@ -36,6 +36,54 @@ pub(super) fn trail_start_camera(world: &World) -> CameraState {
     }
 }
 
+/// Камера на маркере `kind` в рост человека. Если маркер в воде (устье лежит
+/// на кромке, а поле 7,5 м точнее сетки маркеров 30 м), игрок встаёт на
+/// ближайший сухой грунт и смотрит на сам маркер; на суше — в сторону самого
+/// низкого грунта в 60 м (к морю). `None`, если маркера нет.
+pub(super) fn marker_camera(world: &World, kind: MarkerKind) -> Option<CameraState> {
+    let m = world.marker(kind)?;
+    let target = Vec2::new(m.position.x, m.position.z);
+    let dry = |q: Vec2| {
+        world
+            .sample_ground(q.x, q.y)
+            .filter(|g| !g.wet && g.height > 1.0)
+            .map(|g| g.height)
+    };
+    // Ближайшая сухая точка: кольца через 5 м до 400 м.
+    let p = (0..=80)
+        .flat_map(|r| {
+            let n = (r * 6).max(1);
+            (0..n).map(move |k| {
+                let a = k as f32 / n as f32 * std::f32::consts::TAU;
+                target + Vec2::new(a.cos(), a.sin()) * (r as f32 * 5.0)
+            })
+        })
+        .find(|&q| dry(q).is_some())?;
+    let h = dry(p)?;
+    let dir = if (p - target).length() > 1.0 {
+        target - p
+    } else {
+        (0..32)
+            .map(|k| {
+                let a = k as f32 / 32.0 * std::f32::consts::TAU;
+                Vec2::new(a.cos(), a.sin())
+            })
+            .min_by(|a, b| {
+                let g = |d: &Vec2| {
+                    let q = p + *d * 60.0;
+                    world.sample_ground(q.x, q.y).map_or(f32::MAX, |g| g.height)
+                };
+                g(a).total_cmp(&g(b))
+            })
+            .unwrap_or(Vec2::X)
+    };
+    Some(CameraState {
+        position: Vec3::new(p.x, h + sim::EYE_HEIGHT_M, p.y),
+        yaw: (-dir.x).atan2(-dir.y),
+        pitch: -0.08,
+    })
+}
+
 /// Камера из точки `from` с взглядом на `to`.
 pub(super) fn look_camera(from: Vec3, to: Vec3) -> CameraState {
     let dir = to - from;

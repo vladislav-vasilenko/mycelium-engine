@@ -24,6 +24,8 @@ pub struct Args {
     pub pose: Option<usize>,
     /// Рельеф тайлами уровня 0 вместо кластеров (сравнение, 02.3).
     pub tiles: bool,
+    /// Старт пешком на маркере: `trail`, `mouth` (устье реки), `beach`.
+    pub at: Option<crate::world::MarkerKind>,
 }
 
 impl Args {
@@ -60,6 +62,18 @@ impl Args {
                     }
                 }
                 "--tiles" => args.tiles = true,
+                "--at" => {
+                    use crate::world::MarkerKind;
+                    args.at = match it.next().as_deref() {
+                        Some("trail") => Some(MarkerKind::TrailStart),
+                        Some("mouth") => Some(MarkerKind::RiverMouth),
+                        Some("beach") => Some(MarkerKind::ShoreEnd),
+                        _ => {
+                            eprintln!("--at: trail, mouth, beach");
+                            None
+                        }
+                    };
+                }
                 "--pose" => {
                     let names = crate::hands::POSE_NAMES;
                     args.pose = it.next().and_then(|n| names.iter().position(|&p| p == n));

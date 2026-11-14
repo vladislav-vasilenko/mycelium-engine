@@ -32,7 +32,7 @@ use crate::water;
 use crate::world::{self, Ground, World};
 
 pub use args::{Args, load_world};
-use cameras::{island_overview_camera, look_camera, trail_start_camera};
+use cameras::{island_overview_camera, look_camera, marker_camera, trail_start_camera};
 use selftest::SelfTest;
 
 const LIGHT_DIR: Vec3 = Vec3::new(-0.45, -0.8, -0.4);
@@ -115,6 +115,8 @@ impl App {
             look_camera(from, to)
         } else if args.overview {
             island_overview_camera(&world)
+        } else if let Some(c) = args.at.and_then(|k| marker_camera(&world, k)) {
+            c
         } else {
             trail_start_camera(&world)
         });

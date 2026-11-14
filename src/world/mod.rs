@@ -16,9 +16,10 @@ use glam::{Vec2, Vec3};
 
 use generator::{Fields, Generator, SEA_LEVEL};
 
-pub const TILE_SIZE_M: f32 = 64.0;
 /// Точек на сторону тайла в LOD 0.
 pub const TILE_SAMPLES: usize = 65;
+/// Шаг сетки мира генератора, м. Мир из слоёв задаёт свой шаг (`World::step_m`),
+/// размер тайла — 64 шага.
 pub const SAMPLE_STEP_M: f32 = 1.0;
 /// Версия алгоритма генерации. Меняется вместе с результатом генератора.
 pub const GENERATOR_VERSION: u32 = 4;
@@ -30,12 +31,6 @@ pub const FIRST_MAP_TILES: i32 = 16;
 pub struct TileId {
     pub x: i32,
     pub z: i32,
-}
-
-impl TileId {
-    pub fn origin(self) -> Vec2 {
-        Vec2::new(self.x as f32, self.z as f32) * TILE_SIZE_M
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,12 +117,13 @@ pub struct Marker {
     pub position: Vec3,
 }
 
-/// Поля среды на общей мировой сетке `nx × nz` с шагом `SAMPLE_STEP_M`,
+/// Поля среды на общей мировой сетке `nx × nz` с шагом `step_m`,
 /// строка за строкой по z. `nx = tiles_x · 64 + 1`.
 #[derive(Clone, Debug)]
 pub struct FieldGrid {
     pub nx: usize,
     pub nz: usize,
+    pub step_m: f32,
     pub fields: Vec<Fields>,
 }
 
@@ -151,7 +147,12 @@ impl FieldGrid {
                 });
             }
         });
-        FieldGrid { nx, nz, fields }
+        FieldGrid {
+            nx,
+            nz,
+            step_m: SAMPLE_STEP_M,
+            fields,
+        }
     }
 }
 
@@ -166,6 +167,10 @@ pub struct World {
     pub seed: u64,
     pub tiles_x: i32,
     pub tiles_z: i32,
+    /// Шаг сетки, м: 1 у генератора, у мира из слоёв — из `world.json`.
+    pub step_m: f32,
+    /// Привязка к Земле у мира из реальных данных; `None` у генератора.
+    pub geo: Option<layers::GeoRef>,
     pub generator: Generator,
     /// Тайлы по строкам: индекс `z * tiles_x + x`.
     pub tiles: Vec<Tile>,
@@ -176,8 +181,18 @@ pub struct World {
 }
 
 impl World {
+    /// Сторона тайла, м: 64 шага сетки.
+    pub fn tile_size_m(&self) -> f32 {
+        (TILE_SAMPLES - 1) as f32 * self.step_m
+    }
+
+    /// Угол тайла в мировых метрах.
+    pub fn tile_origin(&self, id: TileId) -> Vec2 {
+        Vec2::new(id.x as f32, id.z as f32) * self.tile_size_m()
+    }
+
     pub fn size_m(&self) -> Vec2 {
-        Vec2::new(self.tiles_x as f32, self.tiles_z as f32) * TILE_SIZE_M
+        Vec2::new(self.tiles_x as f32, self.tiles_z as f32) * self.tile_size_m()
     }
 
     pub fn tile(&self, id: TileId) -> Option<&Tile> {
@@ -218,8 +233,8 @@ impl World {
         };
         let normal_at = |i: usize, j: usize| {
             let (i, j) = (i as isize, j as isize);
-            let dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * SAMPLE_STEP_M);
-            let dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * SAMPLE_STEP_M);
+            let dx = (h(i + 1, j) - h(i - 1, j)) / (2.0 * grid.step_m);
+            let dz = (h(i, j + 1) - h(i, j - 1)) / (2.0 * grid.step_m);
             Vec3::new(-dx, 1.0, -dz).normalize()
         };
 
@@ -269,6 +284,8 @@ impl World {
             seed,
             tiles_x,
             tiles_z,
+            step_m: grid.step_m,
+            geo: None,
             generator,
             tiles,
             markers: Vec::new(),
@@ -365,11 +382,11 @@ impl Ground for World {
         }
         // Точка на правом или нижнем краю карты относится к последнему тайлу.
         let id = TileId {
-            x: ((x / TILE_SIZE_M) as i32).min(self.tiles_x - 1),
-            z: ((z / TILE_SIZE_M) as i32).min(self.tiles_z - 1),
+            x: ((x / self.tile_size_m()) as i32).min(self.tiles_x - 1),
+            z: ((z / self.tile_size_m()) as i32).min(self.tiles_z - 1),
         };
         let tile = self.tile(id)?;
-        let local = (Vec2::new(x, z) - id.origin()) / SAMPLE_STEP_M;
+        let local = (Vec2::new(x, z) - self.tile_origin(id)) / self.step_m;
         let i = (local.x.floor() as usize).min(TILE_SAMPLES - 2);
         let j = (local.y.floor() as usize).min(TILE_SAMPLES - 2);
         let (fx, fz) = (local.x - i as f32, local.y - j as f32);
@@ -377,7 +394,7 @@ impl Ground for World {
         let b = tile.at(i + 1, j);
         let c = tile.at(i + 1, j + 1);
         let d = tile.at(i, j + 1);
-        let s = SAMPLE_STEP_M;
+        let s = self.step_m;
         let (height, normal) = if fx >= fz {
             // Треугольник (a, c, b).
             let h = a.height + fx * (b.height - a.height) + fz * (c.height - b.height);

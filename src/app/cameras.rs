@@ -1,17 +1,32 @@
 //! Камеры: старт на тропе, обзор острова, контрольные камеры самопроверки,
 //! столбики маркеров маршрута.
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::layout::InstanceData;
 use crate::sim::{self, CameraState};
 use crate::world::{Ground, MarkerKind, World};
 
-/// Поза на начале тропы, взгляд вдоль тропы.
+/// Поза на начале тропы. Мир из генератора смотрит вдоль сплайна тропы; мир из
+/// слоёв (Якусима) — с маркера начала тропы в сторону следующего маркера.
 pub(super) fn trail_start_camera(world: &World) -> CameraState {
-    let trail = &world.generator.trail;
-    let a = trail.point_at(0.0);
-    let dir = trail.point_at(0.02) - a;
+    let (a, dir) = if world.geo.is_none() {
+        let trail = &world.generator.trail;
+        let a = trail.point_at(0.0);
+        (a, trail.point_at(0.02) - a)
+    } else {
+        let start = world
+            .marker(MarkerKind::TrailStart)
+            .map_or(world.size_m() * 0.5, |m| {
+                Vec2::new(m.position.x, m.position.z)
+            });
+        let next = world
+            .markers
+            .iter()
+            .find(|m| m.kind != MarkerKind::TrailStart)
+            .map_or(start + Vec2::X, |m| Vec2::new(m.position.x, m.position.z));
+        (start, next - start)
+    };
     let h = world.sample_ground(a.x, a.y).map_or(0.0, |g| g.height);
     CameraState {
         position: Vec3::new(a.x, h + sim::EYE_HEIGHT_M, a.y),
@@ -31,10 +46,11 @@ pub(super) fn look_camera(from: Vec3, to: Vec3) -> CameraState {
     }
 }
 
-/// Вид на весь остров с высоты над юго-западным морем.
+/// Вид на весь остров с высоты над юго-западным морем; высота растёт с картой.
 pub(super) fn island_overview_camera(world: &World) -> CameraState {
     let size = world.size_m();
-    let from = Vec3::new(0.12 * size.x, 330.0, 1.12 * size.y);
+    let top = world.fields.iter().fold(0.0f32, |a, f| a.max(f.height));
+    let from = Vec3::new(0.12 * size.x, 0.32 * size.x + top, 1.12 * size.y);
     let to = Vec3::new(0.52 * size.x, 0.0, 0.45 * size.y);
     let dir = to - from;
     CameraState {

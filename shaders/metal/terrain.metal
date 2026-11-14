@@ -10,6 +10,9 @@
 struct TerrainVaryings {
     float4 position [[position]];
     float3 world;
+    // Позиция относительно камеры: малые числа, точные производные даже в 15 км
+    // от начала координат (у мировой позиции шаг f32 там ~2 мм).
+    float3 rel;
     float3 normal;
     float4 weights;   // лес, торф, берег, тропа
     float4 material;  // субстрат (индекс), русло, влажность почвы, тип берега
@@ -22,6 +25,7 @@ vertex TerrainVaryings terrain_vs(uint vid [[vertex_id]],
     TerrainVertex v = vertices[iid * TILE_SAMPLES * TILE_SAMPLES + vid];
     TerrainVaryings out;
     out.world = float3(v.position);
+    out.rel = out.world - frame.camera_pos.xyz;
     out.position = frame.view_proj * float4(out.world, 1.0);
     out.normal = float3(v.normal);
     out.weights = float4(v.weights) / 255.0;
@@ -96,7 +100,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float2 xz = in.world.xz;
     float3 n = normalize(in.normal);
     // Нормаль грани — как у треугольника LOD 0 в SampleGround.
-    float3 face = normalize(cross(dfdy(in.world), dfdx(in.world)));
+    float3 face = normalize(cross(dfdy(in.rel), dfdx(in.rel)));
     face = face.y < 0.0 ? -face : face;
     float slope = 1.0 - n.y;
     float slope_deg = acos(clamp(face.y, -1.0, 1.0)) * (180.0 / M_PI_F);
@@ -110,7 +114,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     if (frame.view_mode == VIEW_RAW) {
         float3 w = in.weights.xyz;
         float dominant = (w.x >= w.y && w.x >= w.z) ? 0.0 : (w.y >= w.z ? 1.0 : 2.0);
-        return float4(in.world.y, slope_deg, dominant, rocky);
+        // Высота относительно камеры: HDR — half, на высотах 1000–2000 м его шаг
+        // 1 м, а вблизи камеры — сантиметры.
+        return float4(in.world.y - frame.camera_pos.y, slope_deg, dominant, rocky);
     }
 
     // Доли слоёв до смешивания по высоте.

@@ -1,0 +1,7 @@
+# Окружение скриптов импорта реального рельефа (02.7).
+# python3 -m venv .venv-geo && .venv-geo/bin/pip install -r tools/geo/requirements.txt
+numpy>=2.0
+scipy>=1.14
+tifffile>=2025.1
+imagecodecs>=2025.1
+pillow>=11.0

@@ -25,7 +25,8 @@ impl App {
         let t_mat = Instant::now();
         let materials = terrain_materials::load(&terrain_materials::source_dir())?;
         let mat_ms = t_mat.elapsed().as_secs_f64() * 1000.0;
-        let wet_size = self.world.size_m().x as u32;
+        // Маска мокрого песка — тексель на шаг сетки (1 м у генератора, 30 м у острова).
+        let wet_size = (self.world.tiles_x as u32) * (crate::world::TILE_SAMPLES as u32 - 1);
         r.set_terrain(
             &terrain,
             &terrain_mesh::tile_indices(),

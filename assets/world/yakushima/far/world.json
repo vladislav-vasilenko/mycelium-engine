@@ -1,0 +1,77 @@
+{
+  "format": 3,
+  "seed": 23115,
+  "generator_version": 4,
+  "tiles_x": 16,
+  "tiles_z": 16,
+  "sample_step_m": 30.0,
+  "size_samples": [
+    1025,
+    1025
+  ],
+  "height_range_m": [
+    -260.0,
+    1940.0
+  ],
+  "temperature_range_c": [
+    -10.0,
+    40.0
+  ],
+  "substrate_codes": [
+    "Soil",
+    "Peat",
+    "Sand",
+    "Rock",
+    "Gravel"
+  ],
+  "overrides": [],
+  "exported_checksum": "",
+  "markers": [
+    {
+      "name": "Сиратани Унсуикё, начало тропы",
+      "kind": "TrailStart",
+      "x": 17764.02,
+      "z": 10482.24
+    },
+    {
+      "name": "Дзёмон-суги",
+      "kind": "Viewpoint",
+      "x": 16004.28,
+      "z": 12743.75
+    },
+    {
+      "name": "гора Миянoура, 1936 м",
+      "kind": "Viewpoint",
+      "x": 13407.94,
+      "z": 15238.06
+    },
+    {
+      "name": "устье реки Анбо",
+      "kind": "RiverMouth",
+      "x": 28101.28,
+      "z": 18286.65
+    },
+    {
+      "name": "пляж Нагата Инакахама",
+      "kind": "ShoreEnd",
+      "x": 6734.39,
+      "z": 6424.84
+    }
+  ],
+  "coast_distance_range_m": [
+    -4000.0,
+    4000.0
+  ],
+  "geo": {
+    "center_lat": 30.335,
+    "center_lon": 130.525,
+    "center_world_m": [
+      15360.0,
+      15360.0
+    ],
+    "projection": "local tangent plane WGS84: x — восток, z — юг, метры",
+    "sources": [
+      "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
+    ]
+  }
+}

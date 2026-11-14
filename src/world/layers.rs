@@ -1,8 +1,9 @@
 //! Слои карты: экспорт мира в PNG и сборка мира из PNG.
 //!
 //! Каталог слоёв содержит `world.json` и изображения размером `nx × nz`
-//! (1025 × 1025 для карты 16 × 16 тайлов, по точке на метр с общими краями).
-//! Пиксель (i, j) — точка мировой сетки x = i, z = j; z растёт вниз по картинке.
+//! (1025 × 1025 для карты 16 × 16 тайлов, с общими краями). Шаг сетки —
+//! `sample_step_m` (1 м у генератора, 30 м у дальнего рельефа Якусимы).
+//! Пиксель (i, j) — точка мировой сетки x = i · шаг, z = j · шаг; z растёт вниз.
 //!
 //! | Файл | Формат | Роль | Каналы |
 //! | --- | --- | --- | --- |
@@ -10,6 +11,7 @@
 //! | `masks.png` | RGB 8 бит | источник | тропа, русло, чаша торфяника |
 //! | `climate.png` | RGB 8 бит | источник | влажность 0..1, температура в `temperature_range_c`, близость берега моря 0..1 |
 //! | `coast_type.png` | серый 8 бит | источник | тип берега: 0 песок, 255 камень |
+//! | `coast_distance.png` | серый 16 бит | источник | знаковое расстояние до кромки в `coast_distance_range_m` (> 0 — суша) |
 //! | `biome.png` | RGB 8 бит | замена по `overrides` | лес, торф, берег; сумма каналов 255 |
 //! | `substrate.png` | серый 8 бит | замена по `overrides` | индекс субстрата × 60 |
 //! | `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
@@ -27,13 +29,24 @@ use serde::{Deserialize, Serialize};
 use super::generator::{Fields, Generator};
 use super::{
     BiomeWeights, DerivedOverrides, FieldGrid, GENERATOR_VERSION, Ground, Marker, MarkerKind,
-    SAMPLE_STEP_M, Substrate, TILE_SAMPLES, World,
+    Substrate, TILE_SAMPLES, World,
 };
 
 /// Версия формата каталога слоёв.
-pub const FORMAT_VERSION: u32 = 2;
-/// Диапазон высот 16-битного слоя, м: шаг 100 / 65535 ≈ 1,5 мм.
-pub const HEIGHT_RANGE_M: [f32; 2] = [-40.0, 60.0];
+pub const FORMAT_VERSION: u32 = 3;
+/// Диапазон расстояния до кромки в `coast_distance.png`, м: шаг ≈ 12 см.
+pub const COAST_RANGE_M: [f32; 2] = [-4000.0, 4000.0];
+/// Диапазон высот подбирается под данные с запасом и округлением до 10 м,
+/// поэтому повторный экспорт импортированного мира даёт тот же диапазон.
+fn height_range(world: &World) -> [f32; 2] {
+    let (lo, hi) = world.fields.iter().fold((f32::MAX, f32::MIN), |(a, b), f| {
+        (a.min(f.height), b.max(f.height))
+    });
+    [
+        (lo / 10.0).floor() * 10.0 - 10.0,
+        (hi / 10.0).ceil() * 10.0 + 10.0,
+    ]
+}
 pub const TEMPERATURE_RANGE_C: [f32; 2] = [-10.0, 40.0];
 /// Шаг кода субстрата в `substrate.png`: 0, 60, 120, 180, 240.
 pub const SUBSTRATE_STEP: u8 = 60;
@@ -60,6 +73,24 @@ pub struct Manifest {
     /// Контрольная сумма мира, из которого сделан экспорт (для справки).
     pub exported_checksum: String,
     pub markers: Vec<MarkerEntry>,
+    pub coast_distance_range_m: [f32; 2],
+    /// Привязка к Земле для мира из реальных данных (02.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo: Option<GeoRef>,
+}
+
+/// Привязка мира к географическим координатам.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GeoRef {
+    /// Центр локальной проекции (WGS84), градусы.
+    pub center_lat: f64,
+    pub center_lon: f64,
+    /// Мировые координаты центра проекции, м. Мировая точка (0, 0) — угол карты.
+    pub center_world_m: [f32; 2],
+    /// Описание проекции: «local tangent plane: x — восток, z — юг».
+    pub projection: String,
+    /// Источники данных с указанием авторства.
+    pub sources: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -230,11 +261,15 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
     let mut biome = Vec::with_capacity(nx * nz * 3);
     let mut substrate = Vec::with_capacity(nx * nz);
     let mut coast_type = Vec::with_capacity(nx * nz);
+    let mut coast_distance = Vec::with_capacity(nx * nz * 2);
+    let h_range = height_range(world);
     for j in 0..nz {
         for i in 0..nx {
             let s = sample(i, j);
             let f = &grid[j * nx + i];
-            height.extend_from_slice(&quantize(s.height, HEIGHT_RANGE_M, 65535.0).to_be_bytes());
+            height.extend_from_slice(&quantize(s.height, h_range, 65535.0).to_be_bytes());
+            coast_distance
+                .extend_from_slice(&quantize(f.coast_d, COAST_RANGE_M, 65535.0).to_be_bytes());
             masks.extend_from_slice(&[unit8(f.trail), unit8(f.river), unit8(f.basin)]);
             climate.extend_from_slice(&[
                 unit8(s.moisture),
@@ -256,6 +291,13 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         Grayscale,
         Eight,
         &coast_type,
+    )?;
+    write_png(
+        &dir.join("coast_distance.png"),
+        size,
+        Grayscale,
+        Sixteen,
+        &coast_distance,
     )?;
     write_png(&dir.join("biome.png"), size, Rgb, Eight, &biome)?;
     write_png(
@@ -279,9 +321,9 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         generator_version: GENERATOR_VERSION,
         tiles_x: world.tiles_x,
         tiles_z: world.tiles_z,
-        sample_step_m: SAMPLE_STEP_M,
+        sample_step_m: world.step_m,
         size_samples: [nx, nz],
-        height_range_m: HEIGHT_RANGE_M,
+        height_range_m: h_range,
         temperature_range_c: TEMPERATURE_RANGE_C,
         substrate_codes: SUBSTRATES.iter().map(|s| format!("{s:?}")).collect(),
         overrides: Vec::new(),
@@ -296,6 +338,8 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
                 z: m.position.z,
             })
             .collect(),
+        coast_distance_range_m: COAST_RANGE_M,
+        geo: world.geo.clone(),
     };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(MANIFEST), json + "\n").map_err(|e| e.to_string())?;
@@ -348,6 +392,13 @@ pub fn import(dir: &Path) -> Result<World, String> {
     let masks = load("masks.png", 3)?;
     let climate = load("climate.png", 3)?;
     let coast_type = load("coast_type.png", 1)?;
+    let coast_distance = load("coast_distance.png", 1)?;
+    if coast_distance.max != u16::MAX {
+        return Err("coast_distance.png: нужна разрядность 16 бит".into());
+    }
+    if m.sample_step_m.is_nan() || m.sample_step_m <= 0.0 {
+        return Err(format!("{MANIFEST}: sample_step_m должен быть больше нуля"));
+    }
     let unit = |img: &Image, i, j, c| img.get(i, j, c) as f32 / img.max as f32;
 
     let mut fields = Vec::with_capacity(nx * nz);
@@ -366,6 +417,11 @@ pub fn import(dir: &Path) -> Result<World, String> {
                 basin: unit(&masks, i, j, 2),
                 coast: unit(&climate, i, j, 2),
                 rocky: unit(&coast_type, i, j, 0),
+                coast_d: dequantize(
+                    coast_distance.get(i, j, 0),
+                    m.coast_distance_range_m,
+                    65535.0,
+                ),
             });
         }
     }
@@ -419,14 +475,15 @@ pub fn import(dir: &Path) -> Result<World, String> {
             position: Vec3::new(e.x, 0.0, e.z),
         })
         .collect();
-    let grid = FieldGrid { nx, nz, fields };
-    Ok(World::from_grid(
-        m.seed,
-        generator,
-        grid,
-        &overrides,
-        Some(markers),
-    ))
+    let grid = FieldGrid {
+        nx,
+        nz,
+        step_m: m.sample_step_m,
+        fields,
+    };
+    let mut world = World::from_grid(m.seed, generator, grid, &overrides, Some(markers));
+    world.geo = m.geo;
+    Ok(world)
 }
 
 /// Цветная карта сверху: вода, тропа, субстрат, отмывка рельефа, маркеры.
@@ -435,7 +492,7 @@ pub fn preview(world: &World, (nx, nz): (usize, usize)) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(nx * nz * 3);
     for z in 0..nz {
         for x in 0..nx {
-            let p = Vec2::new(x as f32, z as f32) * SAMPLE_STEP_M;
+            let p = Vec2::new(x as f32, z as f32) * world.step_m;
             let Some(s) = world.sample_ground(p.x.min(world.size_m().x), p.y.min(world.size_m().y))
             else {
                 rgb.extend_from_slice(&[0, 0, 0]);

@@ -164,6 +164,8 @@ pub struct Fields {
     pub basin: f32,
     /// Тип берега: 0 — песок, 1 — камень.
     pub rocky: f32,
+    /// Знаковое расстояние до кромки моря, м: > 0 на суше, < 0 в море.
+    pub coast_d: f32,
 }
 
 /// Сторона первой карты, м: 16 × 16 тайлов. Остров с полосой моря по краям.
@@ -389,6 +391,7 @@ impl Generator {
             coast,
             basin,
             rocky: self.rocky(p),
+            coast_d: self.coast_distance(p),
         }
     }
 }

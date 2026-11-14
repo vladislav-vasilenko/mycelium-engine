@@ -1,0 +1,11 @@
+{
+  "comment": "Исходные данные реального рельефа (02.7). Файлы кэша — assets/source/geo/cache/, вне git. Скачивание и проверка: tools/geo/yakushima.py fetch.",
+  "files": [
+    {
+      "file": "Copernicus_DSM_COG_10_N30_00_E130_00_DEM.tif",
+      "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N30_00_E130_00_DEM/Copernicus_DSM_COG_10_N30_00_E130_00_DEM.tif",
+      "sha256": "1cbf46e3cdf7c2e5cafb5bd6cb80b50cb2602fe63903062d413c2cd5ee85545e",
+      "attribution": "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"
+    }
+  ]
+}

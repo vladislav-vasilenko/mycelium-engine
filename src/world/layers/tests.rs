@@ -55,7 +55,8 @@ fn export_import_round_trip_is_stable_and_close() {
     // Импорт детерминирован.
     assert_eq!(imported.checksum(), import(&a).unwrap().checksum());
     // Высоты отличаются не больше половины шага квантования.
-    let step = (HEIGHT_RANGE_M[1] - HEIGHT_RANGE_M[0]) / 65535.0;
+    let range = height_range(&generated);
+    let step = (range[1] - range[0]) / 65535.0;
     let mut same_substrate = 0;
     let mut total = 0;
     for (tg, ti) in generated.tiles.iter().zip(&imported.tiles) {

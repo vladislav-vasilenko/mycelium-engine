@@ -122,7 +122,8 @@ pub(in crate::app) fn compare_terrain_depth(
 }
 
 /// Вид Raw: HDR = (высота, уклон в градусах, доминирующий биом, тип берега).
-/// Сверка с CPU в точках попадания луча: высота ±5 см (half), уклон грани ±2°,
+/// Сверка с CPU в точках попадания луча: высота ±5 см (half), уклон в диапазоне
+/// уклонов граней под квадратом 2 × 2 пикселя ±1°,
 /// доминирующий биом ближайшего узла — допускается одно расхождение на границе.
 pub(in crate::app) fn compare_terrain_raw(
     rb: &Readback,
@@ -131,6 +132,8 @@ pub(in crate::app) fn compare_terrain_raw(
     world: &World,
 ) -> (u32, u32, f32, f32, u32) {
     let (mut checked, mut bad, mut dh, mut ds, mut biome_miss) = (0, 0, 0.0f32, 0.0f32, 0);
+    // Вид Raw пишет высоту относительно камеры.
+    let camera_y = view.inverse().w_axis.y;
     for (&(x, y, _), got) in rb.depth.iter().zip(&rb.hdr) {
         let Some(hit) =
             reference::terrain_hit((x, y), (rb.width, rb.height), view, proj, world, 3000.0)
@@ -141,18 +144,30 @@ pub(in crate::app) fn compare_terrain_raw(
             .sample_ground(hit.x, hit.z)
             .expect("попадание на карте");
         let slope = g.normal.y.clamp(-1.0, 1.0).acos().to_degrees();
-        let e_h = (got[0] - g.height).abs();
-        let e_s = (got[1] - slope).abs();
+        let e_h = (got[0] + camera_y - g.height).abs();
+        // GPU берёт нормаль грани по производным в квадрате 2 × 2 пикселя: у ребра
+        // треугольника производные приходят с двух граней, и уклон получается
+        // промежуточным. Допустимо значение в диапазоне уклонов граней в пределах
+        // ±2 пикселей вокруг точки попадания.
+        let dist = (hit - view.inverse().w_axis.truncate()).length();
+        let px = 2.0 * dist / (proj.y_axis.y * rb.height as f32);
+        let (lo, hi) = [(0.0, 0.0), (px, 0.0), (-px, 0.0), (0.0, px), (0.0, -px)]
+            .iter()
+            .filter_map(|&(dx, dz)| world.sample_ground(hit.x + dx, hit.z + dz))
+            .map(|s| s.normal.y.clamp(-1.0, 1.0).acos().to_degrees())
+            .fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v), b.max(v)));
+        let e_s = (lo - got[1]).max(got[1] - hi).max(0.0);
         dh = dh.max(e_h);
         ds = ds.max(e_s);
         let tile = world.tile(g.tile).expect("тайл");
-        let local = (glam::Vec2::new(hit.x, hit.z) - g.tile.origin()).round();
+        let local =
+            ((glam::Vec2::new(hit.x, hit.z) - world.tile_origin(g.tile)) / world.step_m).round();
         let s = tile.at(local.x as usize, local.y as usize);
         let w = [s.weights.forest, s.weights.peat, s.weights.shore];
         let dominant = (0..3).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap() as f32;
         biome_miss += (got[2] != dominant) as u32;
         checked += 1;
-        if e_h > 0.05 || e_s > 2.0 {
+        if e_h > 0.05 || e_s > 1.0 {
             bad += 1;
             println!(
                 "       вид Raw ({x},{y}): GPU h {:.3} уклон {:.2}°, CPU h {:.3} уклон {slope:.2}°",

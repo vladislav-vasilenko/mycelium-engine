@@ -16,8 +16,9 @@ use crate::world::noise::{hash01, smoothstep};
 const G: f32 = 9.81;
 const PI: f32 = std::f32::consts::PI;
 
-/// Уровней кольцевой сетки воды: шаг 0,5 м × 2^L, последний уровень ~32 км.
-pub const WATER_LEVELS: usize = 11;
+/// Уровней кольцевой сетки воды: шаг 0,5 м × 2^L, последний уровень ~130 км
+/// (хватает до горизонта и для острова 30 км с камерой высоко над морем).
+pub const WATER_LEVELS: usize = 13;
 /// Ячеек на сторону уровня.
 pub const WATER_GRID_N: u32 = 64;
 /// Шаг самого мелкого уровня, м.
@@ -102,7 +103,6 @@ pub struct ShoreField {
 impl ShoreField {
     pub fn from_world(world: &World) -> ShoreField {
         let size = world.tiles_x as usize * (crate::world::TILE_SAMPLES - 1) + 1;
-        let g = &world.generator;
         let mut data = vec![[0.0f32; 4]; size * size];
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let rows = size.div_ceil(threads);
@@ -114,15 +114,14 @@ impl ShoreField {
                         let j = ci * rows + k / size;
                         let i = k % size;
                         let f = &fields[j * size + i];
-                        let p = Vec2::new(i as f32, j as f32) * crate::world::SAMPLE_STEP_M;
-                        *v = [f.height, g.coast_distance(p), f.rocky, 0.0];
+                        *v = [f.height, f.coast_d, f.rocky, 0.0];
                     }
                 });
             }
         });
         ShoreField {
             size,
-            step_m: crate::world::SAMPLE_STEP_M,
+            step_m: world.step_m,
             data,
         }
     }

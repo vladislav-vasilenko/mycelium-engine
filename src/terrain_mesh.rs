@@ -36,12 +36,17 @@ fn unorm8(v: f32) -> u8 {
 pub fn vertices(world: &World) -> Vec<TerrainVertex> {
     let mut out = Vec::with_capacity(world.tiles.len() * VERTICES_PER_TILE);
     for tile in &world.tiles {
-        let origin = tile.id.origin();
+        let origin = world.tile_origin(tile.id);
+        let step = world.step_m;
         for j in 0..TILE_SAMPLES {
             for i in 0..TILE_SAMPLES {
                 let s = tile.at(i, j);
                 out.push(TerrainVertex {
-                    position: [origin.x + i as f32, s.height, origin.y + j as f32],
+                    position: [
+                        origin.x + i as f32 * step,
+                        s.height,
+                        origin.y + j as f32 * step,
+                    ],
                     normal: s.normal.to_array(),
                     weights: [
                         unorm8(s.weights.forest),
@@ -128,7 +133,7 @@ mod tests {
         let t = &world.tiles[3];
         let k = 3 * VERTICES_PER_TILE + 10 * TILE_SAMPLES + 7;
         assert_eq!(v[k].position[1], t.at(7, 10).height);
-        assert_eq!(v[k].position[0], t.id.origin().x + 7.0);
+        assert_eq!(v[k].position[0], world.tile_origin(t.id).x + 7.0);
     }
 
     #[test]

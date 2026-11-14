@@ -2,3 +2,8 @@ target/
 captures/
 .DS_Store
 dist/
+
+# Реальный рельеф (02.7): кэш исходников и окружение Python
+assets/source/geo/cache/
+assets/source/geo/gsi/
+.venv-geo/

@@ -65,7 +65,7 @@ flowchart LR
 | `Path::catmull_rom(control, per_segment)` | fn | уплотнение опорных точек, построение сетки |
 | `Path::nearest(p) -> (d, t, q)` | fn | расстояние, параметр 0..1 по длине, точка на оси; дальше радиуса — `(∞, 0, p)` |
 | `Path::point_at(t)`, `Path::length()` | fn | точка по параметру, длина |
-| `Fields` | struct (`Default`) | `rocky` (тип берега), `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
+| `Fields` | struct (`Default`) | `coast_d` (знаковое расстояние до кромки, м), `rocky` (тип берега), `height`, `moisture` 0..1, `temperature` °C, маски `trail`, `river`, `coast`, `basin` |
 | `FIRST_MAP_SIZE_M` = 1024, `SEA_FLOOR_M` = −24, `CAPE_EXTENT_M` = 55, `CAPE_RADIUS_M` = 110, `MOUTH_BEACH_RADIUS_M` = 90 | const | раскладка острова |
 | `Generator` | struct | `seed`, `size_m`, `river`, `trail`, `basin_center`, `basin_radius`, `island_center`, `island_radii`, `cape_center`, `mouth` (первая точка реки в море) |
 | `Generator::first_map(seed)` | fn | авторская раскладка острова 1024 м |
@@ -82,8 +82,8 @@ flowchart LR
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
-| `TILE_SIZE_M` = 64, `TILE_SAMPLES` = 65, `SAMPLE_STEP_M` = 1, `GENERATOR_VERSION` = 3, `FIRST_MAP_TILES` = 16 | const | параметры LOD 0 и первой карты |
-| `TileId { x, z }` | struct | целые координаты тайла; `origin()` — угол в метрах |
+| `TILE_SAMPLES` = 65, `SAMPLE_STEP_M` = 1 (шаг генератора), `GENERATOR_VERSION` = 4, `FIRST_MAP_TILES` = 16 | const | параметры LOD 0 и первой карты; размер тайла — 64 шага мира |
+| `TileId { x, z }` | struct | целые координаты тайла; угол в метрах — `World::tile_origin(id)` |
 | `Substrate` | enum `u8` | `Soil` 0, `Peat` 1, `Sand` 2, `Rock` 3, `Gravel` 4 — те же числа в `TerrainVertex.material[0]` |
 | `BiomeWeights { forest, peat, shore }` | struct | нормированные веса |
 | `Sample` | struct | `height`, `normal`, `moisture`, `temperature`, `substrate`, `weights`, `trail`, `river`, `rocky` (в `TerrainVertex.material[3]`) |
@@ -91,12 +91,12 @@ flowchart LR
 | `GroundSample` | struct | `height`, `normal` (треугольника LOD 0), `substrate`, `on_trail`, `wet` (русло или ниже моря), `tile` |
 | `Ground` | trait | `sample_ground(x, z) -> Option<GroundSample>`; `None` за картой. Реализуют `World` и тестовые поверхности |
 | `MarkerKind` (serde), `Marker { name: String, kind, position }` | enum, struct | авторские точки маршрута |
-| `FieldGrid { nx, nz, fields }` | struct | поля `Fields` на мировой сетке `nx × nz` (1025 × 1025 для первой карты), строки по z; `FieldGrid::generate(&Generator, tiles_x, tiles_z)` — параллельно по строкам |
+| `FieldGrid { nx, nz, step_m, fields }` | struct | поля `Fields` на мировой сетке `nx × nz` (1025 × 1025 для первой карты), строки по z; `FieldGrid::generate(&Generator, tiles_x, tiles_z)` — параллельно по строкам |
 | `DerivedOverrides { weights, substrate }` | struct | `Option<Vec<…>>` по точкам мировой сетки: ручные слои вместо вычисленных |
-| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers`, `fields` (сетка, из которой собран мир; нужна экспорту масок торфяника и берега) |
+| `World` | struct | `seed`, `tiles_x`, `tiles_z`, `step_m` (шаг сетки, м), `geo: Option<GeoRef>`, `generator`, `tiles` (индекс `z * tiles_x + x`), `markers`, `fields` (сетка, из которой собран мир; нужна экспорту масок торфяника и берега) |
 | `World::generate(seed, tiles_x, tiles_z)` | fn | `FieldGrid::generate`, затем `from_grid` без замен |
 | `World::from_grid(seed, Generator, FieldGrid, &DerivedOverrides, Option<Vec<Marker>>)` | fn | 1) нормали центральными разностями по сетке; 2) веса и субстрат из полей или из `overrides`; 3) нарезка на тайлы с общими граничными точками; 4) маркеры: переданные получают высоту грунта, иначе расставляются по сплайнам генератора |
-| `World::tile(id)`, `size_m()`, `marker(kind)` | fn | доступ |
+| `World::tile(id)`, `tile_size_m()`, `tile_origin(id)`, `size_m()`, `marker(kind)` | fn | доступ; размер тайла = 64 × `step_m` |
 | `World::checksum()` | fn | хеш всех тайлов и их метаданных |
 | `impl Ground for World` | — | точка → тайл → ячейка → треугольник (a, c, b) при fx ≥ fz, иначе (a, d, c); высота — барицентрическая, нормаль — грани; свойства — от ближайшего узла |
 
@@ -111,14 +111,16 @@ flowchart LR
 | `height.png` | серый 16 бит | источник | высота в `height_range_m` (−40…60 м, шаг ≈ 1,5 мм) |
 | `masks.png` | RGB 8 бит | источник | тропа, русло, чаша торфяника |
 | `climate.png` | RGB 8 бит | источник | влажность, температура в `temperature_range_c` (−10…40 °C), близость берега моря |
-| `coast_type.png` | серый 8 бит | источник | тип берега: 0 песок, 255 камень (формат слоёв 2) |
+| `coast_type.png` | серый 8 бит | источник | тип берега: 0 песок, 255 камень |
+| `coast_distance.png` | серый 16 бит | источник | знаковое расстояние до кромки в `coast_distance_range_m` (−4…4 км, шаг ≈ 12 см), формат слоёв 3 |
 | `biome.png` | RGB 8 бит | замена, если указан в `overrides` | лес, торф, берег; сумма каналов ровно 255 |
 | `substrate.png` | серый 8 бит | замена, если указан в `overrides` | индекс `Substrate` × 60 |
 | `preview.png` | RGB 8 бит | только просмотр | цветная карта с маркерами |
 
 | Элемент | Вид | Описание |
 | --- | --- | --- |
-| `FORMAT_VERSION` = 2, `HEIGHT_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json` | const | параметры формата |
+| `FORMAT_VERSION` = 3, `COAST_RANGE_M`, `TEMPERATURE_RANGE_C`, `SUBSTRATE_STEP` = 60, `MANIFEST` = `world.json`; приватная `height_range(&World)` — диапазон высот по данным, округлённый до 10 м | const, fn | параметры формата |
+| `GeoRef { center_lat, center_lon, center_world_m, projection, sources }` | struct (serde) | привязка мира к Земле в `world.json` (`geo`) и `World.geo` |
 | `Manifest` | struct (serde) | `format`, `seed`, `generator_version`, `tiles_x`, `tiles_z`, `sample_step_m`, `size_samples`, `height_range_m`, `temperature_range_c`, `substrate_codes`, `overrides` (`biome`, `substrate`), `exported_checksum`, `markers` |
 | `MarkerEntry { name, kind, x, z }` | struct (serde) | маркер в `world.json`; высота при импорте берётся с грунта |
 | `export(&World, dir) -> Result<Manifest, String>` | fn | пишет все слои и `world.json` (`overrides` пустой) |
@@ -127,7 +129,7 @@ flowchart LR
 | приватные `encode_weights`, `decode_weights` | fn | веса ↔ три байта с суммой 255 (метод наибольших остатков), чтобы повторный экспорт давал те же байты |
 | приватные `read_png`, `write_png`, `Image` | fn, struct | PNG 8/16 бит, палитра разворачивается, лишние каналы допускаются |
 
-Квантование источников идемпотентно: экспорт → импорт → экспорт даёт побайтно те же `height.png`, `masks.png`, `climate.png`, `coast_type.png`. Мир после импорта отличается от сгенерированного на половину шага квантования (контрольная сумма другая).
+Квантование источников идемпотентно: экспорт → импорт → экспорт даёт побайтно те же `height.png`, `masks.png`, `climate.png`, `coast_type.png`, `coast_distance.png`. Шаг сетки берётся из `sample_step_m`. Мир после импорта отличается от сгенерированного на половину шага квантования (контрольная сумма другая).
 
 Запуск: `echo --export-world DIR` записывает слои и выходит; `echo --world DIR` собирает мир из слоёв. Ошибки слоёв выводятся с именем файла и завершают программу с кодом 2.
 
@@ -193,3 +195,4 @@ flowchart LR
 | 2026-11-08 | 02.1 | после `7d787d0` | Генератор v4: маска типа берега `Generator::rocky`, `Fields.rocky`, `Sample.rocky`, `TerrainVertex.material[3]`, `Generator::mouth`; уклоны пляжа, шельфа и каменистые гряды от `rocky` вместо востока; слой `coast_type.png`, формат слоёв 2 ([AD-37](00-arch.md#ad-37-маска-типа-берега-по-направлению-от-центра-острова)) |
 | 2026-11-08 | 02.2 | после `453a670` | Материалы ambientCG, смешивание по высоте, мокрый песок по маске, отладочные виды ([AD-38](00-arch.md#ad-38-материалы-ландшафта-фотосканы-ambientcg-в-двух-массивах-смешивание-по-высоте)) |
 | 2026-11-08 | 03.1 | после `bd4aac5` | Маска влажности — живая маска мокрого песка R16Float из 03.1; подкраска дна ниже моря удалена (цвет под водой даёт вода) |
+| 2026-11-14 | 02.7 | после `3932e70` | Шаг сетки — параметр мира (`World.step_m`, `FieldGrid.step_m`, `tile_origin`, `tile_size_m`; `TILE_SIZE_M` и `TileId::origin` удалены), `Fields.coast_d`, слой `coast_distance.png` и `GeoRef`, формат слоёв 3, диапазон высот по данным ([AD-42](00-arch.md#ad-42-реальный-рельеф-скрипт-python-шаг-сетки-мира-и-георазметка)) |

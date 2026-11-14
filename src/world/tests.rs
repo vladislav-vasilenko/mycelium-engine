@@ -45,8 +45,8 @@ fn same_world_coordinates_give_same_ground_from_both_tiles() {
                 z: (z / 64.0) as i32,
             })
             .unwrap();
-        let j = ((z - left_tile.id.origin().y) / SAMPLE_STEP_M) as usize;
-        let fz = (z - left_tile.id.origin().y) / SAMPLE_STEP_M - j as f32;
+        let j = ((z - w.tile_origin(left_tile.id).y) / SAMPLE_STEP_M) as usize;
+        let fz = (z - w.tile_origin(left_tile.id).y) / SAMPLE_STEP_M - j as f32;
         let h0 = left_tile.at(64, j).height;
         let h1 = left_tile.at(64, j + 1).height;
         assert!(
@@ -61,7 +61,7 @@ fn sample_ground_matches_lod0_vertices() {
     let w = test_world();
     let t = w.tile(TileId { x: 3, z: 5 }).unwrap();
     for (i, j) in [(0, 0), (10, 20), (63, 1), (64, 64), (31, 47)] {
-        let p = t.id.origin() + Vec2::new(i as f32, j as f32);
+        let p = w.tile_origin(t.id) + Vec2::new(i as f32, j as f32);
         let s = w.sample_ground(p.x, p.y).unwrap();
         assert!((s.height - t.at(i, j).height).abs() < 1e-4);
     }

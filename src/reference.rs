@@ -113,11 +113,16 @@ pub fn pixel_ray(
 ) -> (Vec3, Vec3) {
     let ndc_x = (px as f32 + 0.5) / width as f32 * 2.0 - 1.0;
     let ndc_y = 1.0 - (py as f32 + 0.5) / height as f32 * 2.0;
-    let inv = (proj * view).inverse();
-    let near = inv * Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
-    let far = inv * Vec4::new(ndc_x, ndc_y, 0.5, 1.0);
-    let origin = near.truncate() / near.w;
-    let dir = (far.truncate() / far.w - origin).normalize();
+    // Направление — в пространстве вида (малые числа), затем поворот в мир.
+    // Обратная матрица `proj * view` при мировых координатах в десятки км теряет
+    // точность f32 и сбивает луч на сантиметры.
+    let inv_proj = proj.inverse();
+    let near = inv_proj * Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+    let far = inv_proj * Vec4::new(ndc_x, ndc_y, 0.5, 1.0);
+    let dir_view = (far.truncate() / far.w - near.truncate() / near.w).normalize();
+    let inv_view = view.inverse();
+    let origin = inv_view.transform_point3(Vec3::ZERO);
+    let dir = inv_view.transform_vector3(dir_view).normalize();
     (origin, dir)
 }
 

@@ -92,4 +92,30 @@ def moss_cushion(lod, seed=0x3055):
     return m
 
 
-SPECIES = {"debris": debris, "moss_cushion": moss_cushion}
+def trail_roots(lod, seed=0x7207):
+    """Корни поперёк тропы: 3–5 полузарытых изогнутых корней вдоль оси X
+    (шейдер поворачивает их поперёк тропы) и плоские камни между ними."""
+    rng = np.random.default_rng(seed)
+    m = Mesh()
+    for k in range([5, 3, 2][lod]):
+        z = rng.uniform(-0.8, 0.8)
+        r = rng.uniform(0.03, 0.07)
+        steps = [10, 5, 3][lod]
+        ph = rng.uniform(0, 6.28)
+        pts, rr = [], []
+        for j in range(steps + 1):
+            t = j / steps
+            x = -1.3 + 2.6 * t
+            # Над землёй в середине, концы уходят в грунт.
+            y = r * (0.6 * math.sin(math.pi * t) - 0.5) + 0.02 * math.sin(7 * t + ph)
+            pts.append(np.array([x, y, z + 0.18 * math.sin(2.5 * t + ph)]))
+            rr.append(r * (0.8 + 0.3 * math.sin(math.pi * t)))
+        tube(m, pts, rr, [6, 4, 3][lod], BARK_BROAD, lambda q: 0.0, 0.75, u_tiles=1,
+             moss_of=lambda q, n: 0.35 * max(n[1], 0))
+    for k in range([4, 2, 1][lod]):
+        c = np.array([rng.uniform(-0.9, 0.9), -0.02, rng.uniform(-0.7, 0.7)])
+        pebble(m, rng, c, rng.uniform(0.12, 0.25), lod)
+    return m
+
+
+SPECIES = {"debris": debris, "moss_cushion": moss_cushion, "trail_roots": trail_roots}

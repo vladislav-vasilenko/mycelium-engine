@@ -586,6 +586,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                 // Скан Grass004 — сочный газон; луга Якусимы — приглушённые,
                 // оливковые (02.10): меньше насыщенность и яркость.
                 la = mix(float3(dot(la, float3(0.3, 0.5, 0.2))), la, 0.55) * float3(0.78, 0.76, 0.66);
+            } else if (i == MAT_MOSS) {
+                // Мох темнее и глуше скана на солнце (02.10).
+                la = mix(float3(dot(la, float3(0.3, 0.5, 0.2))), la, 0.75) * float3(0.8, 0.82, 0.72);
             }
             albedo += la * f;
             nxy += ms[i].nxy * f;

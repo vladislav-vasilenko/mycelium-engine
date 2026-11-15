@@ -1,6 +1,6 @@
 //! Лес на GPU (02.4): сетки и текстуры растений, списки экземпляров и
-//! indirect-аргументы слотов. Списки: вид × LOD (0–44), тени шести деревьев
-//! (45–50) и предметы с CPU (51: грибы, бусины чувства мицелия), по
+//! indirect-аргументы слотов. Списки: вид × LOD (0–47), тени шести деревьев
+//! (48–53) и предметы с CPU (54: грибы, бусины чувства мицелия), по
 //! `FOREST_CAP` экземпляров; раскладка совпадает с `forest.metal`.
 
 use objc2_metal::*;
@@ -12,7 +12,7 @@ use crate::layout::PlantInstance;
 use crate::plants::PlantAssets;
 
 /// Видов, которые расставляет GPU (`plants::SPECIES` без гриба).
-pub const GPU_SPECIES: usize = 15;
+pub const GPU_SPECIES: usize = 16;
 /// Деревья — первые виды; у каждого свой список теней (LOD 1).
 pub const TREE_MESHES: usize = 6;
 /// Списки, которые рисует камера (вид × LOD); дальше — тени деревьев.
@@ -24,7 +24,7 @@ pub const FOREST_LISTS: usize = PROPS_LIST + 1;
 const TRUNK_R: [f32; TREE_MESHES] = [0.9, 0.75, 2.0, 0.45, 0.4, 0.5];
 pub const FOREST_CAP: usize = 16384;
 pub const FOREST_GRID: usize = 160;
-/// u32 в буфере счётчиков: 64 счётчика (52 занято), затем аргументы по 5 u32.
+/// u32 в буфере счётчиков: 64 счётчика (55 занято), затем аргументы по 5 u32.
 const COUNTS_WORDS: usize = 64;
 pub const ARGS_OFFSET: usize = COUNTS_WORDS * 4;
 const COUNTERS_BYTES: usize = ARGS_OFFSET + FOREST_LISTS * 20;

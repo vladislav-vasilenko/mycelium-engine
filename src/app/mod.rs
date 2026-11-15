@@ -134,7 +134,12 @@ impl App {
             world.checksum()
         );
         let game = crate::game::Game::new(&world);
-        let mut sim = Sim::new(if let Some((from, to)) = args.camera {
+        let mut sim = Sim::new(if let Some((mut from, to)) = args.camera {
+            // Глаз не ниже 0,3 м над землёй: из-под рельефа видна его изнанка
+            // и небо — кадр выглядит перевёрнутым (02.10).
+            if let Some(g) = world.sample_ground(from.x, from.z) {
+                from.y = from.y.max(g.height + 0.3);
+            }
             look_camera(from, to)
         } else if args.overview {
             island_overview_camera(&world)

@@ -14,8 +14,9 @@ use crate::layout::PlantVertex;
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
 /// 0–5 деревья (три криптомерии, три лиственных), 6 валун, 7 папоротник,
 /// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
-/// дерево, 13 лесной сор, 14 подушка мха; 15 гриб — только с CPU.
-pub const SPECIES: [&str; 16] = [
+/// дерево, 13 лесной сор, 14 подушка мха, 15 корни и камни на тропе; 16 гриб —
+/// только с CPU.
+pub const SPECIES: [&str; 17] = [
     "sugi_a",
     "sugi_b",
     "sugi_old",
@@ -31,6 +32,7 @@ pub const SPECIES: [&str; 16] = [
     "windfall",
     "debris",
     "moss_cushion",
+    "trail_roots",
     "mushroom",
 ];
 pub const LODS: usize = 3;

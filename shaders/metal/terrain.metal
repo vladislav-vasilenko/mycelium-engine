@@ -979,5 +979,5 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         color = apply_aerial(aerial, frame, in.rel, color);
     }
     // Нити мицелия под почвой (05.6): после связи — пульс к цели.
-    return float4(color * frame.pre_exposure + mycelium_glow(frame, in.rel), 1.0);
+    return float4(color * frame.pre_exposure + mycelium_glow(frame, in.rel, fd.route, fd.route_left), 1.0);
 }

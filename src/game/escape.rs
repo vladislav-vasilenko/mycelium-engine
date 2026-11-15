@@ -94,7 +94,7 @@ impl NightEscape {
             while next <= acc + len {
                 let p = a + dir * (next - acc);
                 // У края тропы, сторона меняется каждые ~60 м.
-                let side = if (next as usize / 60) % 2 == 0 {
+                let side = if (next as usize / 60).is_multiple_of(2) {
                     1.0
                 } else {
                     -1.0
@@ -417,36 +417,53 @@ impl NightEscape {
 /// Кратчайший путь по тропам и дорогам (`FeatureSet`) от `from` к `to`:
 /// граф из концов отрезков (сшиты с точностью 1 м), Дейкстра. Концы — к
 /// ближайшим узлам; первая и последняя точки маршрута — сами `from` и `to`.
+/// Маршрут: точки от старта к цели и отрезки объектов карты по порядку —
+/// (индекс, цель ближе к концу `b`, путь до цели от конца `a`, м).
+pub struct Route {
+    pub points: Vec<Vec2>,
+    pub segs: Vec<(usize, bool, f32)>,
+}
+
+impl Route {
+    /// Служебные поля `FeatureSegment._pad` для отрезков маршрута (05.6):
+    /// `[1 или 2, путь от a]` — шейдер рельефа ведёт по ним нити мицелия.
+    pub fn pads(&self) -> impl Iterator<Item = (usize, [f32; 2])> + '_ {
+        self.segs
+            .iter()
+            .map(|&(i, to_b, left_a)| (i, [if to_b { 1.0 } else { 2.0 }, left_a]))
+    }
+}
+
 pub fn trail_route(
     set: &crate::world::features::FeatureSet,
     from: Vec2,
     to: Vec2,
-) -> Option<Vec<Vec2>> {
+) -> Option<Route> {
     use crate::world::features::{KIND_ROAD, KIND_TRAIL};
     use std::collections::{BinaryHeap, HashMap};
     let key = |p: [f32; 2]| ((p[0]).round() as i64, (p[1]).round() as i64);
     let mut ids: HashMap<(i64, i64), usize> = HashMap::new();
     let mut pos: Vec<Vec2> = Vec::new();
-    let mut adj: Vec<Vec<(usize, f32)>> = Vec::new();
+    let mut adj: Vec<Vec<(usize, f32, usize)>> = Vec::new();
     let node = |p: [f32; 2],
                 ids: &mut HashMap<(i64, i64), usize>,
                 pos: &mut Vec<Vec2>,
-                adj: &mut Vec<Vec<(usize, f32)>>| {
+                adj: &mut Vec<Vec<(usize, f32, usize)>>| {
         *ids.entry(key(p)).or_insert_with(|| {
             pos.push(Vec2::from(p));
             adj.push(Vec::new());
             pos.len() - 1
         })
     };
-    for s in &set.segments {
+    for (si, s) in set.segments.iter().enumerate() {
         if s.kind != KIND_TRAIL && s.kind != KIND_ROAD {
             continue;
         }
         let a = node(s.a, &mut ids, &mut pos, &mut adj);
         let b = node(s.b, &mut ids, &mut pos, &mut adj);
         let w = pos[a].distance(pos[b]) * if s.kind == KIND_ROAD { 1.5 } else { 1.0 };
-        adj[a].push((b, w));
-        adj[b].push((a, w));
+        adj[a].push((b, w, si));
+        adj[b].push((a, w, si));
     }
     let nearest =
         |p: Vec2| (0..pos.len()).min_by(|&i, &j| pos[i].distance(p).total_cmp(&pos[j].distance(p)));
@@ -465,7 +482,7 @@ pub fn trail_route(
         }
     }
     let mut dist = vec![f32::INFINITY; pos.len()];
-    let mut prev = vec![usize::MAX; pos.len()];
+    let mut prev = vec![(usize::MAX, usize::MAX); pos.len()];
     let mut heap = BinaryHeap::new();
     dist[s0] = 0.0;
     heap.push(Item(0.0, s0));
@@ -476,10 +493,10 @@ pub fn trail_route(
         if d > dist[u] {
             continue;
         }
-        for &(v, w) in &adj[u] {
+        for &(v, w, si) in &adj[u] {
             if d + w < dist[v] {
                 dist[v] = d + w;
-                prev[v] = u;
+                prev[v] = (u, si);
                 heap.push(Item(d + w, v));
             }
         }
@@ -487,13 +504,27 @@ pub fn trail_route(
     if !dist[t0].is_finite() {
         return None;
     }
-    let mut route = vec![to];
+    // Назад от цели: точки и отрезки; путь до цели копится от конца.
+    let mut points = vec![to];
+    let mut segs = Vec::new();
+    let mut left = pos[t0].distance(to);
     let mut u = t0;
     while u != usize::MAX {
-        route.push(pos[u]);
-        u = prev[u];
+        points.push(pos[u]);
+        let (p, si) = prev[u];
+        if p != usize::MAX {
+            let s = &set.segments[si];
+            let len = Vec2::from(s.a).distance(Vec2::from(s.b));
+            // Цель ближе к концу, совпадающему с `u`.
+            let to_b = Vec2::from(s.b).distance(pos[u]) < Vec2::from(s.a).distance(pos[u]);
+            let left_a = if to_b { left + len } else { left };
+            segs.push((si, to_b, left_a));
+            left += len;
+        }
+        u = p;
     }
-    route.push(from);
-    route.reverse();
-    Some(route)
+    points.push(from);
+    points.reverse();
+    segs.reverse();
+    Some(Route { points, segs })
 }

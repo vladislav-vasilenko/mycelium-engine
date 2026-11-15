@@ -41,29 +41,29 @@ inline float myc_noise(float2 p) {
                mix(myc_hash(i + float2(0, 1)), myc_hash(i + float2(1, 1)), u.x), u.y);
 }
 
-// Нити мицелия под почвой (05.6, сессия 2): гребни шума (тонкие линии там,
-// где шум ≈ 0,5) двух масштабов — ветвящаяся сеть; пульс бежит по сети к
-// цели (фаза по расстоянию до цели), ярче у игрока. Возвращает излучение в
-// единицах «после предэкспозиции» (не зависит от экспозиции, как бусины).
-inline float3 mycelium_glow(constant FrameUniforms& f, float3 rel) {
-    if (f.mycelium.x <= 0.0) {
+// Нити мицелия под почвой (05.6, сессия 2): только вдоль маршрута уровня —
+// полоса ~3 м вокруг оси тропы (`route` — расстояние до оси, `left` — путь
+// до цели по тропе). Сеть — гребни шума двух масштабов с изгибом; пульс бежит
+// по пути к цели (по тропе, не напрямую через скалы), ярче у игрока.
+// Излучение — в единицах «после предэкспозиции» (не зависит от экспозиции).
+inline float3 mycelium_glow(constant FrameUniforms& f, float3 rel, float route, float left) {
+    if (f.mycelium.x <= 0.0 || route > 4.0) {
         return float3(0.0);
     }
-    float2 p = rel.xz + f.cam_lo.xz;         // относительно cam_hi — точность f32
-    float2 q = p + f.cam_hi.xz;              // мировые: узор не «плывёт» за камерой
-    float2 w = q + 2.0 * float2(myc_noise(q * 0.07), myc_noise(q * 0.07 + 17.0));  // изгиб
-    float r1 = 1.0 - abs(myc_noise(w * 0.45) * 2.0 - 1.0);
-    float r2 = 1.0 - abs(myc_noise(w * 1.3 + 5.0) * 2.0 - 1.0);
-    float vein = pow(r1, 14.0) + 0.6 * pow(r2, 18.0);
-    float d_goal = length(p - f.mycelium.zw);
+    float2 q = rel.xz + f.cam_lo.xz + f.cam_hi.xz;  // мировые: узор не «плывёт»
+    float2 w = q + 1.5 * float2(myc_noise(q * 0.09), myc_noise(q * 0.09 + 17.0));
+    float r1 = 1.0 - abs(myc_noise(w * 0.7) * 2.0 - 1.0);
+    float r2 = 1.0 - abs(myc_noise(w * 1.9 + 5.0) * 2.0 - 1.0);
+    // Вдоль оси — главная жила (тонкая линия по центру), вокруг — ветви.
+    float spine = exp(-route * route / 0.08) * (0.6 + 0.4 * myc_noise(q * 0.5));
+    float vein = max(pow(r1, 12.0) + 0.6 * pow(r2, 16.0), spine);
+    float band = 1.0 - smoothstep(1.2, 3.5, route);
     float t = f.time;
-    // Пульс к цели: фаза растёт по расстоянию — гребень движется к цели.
-    float pulse = pow(0.5 + 0.5 * sin(d_goal * 0.35 + t * 2.4), 6.0);
-    // Сигнал острова: раз в ~6 с длинная яркая волна.
-    float signal = pow(0.5 + 0.5 * sin(d_goal * 0.08 + t * 1.05), 24.0);
-    float near = exp(-length(rel.xz) / 28.0);
+    float pulse = pow(0.5 + 0.5 * sin(left * 0.35 + t * 2.4), 6.0);
+    float signal = pow(0.5 + 0.5 * sin(left * 0.06 + t * 1.05), 24.0);
+    float near = exp(-length(rel.xz) / 35.0);
     float breathe = 0.55 + 0.45 * sin(t * 0.9);
-    float k = f.mycelium.x * vein * (0.15 * breathe + 1.2 * pulse + 2.5 * signal) * (0.25 + 0.75 * near);
+    float k = f.mycelium.x * vein * band * (0.2 * breathe + 1.2 * pulse + 2.5 * signal) * (0.3 + 0.7 * near);
     return float3(0.25, 1.0, 0.75) * k * 0.12;
 }
 

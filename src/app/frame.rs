@@ -319,7 +319,13 @@ impl App {
         if self.river_push_s <= 0.0 {
             self.river_push_s = 0.5;
             if let Some(f) = self.world.features.as_ref() {
-                let spread = self.hydrology.spread(f.segments.len());
+                let mut spread = self.hydrology.spread(f.segments.len());
+                // Маршрут уровня (05.6) — в тех же служебных полях отрезков троп.
+                for &(i, pad) in &self.route_pads {
+                    if let Some(s) = spread.get_mut(i) {
+                        *s = pad;
+                    }
+                }
                 r.set_river_spread(&spread);
                 // Уровень воды (03.2): плёсы ровные, перепады — водопады.
                 self.river_levels = self

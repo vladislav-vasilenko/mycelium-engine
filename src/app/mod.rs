@@ -74,6 +74,8 @@ pub struct App {
     raft: Option<raft::Raft>,
     /// Ночной побег от дрона (05.6, `--escape`).
     escape: Option<crate::game::escape::NightEscape>,
+    /// Отрезки маршрута уровня: служебные поля для шейдера (нити мицелия).
+    route_pads: Vec<(usize, [f32; 2])>,
     /// Уровень воды рек на концах отрезков (03.2), обновляется с разливом.
     river_levels: Vec<[f32; 4]>,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
@@ -254,6 +256,7 @@ impl App {
         }
         // Ночной побег (05.6): тропа маяков вдоль реки от начала тропы вниз
         // по течению к водопаду; игрок — у начала тропы.
+        let mut route_pads: Vec<(usize, [f32; 2])> = Vec::new();
         let escape = if args.escape {
             // Лес мха (Кокэмуси-но-мори, выше хижины Сиратани-сансо; в OSM
             // нет — по описанию маршрута, ±200 м) → водопад Хирю-отоси (OSM
@@ -265,9 +268,18 @@ impl App {
                 .as_ref()
                 .and_then(|f| crate::game::escape::trail_route(f, MOSS_FOREST, HIRYU_OTOSHI))
                 .and_then(|r| {
-                    let len: f32 = r.windows(2).map(|w| w[0].distance(w[1])).sum();
-                    eprintln!("побег: лес мха → Хирю-отоси, {:.0} м по тропам", len);
-                    crate::game::escape::NightEscape::on_route(&world, &r)
+                    let len: f32 = r.points.windows(2).map(|w| w[0].distance(w[1])).sum();
+                    eprintln!(
+                        "побег: лес мха → Хирю-отоси, {:.0} м по тропам, {} отрезков; до тропы от старта {:.0} м, от водопада {:.0} м",
+                        len,
+                        r.segs.len(),
+                        r.points[0].distance(r.points[1]),
+                        r.points[r.points.len() - 1].distance(r.points[r.points.len() - 2])
+                    );
+                    route_pads = r.pads().collect();
+                    // Старт — на тропе у леса мха (точка без тропы до неё — по прямой
+                    // через склон, нитей там нет).
+                    crate::game::escape::NightEscape::on_route(&world, &r.points[1..])
                 });
             if e.is_none() {
                 eprintln!("побег: маршрут по тропам не найден");
@@ -312,6 +324,7 @@ impl App {
             river_push_s: 0.0,
             raft,
             escape,
+            route_pads,
             river_levels: Vec::new(),
             grade: true,
             taa_frame: 0,

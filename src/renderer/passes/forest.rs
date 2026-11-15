@@ -55,6 +55,8 @@ impl FramePass for ForestPass {
             table.setAddress_atIndex(f.counters[s].gpuAddress(), 9);
             table.setAddress_atIndex(f.lods.gpuAddress(), 10);
             table.setTexture_atIndex(c.cover.gpuResourceID(), 0);
+            table.setTexture_atIndex(f.vegetation.gpuResourceID(), 1);
+            table.setAddress_atIndex(f.vegetation_table.gpuAddress(), 11);
         }
         enc.setComputePipelineState(&ctx.r.pipelines.forest_place);
         enc.setArgumentTable(Some(table));

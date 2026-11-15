@@ -83,6 +83,10 @@ pub struct Manifest {
     /// Крупная детализация (02.9, `tools/geo/macro.py`), необязательная.
     #[serde(rename = "macro", default, skip_serializing_if = "Option::is_none")]
     pub macro_detail: Option<cover::CoverMeta>,
+    /// Сообщества карты растительности (02.7), необязательные; экспорт их не
+    /// переносит (данные внешние, пересчитываются `tools/geo/vegetation.py`).
+    #[serde(default, skip_serializing)]
+    pub vegetation: Option<vegetation::VegetationMeta>,
     /// Игровая зона ~1 м внутри поля высот (02.7, шаг 5), необязательная.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_zone: Option<fine::HeightZoneMeta>,
@@ -375,6 +379,7 @@ pub fn export(world: &World, dir: &Path) -> Result<Manifest, String> {
         )?,
         // Зона пока только импортируется: экспорт пишет поле острова (02.7, шаг 5).
         height_zone: None,
+        vegetation: None,
         features,
     };
     let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -525,6 +530,9 @@ pub fn import(dir: &Path) -> Result<World, String> {
     if let Some(meta) = &m.cover {
         world.cover = Some(cover::import(dir, meta)?);
     }
+    if let Some(meta) = &m.vegetation {
+        world.vegetation = Some(vegetation::import(dir, meta)?);
+    }
     if let Some(meta) = &m.macro_detail {
         world.macro_detail = Some(cover::import(dir, meta)?);
     }
@@ -607,6 +615,7 @@ pub fn preview(world: &World, (nx, nz): (usize, usize)) -> Vec<u8> {
 }
 
 mod cover;
+mod vegetation;
 mod fine;
 #[cfg(test)]
 mod tests;

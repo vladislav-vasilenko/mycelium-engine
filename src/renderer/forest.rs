@@ -32,6 +32,9 @@ pub(super) struct ForestGpu {
     /// (первый индекс, число индексов, базовая вершина, 0) вида × LOD.
     pub lods: Obj<dyn MTLBuffer>,
     pub albedo: Obj<dyn MTLTexture>,
+    /// Сообщества (R8, номер) и параметры леса (256 × 2 float4); без карты — 1 × 1 нуль.
+    pub vegetation: Obj<dyn MTLTexture>,
+    pub vegetation_table: Obj<dyn MTLBuffer>,
     pub instances: Vec<Obj<dyn MTLBuffer>>,
     pub counters: Vec<Obj<dyn MTLBuffer>>,
     counted: [bool; FRAME_SLOTS],
@@ -82,7 +85,11 @@ impl ForestGpu {
 
 impl super::Renderer {
     /// Растения для леса: сетки трёх видов и массив текстур коры и листвы.
-    pub fn set_forest(&mut self, a: &PlantAssets) -> Result<(), String> {
+    pub fn set_forest(
+        &mut self,
+        a: &PlantAssets,
+        vegetation: Option<&crate::world::VegetationLayer>,
+    ) -> Result<(), String> {
         let buf = |bytes: &[u8], name: &str| buffer_with(&self.device, bytes, name);
         let mut lods = Vec::new();
         for s in &a.lods {
@@ -104,12 +111,31 @@ impl super::Renderer {
             pixel_bytes: 4,
             mips: true,
         }])?;
+        let zero = [0u8];
+        let (ids, size) = vegetation.map_or((&zero[..], 1), |v| (&v.ids[..], v.size));
+        let veg_tex = super::resources::sampled_texture(
+            &self.device,
+            MTLPixelFormat::R8Unorm,
+            size,
+            1,
+            false,
+            "forest: vegetation communities",
+        )?;
+        self.upload_textures(&[super::resources::TextureUpload {
+            texture: &veg_tex,
+            data: ids,
+            pixel_bytes: 1,
+            mips: false,
+        }])?;
+        let table: Vec<[f32; 8]> = vegetation.map_or(vec![[0.0; 8]; 256], |v| v.forest.clone());
         let inst_bytes = FOREST_LISTS * FOREST_CAP * std::mem::size_of::<PlantInstance>();
         let g = ForestGpu {
             vertices: buf(bytemuck::cast_slice(&a.vertices), "plants: vertices"),
             indices: buf(bytemuck::cast_slice(&a.indices), "plants: indices"),
             lods: buf(bytemuck::cast_slice(&lods), "plants: LOD ranges"),
             albedo,
+            vegetation: veg_tex,
+            vegetation_table: buf(bytemuck::cast_slice(&table), "forest: community table"),
             instances: (0..FRAME_SLOTS)
                 .map(|s| {
                     shared_buffer(
@@ -131,7 +157,8 @@ impl super::Renderer {
             counted: [false; FRAME_SLOTS],
             obstacles: Vec::new(),
         };
-        for b in [&g.vertices, &g.indices, &g.lods]
+        self.residency.addAllocation(as_allocation(&*g.vegetation));
+        for b in [&g.vertices, &g.indices, &g.lods, &g.vegetation_table]
             .into_iter()
             .chain(&g.instances)
             .chain(&g.counters)
@@ -142,13 +169,14 @@ impl super::Renderer {
         self.residency.commit();
         if let Some(old) = self.forest.replace(g) {
             self.retire(
-                vec![old.albedo],
+                vec![old.albedo, old.vegetation],
                 Some(Box::new((
                     old.vertices,
                     old.indices,
                     old.lods,
                     old.instances,
                     old.counters,
+                    old.vegetation_table,
                 ))),
             );
         }

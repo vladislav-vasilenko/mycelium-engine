@@ -114,7 +114,7 @@ impl App {
                 &crate::plants::models_dir(),
                 &crate::terrain_materials::source_dir(),
             )
-            .and_then(|a| r.set_forest(&a).map(|_| a))
+            .and_then(|a| r.set_forest(&a, self.world.vegetation.as_ref()).map(|_| a))
             {
                 Ok(a) => {
                     eprintln!(

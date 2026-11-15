@@ -65,7 +65,9 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
                          constant CullView& view [[buffer(7)]],
                          device PlantInstance* out [[buffer(8)]],
                          device atomic_uint* counts [[buffer(9)]],
+                         device const float4* veg_table [[buffer(11)]],
                          texture2d<float> cover [[texture(0)]],
+                         texture2d<float> veg [[texture(1)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (any(gid >= uint2(FOREST_GRID))) {
         return;
@@ -82,6 +84,25 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         float cn = float(cover.get_width());
         float4 cv = cover.sample(ls, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
         float forest = cv.x + cv.y;
+        // Сообщество карты растительности (02.7): густота, доля криптомерии,
+        // масштаб, валуны. Точка выборки дрожит на ±10 м: граница сообществ
+        // не ступенька сетки 15 м. Без карты — по поясам.
+        float density = forest * 0.6;
+        float cedar = cv.y / max(forest, 1e-4);
+        float2 srange = float2(0.55, 1.1);
+        float boulders = 0.06 * forest + 0.25 * cv.w;
+        uint vn = veg.get_width();
+        if (vn > 1) {
+            float2 pj = p + (float2(rnd(h, 11), rnd(h, 12)) - 0.5) * 20.0;
+            uint2 t = uint2(clamp(pj / frame.map_size_m * float(vn - 1) + 0.5, 0.0, float(vn - 1)));
+            uint id = uint(veg.read(t).r * 255.0 + 0.5);
+            float4 a = veg_table[id * 2];
+            float4 b = veg_table[id * 2 + 1];
+            density = a.x;
+            cedar = a.y;
+            srange = a.zw;
+            boulders = b.x;
+        }
         float y = ground_height(p, heights, zone_heights, zone, frame);
         // На склоне основание — по нижней точке у ствола: корни уходят в грунт.
         float y_low = y;
@@ -99,16 +120,16 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         uint species;
         float scale;
         if (kind == 0) {
-            if (rnd(h, 3) > forest * 0.6 || slope > 0.9) {
+            if (rnd(h, 3) > density || slope > 0.9) {
                 continue;
             }
-            species = rnd(h, 4) < cv.y / max(forest, 1e-4) ? SPECIES_YAKUSUGI : SPECIES_BROADLEAF;
-            scale = species == SPECIES_YAKUSUGI
-                ? (rnd(h, 5) < 0.03 ? 1.45 : 0.55 + 0.55 * rnd(h, 5))
-                : 0.7 + 0.45 * rnd(h, 5);
+            species = rnd(h, 4) < cedar ? SPECIES_YAKUSUGI : SPECIES_BROADLEAF;
+            // Редкие великаны в естественном кедровом лесу (масштаб от 0,7).
+            bool giant = species == SPECIES_YAKUSUGI && srange.x >= 0.7 && rnd(h, 6) < 0.04;
+            scale = giant ? 1.6 : mix(srange.x, srange.y, rnd(h, 5));
         } else {
             // Валуны: редко в лесу, чаще на голом и в руслах.
-            if (rnd(h, 3) > 0.06 * forest + 0.25 * cv.w || slope > 1.2) {
+            if (rnd(h, 3) > boulders || slope > 1.2) {
                 continue;
             }
             species = SPECIES_BOULDER;

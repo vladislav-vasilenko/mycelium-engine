@@ -194,6 +194,17 @@ pub struct World {
     /// Крупная детализация (`macro.png`, 02.9): видимость неба, кривизна,
     /// влажность, осыпь — RGBA на сетке поля высот, если есть.
     pub macro_detail: Option<CoverLayer>,
+    /// Сообщества карты растительности (02.7) и параметры леса, если есть.
+    pub vegetation: Option<VegetationLayer>,
+}
+
+/// Номер сообщества на узел сетки поясов (0 — нет данных) и параметры леса
+/// сообщества: густота, доля криптомерии, масштаб от и до, валуны (по 8 f32).
+#[derive(Clone, Debug)]
+pub struct VegetationLayer {
+    pub size: u32,
+    pub ids: Vec<u8>,
+    pub forest: Vec<[f32; 8]>,
 }
 
 /// Слой RGBA8 на квадратной сетке на всю карту, узел — тексель. Пояса
@@ -338,6 +349,7 @@ impl World {
             features: None,
             cover: None,
             macro_detail: None,
+            vegetation: None,
             zone: None,
         };
         world.markers = match markers {

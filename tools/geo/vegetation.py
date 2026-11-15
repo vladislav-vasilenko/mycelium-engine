@@ -49,6 +49,30 @@ RULES = [
 # Нет правила по названию — по зоне (植生区分): зона бука (на Якусиме — горные
 # хвойные леса) или зона камелии (вечнозелёный широколиственный лес).
 ZONES = [("ブナクラス", (0.2, 0.8, 0.0, 0.0)), ("ヤブツバキクラス", (0.9, 0.0, 0.1, 0.0))]
+# Лес по сообществу (02.4): густота (доля клеток 6 м с деревом), доля
+# криптомерии, масштаб дерева от и до, частота валунов. Первое совпадение.
+FOREST = [
+    (("植林",), (0.9, 1.0, 0.45, 0.7, 0.02)),            # посадки криптомерии: густо, молодо
+    (("ヤクスギ", "スギ群集"), (0.55, 0.7, 0.7, 1.3, 0.15)),  # естественный лес якусуги, мшистые валуны
+    (("ツガ", "モミ"), (0.55, 0.8, 0.6, 1.1, 0.1)),
+    (("シャクナゲ", "ビャクシン", "ヤクシマダケ", "ササ"), (0.03, 1.0, 0.3, 0.5, 0.25)),  # высокогорье
+    (("岩壁", "裸地", "崩壊", "断崖", "珊瑚礁"), (0.0, 0.0, 0.5, 0.5, 0.4)),
+    (("二次林", "アカメガシワ", "伐採", "ハドノキ", "カナクギノキ", "ミズキ"), (0.45, 0.0, 0.5, 0.85, 0.03)),
+    (("ジイ", "シイ", "カシ", "ガシ", "タブ", "イスノキ", "アコウ", "ハマビワ", "サルスベリ"), (0.7, 0.03, 0.8, 1.2, 0.05)),
+    (("マツ",), (0.4, 0.6, 0.5, 0.8, 0.02)),
+    (("竹林",), (0.1, 0.0, 0.5, 0.8, 0.0)),
+]
+FOREST_DEFAULT = (0.01, 0.0, 0.5, 0.8, 0.01)
+
+
+def forest_params(hanrei, shoku):
+    for name in (hanrei, shoku):
+        for words, f in FOREST:
+            if any(word in name for word in words):
+                return f
+    return FOREST_DEFAULT
+
+
 WATER = ("開放水域", "水域")
 
 
@@ -108,7 +132,8 @@ def main():
         key = hanrei or shoku
         if key not in index:
             index[key] = len(legend) + 1
-            legend.append({"id": index[key], "name": key, "belts": w.tolist()})
+            legend.append({"id": index[key], "name": key, "belts": w.tolist(),
+                           "forest": list(forest_params(hanrei or "", shoku or ""))})
         g = shapely.from_wkb(bytes(wkb))
         for poly in getattr(g, "geoms", [g]):
             if poly.geom_type != "Polygon":
@@ -126,7 +151,9 @@ def main():
     # Смягчение на 1–2 узла: граница полигона — не ступенька сетки.
     for c in range(4):
         veg[..., c] = ndimage.gaussian_filter(veg[..., c], 1.0)
-    cover = np.asarray(Image.open(d / "cover.png")).astype(np.float32) / 255.0
+    # Исходные пояса по WorldCover — отдельный файл: повторный запуск не
+    # подмешивает уже пересчитанные пояса.
+    cover = np.asarray(Image.open(SRC.parent / "cover_worldcover.png")).astype(np.float32) / 255.0
     land = cover.sum(-1) > 0.05
     near = ndimage.gaussian_filter(has.astype(np.float32), 1.0)
     w = veg / np.maximum(near[..., None], 1e-3)

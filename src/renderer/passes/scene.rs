@@ -91,10 +91,14 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
     };
     if let Some(c) = &ctx.r.clusters {
         if ctx.input.cull.is_some() {
-            draw_clusters(ctx, enc, terrain, c, None);
+            // Участок детализации — первым (02.10, сессия 4): кластеры под ним
+            // утоплены и отбрасываются ранним тестом глубины — дорогой
+            // `terrain_fs` не затеняет пиксели у ног дважды (−2,5 мс).
             if ctx.input.forest {
+                bind_clusters(ctx, enc, terrain, c);
                 draw_patch(ctx, enc);
             }
+            draw_clusters(ctx, enc, terrain, c, None);
             return;
         }
         if let Some(list) = ctx.input.clusters {
@@ -166,6 +170,37 @@ fn draw_clusters(
     if count == Some(0) {
         return;
     }
+    enc.pushDebugGroup(&label(&match count {
+        Some(n) => format!("terrain: {n} clusters (CPU cut)"),
+        None => "terrain: clusters (GPU cut, indirect)".to_string(),
+    }));
+    bind_clusters(ctx, enc, terrain, c);
+    match count {
+        // Срез на GPU (02.5): число экземпляров — из indirect-аргументов вида 0.
+        None => enc.drawPrimitives_indirectBuffer(
+            MTLPrimitiveType::Triangle,
+            c.cull.counters[ctx.slot_index].gpuAddress() + ARGS_OFFSET as u64,
+        ),
+        Some(n) => unsafe {
+            enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                MTLPrimitiveType::Triangle,
+                0,
+                CLUSTER_VERTEX_COUNT,
+                n,
+            );
+        },
+    }
+    enc.popDebugGroup();
+}
+
+/// Привязки кластерного рельефа: таблица `Terrain` и конвейер кластеров
+/// (участок детализации ставит свой конвейер поверх тех же привязок).
+fn bind_clusters(
+    ctx: &PassCtx,
+    enc: &RenderEncoder,
+    terrain: &crate::renderer::terrain::TerrainGpu,
+    c: &crate::renderer::terrain_clusters::ClustersGpu,
+) {
     let table = ctx.slot.table(Table::Terrain);
     unsafe {
         table.setAddress_atIndex(c.heights.gpuAddress(), 0);
@@ -198,28 +233,8 @@ fn draw_clusters(
         let probes = ctx.r.rt.as_ref().map_or(&c.heights, |rt| &rt.probes);
         table.setAddress_atIndex(probes.gpuAddress(), 13);
     }
-    enc.pushDebugGroup(&label(&match count {
-        Some(n) => format!("terrain: {n} clusters (CPU cut)"),
-        None => "terrain: clusters (GPU cut, indirect)".to_string(),
-    }));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain_clusters);
     enc.setArgumentTable_atStages(table, BOTH_STAGES);
-    match count {
-        // Срез на GPU (02.5): число экземпляров — из indirect-аргументов вида 0.
-        None => enc.drawPrimitives_indirectBuffer(
-            MTLPrimitiveType::Triangle,
-            c.cull.counters[ctx.slot_index].gpuAddress() + ARGS_OFFSET as u64,
-        ),
-        Some(n) => unsafe {
-            enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
-                MTLPrimitiveType::Triangle,
-                0,
-                CLUSTER_VERTEX_COUNT,
-                n,
-            );
-        },
-    }
-    enc.popDebugGroup();
 }
 
 /// Вершин детальной заплатки у камеры: 256² ячеек × 2 треугольника
@@ -227,7 +242,7 @@ fn draw_clusters(
 const PATCH_VERTEX_COUNT: usize = 256 * 256 * 6;
 
 /// Детальная заплатка рельефа у камеры (02.10, сессия 2) — та же таблица
-/// `terrain`, что у кластеров (её привязки уже стоят), свой вершинный шейдер.
+/// `terrain`, что у кластеров (привязки — `bind_clusters`), свой вершинный шейдер.
 /// Вне игрового режима или вне зоны шейдер схлопывает все вершины.
 fn draw_patch(ctx: &PassCtx, enc: &RenderEncoder) {
     enc.pushDebugGroup(&label("terrain: detail patch"));

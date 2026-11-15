@@ -331,6 +331,17 @@ impl App {
             });
         self.capture_requested = false;
         let readback = std::mem::take(&mut self.readback_requested);
+        if self.args.gpu_times && r.frame_index() % 120 == 0 && r.frame_index() > 0 {
+            let mut v: Vec<_> = r.gpu_pass_ms().to_vec();
+            let total: f64 = v.iter().map(|x| x.1).sum();
+            v.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let line: Vec<String> = v
+                .iter()
+                .take(8)
+                .map(|(n, ms)| format!("{n} {ms:.2}"))
+                .collect();
+            eprintln!("GPU {total:.2} мс: {}", line.join(", "));
+        }
         let outcome = r.render(&FrameInput {
             uniforms,
             instances: &instances,

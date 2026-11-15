@@ -28,6 +28,7 @@ mod sky;
 mod targets;
 mod terrain;
 mod terrain_clusters;
+mod timers;
 mod ui;
 mod water;
 
@@ -114,6 +115,8 @@ pub struct Renderer {
     forest: Option<forest::ForestGpu>,
     /// Ускоряющие структуры для лучей (11); создаются с лесом.
     rt: Option<rt::RtGpu>,
+    /// GPU-таймеры проходов (02.10, сессия 4).
+    timers: Option<timers::GpuTimers>,
     forest_stats: Option<ForestStats>,
     /// Интерфейс (05.1): шрифт и буферы вершин.
     ui: Option<ui::UiGpu>,
@@ -220,6 +223,7 @@ impl Renderer {
             [build(true, false)?, build(true, true)?],
         ];
 
+        let timers = timers::GpuTimers::new(&device);
         Ok(Renderer {
             info,
             device,
@@ -254,6 +258,7 @@ impl Renderer {
             cull_stats: None,
             forest: None,
             rt: None,
+            timers,
             forest_stats: None,
             ui: None,
             stats: Stats::default(),
@@ -395,6 +400,10 @@ impl Renderer {
             return FrameOutcome::SkippedBusySlot;
         }
 
+        // Метки времени прошлого кадра слота (GPU-таймеры).
+        if let Some(t) = self.timers.as_mut() {
+            t.collect(slot_index);
+        }
         // Счётчики выбора на GPU прошлого кадра слота (02.5) и сброс.
         let frame_index = self.frame_index;
         if let Some(c) = self.clusters.as_mut()
@@ -420,6 +429,15 @@ impl Renderer {
             .is_some_and(|path| device::start_capture(&self.device, path));
         let encode_start = std::time::Instant::now();
         self.encode_frame(slot_index, &drawable, input, readback);
+        let names: Vec<&'static str> = self.plans[usize::from(self.prev_readback)]
+            [usize::from(readback)]
+        .passes
+        .iter()
+        .map(|p| p.name)
+        .collect();
+        if let Some(t) = self.timers.as_mut() {
+            t.set_names(slot_index, names);
+        }
 
         // Схема Apple для Metal 4: ждать drawable → commit → сигнал drawable → present.
         let slot = &self.slots[slot_index];
@@ -547,13 +565,19 @@ impl Renderer {
             },
         };
         let plan = &self.plans[usize::from(self.prev_readback)][usize::from(readback)];
-        for (pass, barrier) in plan.passes.iter().zip(&plan.barriers) {
+        for (i, (pass, barrier)) in plan.passes.iter().zip(&plan.barriers).enumerate() {
+            if let Some(t) = &self.timers {
+                t.stamp(&slot.cmd, slot_index, i);
+            }
             let barrier = PassBarrier {
                 after: to_mtl_stages(barrier.after),
                 before: to_mtl_stages(barrier.before),
                 needed: !barrier.after.is_empty(),
             };
             passes::find(pass.name).encode(&ctx, &barrier);
+        }
+        if let Some(t) = &self.timers {
+            t.stamp(&slot.cmd, slot_index, plan.passes.len());
         }
         slot.cmd.popDebugGroup();
         slot.cmd.endCommandBuffer();
@@ -575,6 +599,11 @@ impl Drop for Renderer {
 
 impl Renderer {
     /// Числа выбора кластеров на GPU (02.5) последнего завершённого кадра.
+    /// Сглаженное время проходов на GPU, мс.
+    pub fn gpu_pass_ms(&self) -> &[(&'static str, f64)] {
+        self.timers.as_ref().map_or(&[], |t| &t.avg)
+    }
+
     pub fn cull_stats(&self) -> Option<CullStats> {
         self.cull_stats
     }

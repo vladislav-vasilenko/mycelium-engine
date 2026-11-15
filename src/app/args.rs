@@ -32,6 +32,8 @@ pub struct Args {
     pub no_taa: bool,
     /// Без лучей затенения (11) — для сравнения.
     pub no_rt: bool,
+    /// Печатать время проходов GPU раз в 2 с.
+    pub gpu_times: bool,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -79,6 +81,7 @@ impl Args {
                 "--sense" => args.sense = true,
                 "--no-taa" => args.no_taa = true,
                 "--no-rt" => args.no_rt = true,
+                "--gpu-times" => args.gpu_times = true,
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

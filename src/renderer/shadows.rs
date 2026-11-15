@@ -23,7 +23,12 @@ pub(super) struct ShadowGpu {
     pub map: Obj<dyn MTLTexture>,
     /// Глубина [0, 1], ближе к свету — меньше: проверка «меньше или равно», запись.
     pub depth_state: Obj<dyn MTLDepthStencilState>,
+    /// Карта укрытия от дождя (04.3): Depth32Float `RAIN_SIZE`², кроны сверху.
+    pub rain: Obj<dyn MTLTexture>,
 }
+
+/// Сторона карты укрытия от дождя, текселей (128 м → 12,5 см на тексель).
+pub const RAIN_SIZE: u32 = 1024;
 
 impl ShadowGpu {
     pub fn new(
@@ -52,6 +57,23 @@ impl ShadowGpu {
         let depth_state = device
             .newDepthStencilStateWithDescriptor(&d)
             .ok_or("состояние глубины теней")?;
-        Ok(ShadowGpu { map, depth_state })
+        let rd = MTLTextureDescriptor::new();
+        rd.setPixelFormat(MTLPixelFormat::Depth32Float);
+        unsafe {
+            rd.setWidth(RAIN_SIZE as usize);
+            rd.setHeight(RAIN_SIZE as usize);
+        }
+        rd.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+        rd.setStorageMode(MTLStorageMode::Private);
+        let rain = device
+            .newTextureWithDescriptor(&rd)
+            .ok_or("карта укрытия от дождя")?;
+        rain.setLabel(Some(&label("rain occlusion (Depth32Float)")));
+        residency.addAllocation(as_allocation(&*rain));
+        Ok(ShadowGpu {
+            map,
+            depth_state,
+            rain,
+        })
     }
 }

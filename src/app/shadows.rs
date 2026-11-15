@@ -77,6 +77,8 @@ pub fn shadow_frame(
         ],
         texel_m: [0.0; 4],
         params: [1.0, 0.0, 0.0, 0.0],
+        rain_vp_rel: rain_occlusion_vp(cam).to_cols_array_2d(),
+        rain: [RAIN_HALF_M as f32, RAIN_TOP_M, RAIN_RANGE_M, 1.0],
     };
     let mut ranges = [(0u32, 0u32); CASCADES];
     let mut views = [View::ortho(glam::Mat4::IDENTITY, 1.0, 1.0); CASCADES];
@@ -145,4 +147,27 @@ mod tests {
         assert!((frac(a.x) - frac(b.x)).abs() < 1e-6 || (frac(a.x) - frac(b.x)).abs() > 1.0 - 1e-6);
         assert!((frac(a.y) - frac(b.y)).abs() < 1e-6 || (frac(a.y) - frac(b.y)).abs() > 1.0 - 1e-6);
     }
+}
+
+/// Карта укрытия от дождя (04.3, сессия 2): полуширина, м; сторона — в
+/// `renderer::shadows::RAIN_SIZE` текселей.
+pub const RAIN_HALF_M: f64 = 64.0;
+/// Верх карты над камерой и диапазон высот, м.
+const RAIN_TOP_M: f32 = 120.0;
+const RAIN_RANGE_M: f32 = 240.0;
+
+/// Ортопроекция сверху вниз относительно камеры: x → x, z → y, высота →
+/// глубина (выше — меньше). Центр — по сетке текселей: карта не дрожит при
+/// движении камеры.
+fn rain_occlusion_vp(cam: DVec3) -> glam::Mat4 {
+    let texel = 2.0 * RAIN_HALF_M / crate::renderer::RAIN_SIZE as f64;
+    let sx = ((cam.x / texel).round() * texel - cam.x) as f32;
+    let sz = ((cam.z / texel).round() * texel - cam.z) as f32;
+    let h = RAIN_HALF_M as f32;
+    glam::Mat4::from_cols(
+        glam::Vec4::new(1.0 / h, 0.0, 0.0, 0.0),
+        glam::Vec4::new(0.0, 0.0, -1.0 / RAIN_RANGE_M, 0.0),
+        glam::Vec4::new(0.0, 1.0 / h, 0.0, 0.0),
+        glam::Vec4::new(-sx / h, -sz / h, RAIN_TOP_M / RAIN_RANGE_M, 1.0),
+    )
 }

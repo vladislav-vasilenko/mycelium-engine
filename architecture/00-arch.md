@@ -1450,6 +1450,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Влажность одинакова под кронами и на поляне; переход облачности без облаков на небе.
 - **Пересмотреть.** С картой укрытия от дождя (сессия 2).
 
+### AD-82. Карта укрытия от дождя — глубина крон сверху вниз
+
+- **Решение.** Проход `shadows` после каскадов рисует списки теней деревьев (`forest::draw_rain_occluders` → `draw_occluders`, конвейер `plant_shadow`) в `ShadowGpu.rain` (Depth32Float 1024², 128 м вокруг камеры) ортопроекцией сверху `ShadowUniforms.rain_vp_rel` (глубина 0 — 120 м над камерой, диапазон 240 м); `terrain_fs` (текстура 11) считает долю точек под кронами в круге 0,8 м и ослабляет влажность от дождя; отладочный вид `wetness`: красный — укрытие.
+- **Почему.** Сухо под кронами — замечание пользователя; та же карта нужна каплям (остановка о кроны) и капели с краёв крон (сессия 3).
+- **Отброшено.** Укрытие по поясу леса (кроны не там, где деревья); лучи вверх (дорого в каждом пикселе).
+- **Цена.** +1 проход отрисовки деревьев (списки теней); листва в карте — с просветами (как в тенях), доля укрытия усилена ×2,5.
+- **Пересмотреть.** С частицами дождя и текстурой влажности по месту.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1546,3 +1554,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 04.6 (сессия 2, часть 1) | после `7178074` | AD-80: `Targets.wind`; `shaders::Motion` (`render_pipeline(…, motion)`, `set_motion_attachment`); `plant_world(…, t)`, `PlantOut.prev_clip`, `cur_clip`, `PlantColorOut`, `plant_fs_prepassed` пишет `color(1)`; `upscale_prep` читает `texture(5)`; `FrameUniforms.cam_lo.w` — шаг времени мира (`App.prev_world_time`); `passes/scene.rs::begin_water` — вода вторым кодировщиком |
 | 2026-11-15 | 04.6 (исправления) | после `ca21c91` | `FrameUniforms.cam_hi.w` — масштаб рендера: `terrain_fs` умножает на него производные для мипов; слой рельефа 10 `PH_worn_asphalt` (`terrain_materials::LAYERS` — 11, `MAT_ASPHALT`, `MAT_COUNT` 11), дорога — `over[MAT_ASPHALT]` вместо процедурного асфальта |
 | 2026-11-15 | 04.3 (сессия 1) | после `8939904` | AD-81: модуль `weather.rs` (`Preset`, `Weather`); `FrameUniforms.weather` (256 байт); `App.weather`, `--weather`, клавиша P; `SkyInputs.view.z` — облачность, `SkyFrame.exposure.w` — яркость свода; `sky_ambient`, `sky_fs`, `stars_vs` — облачность; `terrain_fs` — влажность от дождя; `plant_shade` — мокрая кора |
+| 2026-11-15 | 04.3 (сессия 2) | после `b1f1c14` | AD-82: `ShadowUniforms.rain_vp_rel`, `rain` (384 байта); `ShadowGpu.rain`, `RAIN_SIZE`; `app::shadows::rain_occlusion_vp`, `RAIN_HALF_M`; `passes/forest.rs`: `draw_rain_occluders`, `draw_occluders`; проход `shadows` — карта укрытия; `terrain_fs`: `texture(11)` `rain_occ`, укрытие во влажности, вид `wetness` — укрытие и влажность от дождя |

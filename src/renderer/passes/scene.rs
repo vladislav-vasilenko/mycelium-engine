@@ -174,6 +174,8 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
+        // Карта укрытия от дождя (04.3).
+        table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 11);
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
@@ -266,6 +268,8 @@ fn bind_clusters(
         table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 9);
         table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 12);
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
+        // Карта укрытия от дождя (04.3).
+        table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 11);
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
         table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);

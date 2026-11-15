@@ -339,6 +339,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            texture3d<float> aerial [[texture(8)]],
                            texture2d<float> macro_tex [[texture(9)]],
                            texture2d<float> rt_ao_tex [[texture(10)]],
+                           depth2d<float> rain_occ [[texture(11)]],
                            device const float4* probes [[buffer(13)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
@@ -698,7 +699,33 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // ложбинах — мокрее, под пологом чуть суше. Мокрый камень темнеет меньше
     // пористой почвы, но блестит так же.
     float rain_wet = frame.weather.z * (1.0 - 0.6 * smoothstep(30.0, 55.0, slope_deg))
-                   * saturate(0.8 + max(-curv, 0.0) * 3.0) * (1.0 - 0.3 * forest_w);
+                   * saturate(0.8 + max(-curv, 0.0) * 3.0);
+    // Укрытие кронами (04.3, сессия 2): карта глубины крон сверху; доля
+    // закрытых точек в круге ~0,5 м (листва в карте — с просветами) → под
+    // кроной сухо, на краю — переход, вдали от карты — по поясу леса.
+    float shelter_dbg = -1.0;
+    if (shadows.rain.w > 0.5) {
+        constexpr sampler rs(filter::nearest, address::clamp_to_edge);
+        float cover_n = 0.0;
+        float edge = 0.0;
+        for (int k = 0; k < 8; ++k) {
+            float a = float(k) * 0.785398;
+            float3 q = in.rel + float3(cos(a), 0.0, sin(a)) * (k % 2 == 0 ? 0.35 : 0.8);
+            float4 c = shadows.rain_vp_rel * float4(q, 1.0);
+            float2 uv = float2(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
+            edge = max(edge, max(abs(c.x), abs(c.y)));
+            float top = shadows.rain.y - rain_occ.sample(rs, uv) * shadows.rain.z;
+            cover_n += top > in.rel.y + 1.2 ? 1.0 : 0.0;
+        }
+        // Листва в карте — с просветами (55 % текселей пропускают свет, как в
+        // тенях): ~половина закрытых точек — уже полная крона.
+        float shelter = saturate(cover_n / 8.0 * 2.5);
+        float inside = 1.0 - smoothstep(0.8, 1.0, edge);
+        shelter_dbg = shelter;
+        rain_wet *= mix(1.0 - 0.3 * forest_w, 1.0 - 0.85 * shelter, inside);
+    } else {
+        rain_wet *= 1.0 - 0.3 * forest_w;
+    }
     float wet = saturate(max(wet_mask * porosity, rain_wet * mix(porosity, 1.0, 0.7)));
     // Мокрая почва вдвое темнее и насыщеннее (вода заполняет поры).
     albedo = pow(albedo, float3(1.0 + 0.35 * wet)) * mix(1.0, 0.45, wet);
@@ -765,7 +792,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
             return float4(mix(float3(0.08), c, saturate(near)), 1.0);
         }
         case VIEW_WETNESS:
-            return float4(mix(float3(0.1, 0.1, 0.1), float3(0.1, 0.4, 1.0), wet_mask), 1.0);
+            // Синий — мокрый песок у моря, зелёный — влажность от дождя (04.3).
+            return float4(shelter_dbg < 0.0 ? 1.0 : 0.1 + 0.9 * shelter_dbg, 0.1 + 0.8 * rain_wet, 0.1 + 0.9 * wet_mask, 1.0);
         case VIEW_MATERIALS: {
             float3 c = 0.0;
             for (int i = 0; i < MAT_COUNT; ++i) {

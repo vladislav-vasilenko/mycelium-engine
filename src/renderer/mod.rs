@@ -48,7 +48,7 @@ pub use forest::ForestStats;
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
-pub use shadows::{CASCADES, SHADOW_SIZE, ShadowFrame};
+pub use shadows::{CASCADES, RAIN_SIZE, SHADOW_SIZE, ShadowFrame};
 pub use terrain::{FeatureBuffers, TerrainTextures};
 pub use terrain_clusters::{ClusterData, MAX_VISIBLE_CLUSTERS};
 

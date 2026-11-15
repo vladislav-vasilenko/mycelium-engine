@@ -98,5 +98,24 @@ impl FramePass for ShadowsPass {
             super::forest::draw_shadow(ctx, &enc, k);
             enc.endEncoding();
         }
+        // Карта укрытия от дождя (04.3, сессия 2): кроны сверху вниз.
+        if sf.uniforms.rain[3] > 0.5 {
+            let rp = MTL4RenderPassDescriptor::new();
+            let depth = rp.depthAttachment();
+            depth.setTexture(Some(&sh.rain));
+            depth.setLoadAction(MTLLoadAction::Clear);
+            depth.setClearDepth(1.0);
+            depth.setStoreAction(MTLStoreAction::Store);
+            let enc = ctx
+                .slot
+                .cmd
+                .renderCommandEncoderWithDescriptor(&rp)
+                .expect("render encoder");
+            enc.setLabel(Some(&label("rain occlusion: canopy from above")));
+            enc.setDepthStencilState(Some(&sh.depth_state));
+            enc.setCullMode(MTLCullMode::None);
+            super::forest::draw_rain_occluders(ctx, &enc);
+            enc.endEncoding();
+        }
     }
 }

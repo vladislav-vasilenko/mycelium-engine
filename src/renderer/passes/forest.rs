@@ -175,12 +175,25 @@ pub(in crate::renderer) fn draw_shadow(ctx: &PassCtx, enc: &RenderEncoder, k: us
     if !active(ctx) || k > 1 {
         return;
     }
+    draw_occluders(ctx, enc, ctx.upload_addr + (SHADOW_OFFSET + k * 64) as u64);
+}
+
+/// Кроны в карту укрытия от дождя (04.3): те же списки теней деревьев,
+/// матрица — `ShadowUniforms.rain_vp_rel` (смещение 304 байта).
+pub(in crate::renderer) fn draw_rain_occluders(ctx: &PassCtx, enc: &RenderEncoder) {
+    if !active(ctx) {
+        return;
+    }
+    draw_occluders(ctx, enc, ctx.upload_addr + (SHADOW_OFFSET + 304) as u64);
+}
+
+fn draw_occluders(ctx: &PassCtx, enc: &RenderEncoder, matrix_addr: u64) {
     let f = ctx.r.forest.as_ref().unwrap();
     let table = ctx.slot.table(Table::PlantShadow);
     unsafe {
         table.setAddress_atIndex(f.vertices.gpuAddress(), 0);
         table.setAddress_atIndex(ctx.upload_addr, 1);
-        table.setAddress_atIndex(ctx.upload_addr + (SHADOW_OFFSET + k * 64) as u64, 5);
+        table.setAddress_atIndex(matrix_addr, 5);
         table.setTexture_atIndex(f.albedo.gpuResourceID(), 0);
         table.setTexture_atIndex(f.scan_albedo.gpuResourceID(), 2);
     }

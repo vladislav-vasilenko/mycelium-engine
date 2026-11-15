@@ -21,7 +21,7 @@ use glam::Mat4;
 
 pub use asset::{HandsAsset, load};
 pub use props::{PropSpec, load_props};
-pub use rig::{HandRig, POSE_NAMES, RigInput};
+pub use rig::{Action, HandRig, POSE_NAMES, RigInput};
 pub use skeleton::skin_position;
 
 /// Ассет рук в репозитории.
@@ -49,6 +49,8 @@ pub struct Hands {
     /// Предметы в руках (корзина, совок, фонарь, рация) и выбранный.
     pub props: Vec<PropSpec>,
     pub prop: Option<usize>,
+    /// Предмет, видимый сейчас: меняется на середине смены (руки вне кадра).
+    pub shown: Option<usize>,
 }
 
 impl Hands {
@@ -65,19 +67,23 @@ impl Hands {
             .iter()
             .map(|n| asset.pose(n).cloned().ok_or(format!("нет позы {n}")))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut rig = HandRig::new(poses);
+        rig.bind(&asset.skeleton);
         Ok(Hands {
-            rig: HandRig::new(poses),
+            rig,
             asset,
             props: Vec::new(),
             prop: None,
+            shown: None,
         })
     }
 
     /// Палитра кадра по текущей позе и движению.
     pub fn palette(&self, inp: &RigInput) -> Vec<Mat4> {
-        self.asset
-            .skeleton
-            .palette(&self.rig.pose(), self.rig.root(inp))
+        self.asset.skeleton.palette(
+            &self.rig.pose_frame(inp, &self.asset.skeleton),
+            self.rig.root(inp),
+        )
     }
 
     /// Палитра контрольной позы без движения (самопроверка).

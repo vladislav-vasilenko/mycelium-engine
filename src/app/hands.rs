@@ -18,12 +18,21 @@ impl App {
         let selftest = self.selftest.is_some();
         let start_pose = self.args.pose.take();
         let start_prop = self.args.prop.take();
+        // Проверка: действие повторяется всё время (копание — по кругу).
+        let start_act = self.args.act.clone();
         let h = self.hands.as_mut()?;
         if let Some(i) = start_pose {
             h.rig.set_pose(i);
         }
         if let Some(i) = start_prop.filter(|&i| i < h.props.len()) {
             h.prop = Some(i);
+            h.shown = Some(i);
+        }
+        match start_act.as_deref() {
+            Some("talk") => h.rig.act(hands::Action::Talk),
+            Some("dig") => h.rig.act(hands::Action::Dig),
+            Some("aim") => h.rig.act(hands::Action::Aim),
+            _ => {}
         }
         let palette = if selftest {
             h.control_palette()
@@ -41,12 +50,19 @@ impl App {
                 }
                 None => {
                     // С предметом — хват (grip), без — расслабленно.
-                    let want = if h.prop.is_some() { 1 } else { 0 };
+                    let want = if h.shown.is_some() { 1 } else { 0 };
                     if self.game.hands_override || h.rig.target() != want {
                         h.rig.set_pose(want);
                     }
                     self.game.hands_override = false;
                 }
+            }
+            // Смена предмета: руки уходят вниз, предмет меняется вне кадра.
+            if h.prop != h.shown && !h.rig.swapping() {
+                h.rig.start_swap();
+            }
+            if h.rig.take_swap_mid() {
+                h.shown = h.prop;
             }
             let (bob_phase, bob_weight) = self.sim.bob();
             let inp = RigInput {
@@ -73,7 +89,28 @@ impl App {
                 _pad: [0; 2],
             },
             palette: palette.iter().map(Mat4::to_cols_array_2d).collect(),
-            prop: if selftest { None } else { h.prop },
+            prop: if selftest { None } else { h.shown },
         })
+    }
+
+    /// Левая кнопка: действие предметом в правой руке (10.1). Отпускание
+    /// возвращает удерживаемое (рация, фонарь).
+    pub(super) fn use_item(&mut self, pressed: bool) {
+        let Some(h) = self.hands.as_mut() else { return };
+        if !pressed {
+            h.rig.release();
+            return;
+        }
+        let kind = match h
+            .shown
+            .and_then(|i| h.props.get(i))
+            .map(|p| p.name.as_str())
+        {
+            Some("trowel_01") => hands::Action::Dig,
+            Some("vintage_radio_transceiver") => hands::Action::Talk,
+            Some("vintage_flashlight") => hands::Action::Aim,
+            _ => return,
+        };
+        h.rig.act(kind);
     }
 }

@@ -74,14 +74,15 @@ impl ApplicationHandler for App {
                 self.set_grab(false);
             }
             WindowEvent::MouseInput {
-                state: ElementState::Pressed,
+                state,
                 button: MouseButton::Left,
                 ..
-            } => {
-                if !self.grabbed {
-                    self.set_grab(true);
-                }
-            }
+            } => match state {
+                ElementState::Pressed if !self.grabbed => self.set_grab(true),
+                // Действие предметом (10.1): рация ко рту, копнуть, фонарь.
+                ElementState::Pressed => self.use_item(true),
+                ElementState::Released => self.use_item(false),
+            },
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {

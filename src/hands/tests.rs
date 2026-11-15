@@ -116,7 +116,7 @@ fn pose_blend_is_continuous() {
 }
 
 /// Аниматор: переход занимает `POSE_BLEND_S`, отставание от поворота
-/// появляется и затухает, покачивание выключается весом 0.
+/// появляется, проскакивает (пружина) и затухает; стоя руки только дышат.
 #[test]
 fn rig_blends_lags_and_settles() {
     let mut h = hands();
@@ -130,7 +130,7 @@ fn rig_blends_lags_and_settles() {
         h.rig.update(&inp);
     }
     let s = &h.asset.skeleton;
-    let got = s.globals(&h.rig.pose());
+    let got = s.globals(&h.rig.base_pose());
     let want = s.globals(h.asset.pose("grip").unwrap());
     for (a, b) in got.iter().zip(&want) {
         assert!(a.abs_diff_eq(*b, 1e-5), "переход не завершился");
@@ -139,14 +139,27 @@ fn rig_blends_lags_and_settles() {
     inp.yaw = 0.05;
     h.rig.update(&inp);
     assert!(h.rig.lag().x < -0.01, "отставание {}", h.rig.lag());
-    for _ in 0..60 {
+    let mut overshoot = 0.0f32;
+    for _ in 0..90 {
         h.rig.update(&inp);
+        overshoot = overshoot.max(h.rig.lag().x);
     }
-    assert!(h.rig.lag().length() < 1e-4, "отставание не затухло");
+    assert!(overshoot > 1e-3, "пружина без перелёта");
+    assert!(
+        h.rig.lag().length() < 1e-3,
+        "отставание не затухло: {}",
+        h.rig.lag()
+    );
 
+    // Стоя: только дыхание — сдвиг в миллиметрах.
     inp.bob_phase = 1.0;
     inp.bob_weight = 0.0;
-    assert!(h.rig.root(&inp).abs_diff_eq(Mat4::IDENTITY, 1e-6));
+    let root = h.rig.root(&inp);
+    assert!(
+        root.w_axis.truncate().length() < 0.01,
+        "корень сдвинут на {}",
+        root.w_axis
+    );
 }
 
 /// CPU-скиннинг: в контрольной позе вершины конечны и лежат у кистей,

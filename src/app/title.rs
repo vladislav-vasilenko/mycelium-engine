@@ -115,7 +115,16 @@ impl App {
             String::new()
         };
         let clock = if self.scene == SceneMode::Terrain {
-            format!(" · {} · {}{}", self.time_label(), self.weather.preset.label(), if self.grade { "" } else { " · без обработки" })
+            format!(
+                " · {} · {}{}",
+                self.time_label(),
+                self.weather.preset.label(),
+                if self.grade {
+                    ""
+                } else {
+                    " · без обработки"
+                }
+            )
         } else {
             String::new()
         };

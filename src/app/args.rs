@@ -38,6 +38,8 @@ pub struct Args {
     pub render_scale: Option<f32>,
     /// Погода при старте (04.3): clear, cloudy, drizzle, rain, storm.
     pub weather: Option<String>,
+    /// Начальный уровень луж 0…1 (04.3): без ожидания долгого ливня.
+    pub puddles: Option<f32>,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -88,6 +90,7 @@ impl Args {
                 "--gpu-times" => args.gpu_times = true,
                 "--render-scale" => args.render_scale = it.next().and_then(|v| v.parse().ok()),
                 "--weather" => args.weather = it.next(),
+                "--puddles" => args.puddles = it.next().and_then(|v| v.parse().ok()),
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

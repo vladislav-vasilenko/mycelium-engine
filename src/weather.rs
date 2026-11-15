@@ -71,6 +71,9 @@ impl Preset {
 const BLEND_S: f32 = 900.0;
 /// Ливень (сила 1) мочит сухую землю за ~столько игровых секунд.
 const WET_S: f32 = 900.0;
+/// Лужи сливаются за ~столько игровых секунд ливня; уходят за `PUDDLE_DRAIN_S`.
+const PUDDLE_FILL_S: f32 = 5400.0;
+const PUDDLE_DRAIN_S: f32 = 6.0 * 3600.0;
 /// Сохнет без дождя под пасмурным небом (~12 ч); под солнцем — втрое быстрее:
 /// после ливня на Якусиме сыро до вечера.
 const DRY_S: f32 = 12.0 * 3600.0;
@@ -83,6 +86,9 @@ pub struct Weather {
     pub wind: f32,
     /// Влажность земли 0…1 (общая для округи; местные различия — в шейдере).
     pub ground_wet: f32,
+    /// Уровень стоячей воды 0…1: копится в долгий ливень по промокшей земле —
+    /// лужи растут и сливаются; уходит часами.
+    pub puddles: f32,
 }
 
 impl Weather {
@@ -99,6 +105,7 @@ impl Weather {
             } else {
                 0.0
             },
+            puddles: if rain > 0.5 { 0.3 * rain } else { 0.0 },
         }
     }
 
@@ -122,11 +129,25 @@ impl Weather {
             self.ground_wet -= dt * sun / DRY_S;
         }
         self.ground_wet = self.ground_wet.clamp(0.0, 1.0);
+        // Лужи: прибывают только по промокшей земле в сильный дождь (≈1,5 ч
+        // ливня до слияния), уходят за ~6 ч (быстрее под солнцем).
+        if self.rain > 0.3 && self.ground_wet > 0.85 {
+            self.puddles += dt * self.rain / PUDDLE_FILL_S * (1.0 - self.puddles);
+        } else if self.rain < 0.1 {
+            self.puddles -= dt * (1.0 + (1.0 - self.cloud)) / PUDDLE_DRAIN_S;
+        }
+        self.puddles = self.puddles.clamp(0.0, 1.0);
     }
 
-    /// `FrameUniforms.weather`: x — облачность, y — дождь, z — влажность земли, w — ветер.
+    /// `FrameUniforms.weather`: x — облачность, y — дождь, z — влажность
+    /// земли + уровень луж (0…2: до 1 — влажность, сверх — лужи), w — ветер.
     pub fn uniforms(&self) -> [f32; 4] {
-        [self.cloud, self.rain, self.ground_wet, self.wind]
+        [
+            self.cloud,
+            self.rain,
+            self.ground_wet + self.puddles,
+            self.wind,
+        ]
     }
 }
 
@@ -165,6 +186,19 @@ mod tests {
         }
         assert!(w.ground_wet < wet, "сохнет");
         assert!(w.ground_wet > 0.0, "за три часа не высыхает полностью");
+        let mut s = Weather::new(Preset::Clear);
+        s.set(Preset::Storm);
+        let mut last = 0.0;
+        for _ in 0..720 {
+            s.update(10.0); // два часа грозы
+            assert!(s.puddles >= last, "лужи только растут, пока льёт");
+            last = s.puddles;
+        }
+        assert!(
+            s.puddles > 0.5,
+            "за два часа грозы лужи сливаются: {}",
+            s.puddles
+        );
         for p in Preset::ALL {
             assert_eq!(Preset::from_id(p.id()), Some(p));
         }

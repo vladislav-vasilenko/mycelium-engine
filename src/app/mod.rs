@@ -123,12 +123,15 @@ pub(super) struct ClusterJob {
 
 impl App {
     pub fn new(args: Args) -> App {
-        let weather = crate::weather::Weather::new(
+        let mut weather = crate::weather::Weather::new(
             args.weather
                 .as_deref()
                 .and_then(crate::weather::Preset::from_id)
                 .unwrap_or(crate::weather::Preset::Clear),
         );
+        if let Some(p) = args.puddles {
+            weather.puddles = p.clamp(0.0, 1.0);
+        }
         let start_view = args.view.unwrap_or(TerrainView::Lit);
         let selftest = args.selftest.then(SelfTest::new);
         let started = Instant::now();

@@ -849,7 +849,7 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
     }
     // Дождь (04.3): мокрая кора и камни темнее, листва — чуть.
     if (frame.weather.z > 0.0) {
-        albedo *= 1.0 - (leaf ? 0.12 : 0.35) * frame.weather.z;
+        albedo *= 1.0 - (leaf ? 0.12 : 0.35) * saturate(frame.weather.z);
     }
     // У травинок нормаль пучка общая для обеих сторон (полусфера вверх).
     if (!front && !(mat > 8.5 && mat < 9.5)) {

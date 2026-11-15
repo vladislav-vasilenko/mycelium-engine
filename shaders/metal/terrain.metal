@@ -698,7 +698,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Дождь (04.3): общая влажность земли `weather.z`; круче — стекает, в
     // ложбинах — мокрее, под пологом чуть суше. Мокрый камень темнеет меньше
     // пористой почвы, но блестит так же.
-    float rain_wet = frame.weather.z * (1.0 - 0.6 * smoothstep(30.0, 55.0, slope_deg))
+    float rain_wet = saturate(frame.weather.z) * (1.0 - 0.6 * smoothstep(30.0, 55.0, slope_deg))
                    * saturate(0.8 + max(-curv, 0.0) * 3.0);
     // Укрытие кронами (04.3, сессия 2): карта глубины крон сверху; доля
     // закрытых точек в круге ~0,5 м (листва в карте — с просветами) → под
@@ -740,7 +740,11 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float pn = 0.6 * detail.sample(s, pattern_uv(frame, lxz, 7.0)).r
              + 0.4 * detail.sample(s, pattern_uv(frame, lxz, 2.3)).g;
     float pv = pn + 0.25 * saturate(-curv * 6.0) + 0.12 * trail - 0.25 * (1.0 - flat_k);
-    float puddle = smoothstep(0.69, 0.75, pv) * smoothstep(0.5, 0.9, rain_wet);
+    // Уровень стоячей воды (сверх 1 в `weather.z`): порог опускается — лужи
+    // растут от самых низких мест шума наружу и сливаются друг с другом.
+    float level = saturate(frame.weather.z - 1.0);
+    float th = mix(0.74, 0.42, level);
+    float puddle = smoothstep(th, th + 0.05, pv) * smoothstep(0.5, 0.9, rain_wet);
     if (puddle > 0.0) {
         albedo *= mix(1.0, 0.3, puddle);
         rough = mix(rough, 0.03, puddle);
@@ -907,6 +911,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float glint = pow(saturate(dot(Nw, Hw)), 400.0) * 3.0;
         float3 water = mix(bed * float3(0.7, 0.9, 0.9), sky_refl, fres) + sun * glint;
         color = mix(color, water, stream * 0.9);
+    }
+    // Лужи (04.3): отражение неба по Френелю (нормаль — с кругами от капель),
+    // под пологом — тусклее.
+    if (puddle > 0.0) {
+        float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(N, V)), 5.0);
+        float3 sky_refl = sky_ambient_term(skyf, float3(0, 1, 0)) * 1.1 * occ;
+        color = mix(color, color * 0.7 + sky_refl, fres * puddle);
     }
     if (frame.underwater_m > 0.0) {
         // Под водой: свет у точки ниже моря ослаблен толщей над ней, путь от

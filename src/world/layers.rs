@@ -615,7 +615,7 @@ pub fn preview(world: &World, (nx, nz): (usize, usize)) -> Vec<u8> {
 }
 
 mod cover;
-mod vegetation;
 mod fine;
 #[cfg(test)]
 mod tests;
+mod vegetation;

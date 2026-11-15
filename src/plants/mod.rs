@@ -12,11 +12,11 @@ use zune_jpeg::zune_core::options::DecoderOptions;
 use crate::layout::PlantVertex;
 
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
-pub const SPECIES: [&str; 3] = ["yakusugi", "broadleaf", "boulder"];
+pub const SPECIES: [&str; 5] = ["yakusugi", "broadleaf", "boulder", "fern", "sasa"];
 pub const LODS: usize = 3;
 /// Сторона слоя массива текстур растений.
 pub const TEXTURE_SIZE: usize = 1024;
-/// Слои: 0 кора якусуги, 1 кора лиственного, 2 атлас листвы (верхняя половина).
+/// Слои: 0 кора якусуги, 1 кора лиственного, 2 атлас листвы и подлеска.
 pub const TEXTURE_LAYERS: usize = 3;
 
 /// LOD вида в общих буферах: (первый индекс, число индексов, базовая вершина).
@@ -30,7 +30,7 @@ pub struct LodRange {
 pub struct PlantAssets {
     pub vertices: Vec<PlantVertex>,
     pub indices: Vec<u32>,
-    pub lods: [[LodRange; LODS]; 3],
+    pub lods: [[LodRange; LODS]; SPECIES.len()],
     /// RGBA8 sRGB, `TEXTURE_LAYERS` × `TEXTURE_SIZE`².
     pub albedo: Vec<u8>,
 }
@@ -143,7 +143,7 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
     let mut a = PlantAssets {
         vertices: Vec::new(),
         indices: Vec::new(),
-        lods: [[LodRange::default(); LODS]; 3],
+        lods: [[LodRange::default(); LODS]; SPECIES.len()],
         albedo: Vec::with_capacity(TEXTURE_LAYERS * TEXTURE_SIZE * TEXTURE_SIZE * 4),
     };
     for (s, name) in SPECIES.iter().enumerate() {
@@ -153,10 +153,9 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         .extend(jpeg_rgba(&ambientcg.join("Bark012/Color.jpg"))?);
     a.albedo
         .extend(jpeg_rgba(&ambientcg.join("Bark007/Color.jpg"))?);
-    // Атлас листвы 1024 × 512 — в верхнюю половину квадратного слоя.
     let (atlas, w, h) = png_rgba(&models.join("foliage.png"))?;
-    if w != TEXTURE_SIZE || h * 2 != TEXTURE_SIZE {
-        return Err("foliage.png: нужен 1024 × 512".into());
+    if (w, h) != (TEXTURE_SIZE, TEXTURE_SIZE) {
+        return Err("foliage.png: нужен 1024 × 1024".into());
     }
     a.albedo.extend(atlas);
     a.albedo
@@ -180,6 +179,6 @@ mod tests {
         }
         let max = a.vertices.len() as u32;
         assert!(a.indices.iter().all(|&i| i < max));
-        assert!(a.vertices.iter().all(|v| v.attr[0] <= 4));
+        assert!(a.vertices.iter().all(|v| v.attr[0] <= 6));
     }
 }

@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 OUT = Path(__file__).resolve().parents[2] / "assets/models/plants"
-BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK = 0, 1, 2, 3, 4
+BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA = 0, 1, 2, 3, 4, 5, 6
 
 
 class Mesh:
@@ -97,11 +97,12 @@ def card(m, center, right, up, normal, rect, mat, wind, ao):
 
 
 def atlas_rect(side, variant):
-    """side 0 — хвоя, 1 — листья; 2 × 2 варианта в половине атласа 1024 × 512."""
-    x0 = side * 0.5 + (variant % 2) * 0.25
-    y0 = (variant // 2) * 0.5
-    e = 0.004
-    return (x0 + e, y0 + e, x0 + 0.25 - e, y0 + 0.5 - e)
+    """Атлас 1024 × 1024, четверти по 512²: 0 — хвоя, 1 — листья (верх),
+    2 — вайи папоротника, 3 — листья сасы (низ); в четверти 2 × 2 варианта."""
+    x0 = (side % 2) * 0.5 + (variant % 2) * 0.25
+    y0 = (side // 2) * 0.5 + (variant // 2) * 0.25
+    e = 0.002
+    return (x0 + e, y0 + e, x0 + 0.25 - e, y0 + 0.25 - e)
 
 
 def bezier(a, b, c, n):
@@ -246,6 +247,55 @@ def broadleaf(lod, seed=0xB20A):
     return m
 
 
+# --- Подлесок -----------------------------------------------------------------
+
+def fern(lod, seed=0xFE27):
+    """Розетка вай: каждая вайя — изогнутая полоса карточек вдоль дуги."""
+    rng = np.random.default_rng(seed)
+    m = Mesh()
+    fronds = [11, 7, 5][lod]
+    segs = [4, 2, 1][lod]
+    for k in range(fronds):
+        th = 2 * math.pi * k / fronds + rng.uniform(-0.2, 0.2)
+        d = np.array([math.cos(th), 0, math.sin(th)])
+        L = rng.uniform(0.9, 1.4)
+        lift = rng.uniform(0.5, 0.9)
+        side = np.cross(np.array([0, 1.0, 0]), d)
+        rect = atlas_rect(2, rng.integers(4))
+        u0, v0, u1, v1 = rect
+        prev = None
+        for s in range(segs + 1):
+            t = s / segs
+            # Дуга: поднимается и опускается к концу.
+            p = d * L * t + np.array([0, lift * math.sin(math.pi * t * 0.8) * L * 0.6, 0])
+            w = 0.22 * (1.0 - 0.6 * t) + 0.05
+            n = np.array([0, 1.0, 0]) * 0.8 + d * 0.2
+            v = v1 + (v0 - v1) * t
+            a = m.vert(p - side * w, n, (u0, v), FERN, 0.6 + 0.4 * t, 0.7 + 0.3 * t)
+            b = m.vert(p + side * w, n, (u1, v), FERN, 0.6 + 0.4 * t, 0.7 + 0.3 * t)
+            if prev:
+                m.tri(prev[0], prev[1], b)
+                m.tri(prev[0], b, a)
+            prev = (a, b)
+    return m
+
+
+def sasa(lod, seed=0x5A5A):
+    """Куртина якудзасы: вертикальные карточки с листьями крест-накрест."""
+    rng = np.random.default_rng(seed)
+    m = Mesh()
+    for k in range([10, 6, 3][lod]):
+        th = rng.uniform(0, math.pi)
+        c = np.array([rng.normal(0, 0.35), 0, rng.normal(0, 0.35)])
+        h = rng.uniform(0.7, 1.3) * [1.0, 1.1, 1.3][lod]
+        w = rng.uniform(0.35, 0.55) * [1.0, 1.2, 1.6][lod]
+        right = np.array([math.cos(th), 0, math.sin(th)]) * w
+        up = np.array([0, h * 0.5, 0])
+        nrm = np.array([0, 0.7, 0]) + np.array([-math.sin(th), 0, math.cos(th)]) * 0.5
+        card(m, c + np.array([0, h * 0.5 - 0.05, 0]), right, up, nrm, atlas_rect(3, rng.integers(4)), SASA, 0.7, 0.8)
+    return m
+
+
 # --- Валун -------------------------------------------------------------------
 
 def icosphere(sub):
@@ -344,6 +394,54 @@ def draw_leaves(rng, size):
     return img
 
 
+def draw_frond(rng, size):
+    """Вайя папоротника: стержень снизу вверх, перья попарно, к концу мельче."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    x0, y0, y1 = size * 0.5, size * 0.98, size * 0.04
+    bend = rng.uniform(-0.08, 0.08) * size
+    n = 22
+    for k in range(n):
+        t = k / (n - 1)
+        x = x0 + bend * t * t
+        y = y0 + (y1 - y0) * t
+        L = size * 0.42 * (1 - t) ** 0.7 * (0.3 + 0.7 * min(1.0, t * 5))
+        g = rng.uniform(0.8, 1.15)
+        col = (int(40 * g), int(92 * g), int(26 * g), 255)
+        for side in (-1, 1):
+            ex, ey = x + side * L, y - L * 0.35
+            w = max(2, int(size * 0.035 * (1 - t * 0.6)))
+            d.line([(x, y), (ex, ey)], fill=col, width=w)
+            # Доли пера.
+            for j in range(1, 6):
+                px, py = x + (ex - x) * j / 6, y + (ey - y) * j / 6
+                d.line([(px, py), (px + side * size * 0.015, py - size * 0.03)], fill=col, width=max(1, w // 2))
+    d.line([(x0, y0), (x0 + bend, y1)], fill=(70, 70, 30, 255), width=max(2, size // 120))
+    return img
+
+
+def draw_sasa(rng, size):
+    """Листья якудзасы: узкие ланцетные листья веером от стеблей."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for _ in range(14):
+        bx = rng.uniform(0.3, 0.7) * size
+        ang = -math.pi / 2 + rng.uniform(-0.9, 0.9)
+        L = size * rng.uniform(0.35, 0.55)
+        W = size * rng.uniform(0.04, 0.06)
+        cx, cy = bx + math.cos(ang) * L * 0.6, size * 0.95 + math.sin(ang) * L * 0.6
+        g = rng.uniform(0.75, 1.15)
+        pts = []
+        for k in range(20):
+            t = 2 * math.pi * k / 20
+            x, y = math.cos(t) * L * 0.5, math.sin(t) * W
+            pts.append((cx + x * math.cos(ang) - y * math.sin(ang), cy + x * math.sin(ang) + y * math.cos(ang)))
+        d.polygon(pts, fill=(int(48 * g), int(86 * g), int(24 * g), 255))
+        # Сухой светлый край — у якудзасы зимой.
+        d.line(pts[:6], fill=(int(150 * g), int(140 * g), int(90 * g), 255), width=max(1, size // 250))
+    return img
+
+
 def bleed(img):
     """Цвет прозрачных пикселей — размытый цвет соседей: без тёмной каймы на мипах."""
     a = np.asarray(img).astype(np.float32)
@@ -361,14 +459,14 @@ def bleed(img):
 
 def build_atlas():
     rng = np.random.default_rng(0xF011)
-    atlas = Image.new("RGBA", (1024, 512), (0, 0, 0, 0))
+    atlas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
     ss = 2  # суперсэмплинг
-    for side, fn in enumerate((draw_needles, draw_leaves)):
+    for side, fn in enumerate((draw_needles, draw_leaves, draw_frond, draw_sasa)):
         for v in range(4):
             tile = fn(rng, 256 * ss).resize((256, 256), Image.LANCZOS)
-            # Вариант занимает 256 × 256 в своей четверти половины.
-            x = side * 512 + (v % 2) * 256
-            y = (v // 2) * 256
+            # Вариант занимает 256 × 256 в своей четверти 512².
+            x = (side % 2) * 512 + (v % 2) * 256
+            y = (side // 2) * 512 + (v // 2) * 256
             atlas.paste(tile, (x, y))
     return bleed(atlas)
 
@@ -437,7 +535,8 @@ def write_glb(path, lods):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     build_atlas().save(OUT / "foliage.png", optimize=True)
-    for name, fn in (("yakusugi", yakusugi), ("broadleaf", broadleaf), ("boulder", boulder)):
+    for name, fn in (("yakusugi", yakusugi), ("broadleaf", broadleaf), ("boulder", boulder),
+                     ("fern", fern), ("sasa", sasa)):
         lods = [fn(l) for l in range(3)]
         write_glb(OUT / f"{name}.glb", lods)
         print(f"{name}: треугольников по LOD {[m.tris() for m in lods]}")

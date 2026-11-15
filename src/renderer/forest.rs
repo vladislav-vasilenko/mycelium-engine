@@ -1,5 +1,5 @@
 //! Лес на GPU (02.4): сетки и текстуры растений, списки экземпляров и
-//! indirect-аргументы слотов. Списки: вид × LOD (0–8) и тени вида (9–11),
+//! indirect-аргументы слотов. Списки: вид × LOD (0–14) и тени деревьев (15–16),
 //! по `FOREST_CAP` экземпляров; раскладка совпадает с `forest.metal`.
 
 use objc2_metal::*;
@@ -10,11 +10,13 @@ use super::shaders::Obj;
 use crate::layout::PlantInstance;
 use crate::plants::PlantAssets;
 
-pub const FOREST_LISTS: usize = 12;
+pub const FOREST_LISTS: usize = 17;
+/// Списки, которые рисует камера (вид × LOD); дальше — тени деревьев.
+pub const CAMERA_LISTS: usize = 15;
 pub const FOREST_CAP: usize = 16384;
 pub const FOREST_GRID: usize = 160;
-/// u32 в буфере счётчиков: 16 счётчиков (12 занято), затем аргументы по 5 u32.
-pub const ARGS_OFFSET: usize = 16 * 4;
+/// u32 в буфере счётчиков: 32 счётчика (17 занято), затем аргументы по 5 u32.
+pub const ARGS_OFFSET: usize = 32 * 4;
 const COUNTERS_BYTES: usize = ARGS_OFFSET + FOREST_LISTS * 20;
 
 /// Итог расстановки последнего завершённого кадра слота.
@@ -52,9 +54,17 @@ impl ForestGpu {
             std::slice::from_raw_parts_mut(c.contents().as_ptr().cast::<u32>(), COUNTERS_BYTES / 4)
         };
         let stats = self.counted[slot].then(|| ForestStats {
-            visible: words[..9].iter().map(|&n| n.min(FOREST_CAP as u32)).sum(),
-            shadow: words[9..12].iter().map(|&n| n.min(FOREST_CAP as u32)).sum(),
-            overflow: words[..12].iter().any(|&n| n as usize > FOREST_CAP),
+            visible: words[..CAMERA_LISTS]
+                .iter()
+                .map(|&n| n.min(FOREST_CAP as u32))
+                .sum(),
+            shadow: words[CAMERA_LISTS..FOREST_LISTS]
+                .iter()
+                .map(|&n| n.min(FOREST_CAP as u32))
+                .sum(),
+            overflow: words[..FOREST_LISTS]
+                .iter()
+                .any(|&n| n as usize > FOREST_CAP),
         });
         if self.counted[slot] {
             let inst = &self.instances[slot];
@@ -67,17 +77,18 @@ impl ForestGpu {
             };
             self.obstacles.clear();
             // (список, радиус ствола у груди при масштабе 1, м).
-            for (list, r) in [(9usize, 1.0f32), (10, 0.45), (6, 1.3)] {
+            for (list, r) in [(CAMERA_LISTS, 1.0f32), (CAMERA_LISTS + 1, 0.45), (6, 1.3)] {
                 let n = (words[list] as usize).min(FOREST_CAP);
                 for p in &all[list * FOREST_CAP..list * FOREST_CAP + n] {
                     if list == 6 && p.scale < 0.6 {
                         continue; // мелкий камень перешагивается
                     }
-                    self.obstacles.push([p.position[0], p.position[2], r * p.scale]);
+                    self.obstacles
+                        .push([p.position[0], p.position[2], r * p.scale]);
                 }
             }
         }
-        words[..16].fill(0);
+        words[..32].fill(0);
         self.counted[slot] = true;
         stats
     }

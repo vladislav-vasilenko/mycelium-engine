@@ -10,13 +10,19 @@
 
 constant float FOREST_CELL_M = 6.0;
 constant int FOREST_GRID = 160;               // клеток по стороне: радиус ~480 м
-constant uint FOREST_LISTS = 12;              // 3 вида × 3 LOD + 3 тени
+constant uint FOREST_LISTS = 17;              // 5 видов × 3 LOD + тени двух деревьев
+constant uint CAMERA_LISTS = 15;
+constant uint COUNTS_WORDS = 32;               // счётчики, затем indirect-аргументы
 constant uint FOREST_CAP = 16384;             // экземпляров в списке
 constant uint SPECIES_YAKUSUGI = 0;
 constant uint SPECIES_BROADLEAF = 1;
 constant uint SPECIES_BOULDER = 2;
+constant uint SPECIES_FERN = 3;
+constant uint SPECIES_SASA = 4;
 // Высота вида при масштабе 1, м (сфера отсечения).
-constant float SPECIES_H[3] = {29.0, 17.0, 2.2};
+constant float SPECIES_H[5] = {29.0, 17.0, 2.2, 1.0, 1.4};
+// Подлесок: подклетки 3 м до UNDER_DIST, LOD на 15 и 35 м.
+constant float UNDER_DIST = 70.0;
 constant float LOD_DIST[2] = {45.0, 150.0};
 constant float SHADOW_DIST = 160.0;
 
@@ -68,6 +74,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
                          device const float4* veg_table [[buffer(11)]],
                          texture2d<float> cover [[texture(0)]],
                          texture2d<float> veg [[texture(1)]],
+                         texture2d<float> macro [[texture(2)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (any(gid >= uint2(FOREST_GRID))) {
         return;
@@ -153,9 +160,9 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         inst.phase = rnd(h, 9) * 6.2831853;
         inst._pad = 0.0;
         if (kind == 0 && dist < SHADOW_DIST) {
-            uint k = atomic_fetch_add_explicit(&counts[9 + species], 1, memory_order_relaxed);
+            uint k = atomic_fetch_add_explicit(&counts[CAMERA_LISTS + species], 1, memory_order_relaxed);
             if (k < FOREST_CAP) {
-                out[(9 + species) * FOREST_CAP + k] = inst;
+                out[(CAMERA_LISTS + species) * FOREST_CAP + k] = inst;
             }
         }
         float lim = species == SPECIES_BOULDER ? 180.0 : 480.0;
@@ -173,6 +180,70 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             out[list * FOREST_CAP + k] = inst;
         }
     }
+    // Подлесок (02.4): 4 подклетки по 3 м в клетках у камеры — папоротники во
+    // влажных ложбинах леса, якудзаса в высокогорье и на лугах.
+    float2 cc = (float2(cell) + 0.5) * FOREST_CELL_M;
+    if (distance(cc, frame.camera_pos.xz) > UNDER_DIST + 6.0) {
+        return;
+    }
+    constexpr sampler ls2(filter::linear, address::clamp_to_edge);
+    for (uint sub = 0; sub < 4; ++sub) {
+        uint h = hash3(cell.x * 2 + int(sub & 1), cell.y * 2 + int(sub >> 1), 0x0DE2u);
+        float2 p = (float2(cell) + 0.5 * float2(sub & 1, sub >> 1) + 0.05 + 0.4 * float2(rnd(h, 1), rnd(h, 2)))
+                 * FOREST_CELL_M;
+        float dxz = distance(p, frame.camera_pos.xz);
+        if (dxz > UNDER_DIST || any(p < 0.0) || any(p > frame.map_size_m)) {
+            continue;
+        }
+        float cn = float(cover.get_width());
+        float4 cv = cover.sample(ls2, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
+        float mn = float(macro.get_width());
+        float4 mc = macro.sample(ls2, (p / frame.map_size_m * (mn - 1.0) + 0.5) / mn, level(0));
+        float hollow = saturate((0.5 - mc.g) * 2.5);
+        float fern_p = (cv.x + cv.y) * (0.25 + 0.5 * mc.b + 0.35 * hollow);
+        float sasa_p = cv.z * 0.75 + (cv.x + cv.y) * 0.04;
+        float r = rnd(h, 3);
+        uint species;
+        if (r < fern_p) {
+            species = SPECIES_FERN;
+        } else if (r < fern_p + sasa_p) {
+            species = SPECIES_SASA;
+        } else {
+            continue;
+        }
+        float y = ground_height(p, heights, zone_heights, zone, frame);
+        if (y < 2.0) {
+            continue;
+        }
+        FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
+        if (fd.trail < 1.0 || fd.road < 2.0 || fd.river < 0.5) {
+            continue;
+        }
+        float scale = 0.7 + 0.6 * rnd(h, 5);
+        float H = SPECIES_H[species] * scale;
+        float3 base = float3(p.x, y - 0.05, p.y);
+        float3 center = base + float3(0, H * 0.5, 0);
+        bool visible = true;
+        for (int i = 0; i < 6 && visible; ++i) {
+            visible = dot(view.planes[i].xyz, center) + view.planes[i].w >= -H;
+        }
+        if (!visible) {
+            continue;
+        }
+        PlantInstance inst;
+        inst.position = packed_float3(base);
+        inst.scale = scale;
+        inst.yaw = rnd(h, 7) * 6.2831853;
+        inst.tint = rnd(h, 8);
+        inst.phase = rnd(h, 9) * 6.2831853;
+        inst._pad = 0.0;
+        uint lod = dxz < 15.0 ? 0 : (dxz < 35.0 ? 1 : 2);
+        uint list = species * 3 + lod;
+        uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
+        if (k < FOREST_CAP) {
+            out[list * FOREST_CAP + k] = inst;
+        }
+    }
 }
 
 // Indirect-аргументы drawIndexedPrimitives по спискам; `lods` — (первый
@@ -183,10 +254,10 @@ kernel void forest_finish(device uint* counts [[buffer(9)]],
     if (i >= FOREST_LISTS) {
         return;
     }
-    uint species = i < 9 ? i / 3 : i - 9;
-    uint lod = i < 9 ? i % 3 : 1;
+    uint species = i < CAMERA_LISTS ? i / 3 : i - CAMERA_LISTS;
+    uint lod = i < CAMERA_LISTS ? i % 3 : 1;
     uint4 r = lods[species * 3 + lod];
-    device uint* a = counts + 16 + i * 5;
+    device uint* a = counts + COUNTS_WORDS + i * 5;
     a[0] = r.y;
     a[1] = min(counts[i], FOREST_CAP);
     a[2] = r.x;
@@ -219,7 +290,8 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     float2 dir = normalize(float2(0.8, 0.6));
     float sway = (sin(t * 0.9 + inst.phase) * 0.6 + sin(t * 2.3 + inst.phase * 1.7) * 0.25) * w * w;
     float flutter = sin(t * 7.0 + dot(q, float3(1.3, 0.7, 1.1))) * 0.05 * w;
-    q.xz += dir * sway * inst.scale * 0.9;
+    // Раскачка растёт с высотой точки: верх кроны качается, папоротник — едва.
+    q.xz += dir * sway * inst.scale * 0.9 * saturate(q.y / 8.0);
     q += n * flutter;
     return float3(inst.position) + q;
 }
@@ -249,8 +321,7 @@ static float4 plant_albedo(texture2d_array<float> albedo, float mat, float2 uv) 
     if (mat < 1.5) {
         return float4(albedo.sample(s, uv, uint(mat)).rgb, 1.0);
     }
-    float2 auv = float2(uv.x, uv.y * 0.5);
-    float4 a = albedo.sample(s, auv, 2);
+    float4 a = albedo.sample(s, uv, 2);
     float w = max(fwidth(a.a), 1e-4);
     a.a = saturate((a.a - 0.5) / w + 0.5);
     return a;
@@ -267,8 +338,9 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
     float3 albedo;
-    bool leaf = mat > 1.5 && mat < 3.5;
-    if (mat > 3.5) {
+    // 2 хвоя, 3 листья, 5 папоротник, 6 якудзаса — листва; 4 — камень.
+    bool leaf = (mat > 1.5 && mat < 3.5) || mat > 4.5;
+    if (mat > 3.5 && mat < 4.5) {
         // Валун: камень сбоку, мшистый камень сверху (слои рельефа 0 и 9).
         constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
         float3 lp = in.rel + frame.cam_lo.xyz;
@@ -343,7 +415,7 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
 fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
                               texture2d_array<float> albedo_tex [[texture(0)]]) {
     float mat = round(in.mat);
-    if (mat > 1.5 && mat < 3.5 && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
+    if (((mat > 1.5 && mat < 3.5) || mat > 4.5) && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
         discard_fragment();
     }
 }

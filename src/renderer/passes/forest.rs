@@ -5,7 +5,7 @@ use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx, RenderEncoder, size2};
 use crate::layout::PlantInstance;
-use crate::renderer::forest::{ARGS_OFFSET, FOREST_CAP, FOREST_GRID, FOREST_LISTS};
+use crate::renderer::forest::{ARGS_OFFSET, CAMERA_LISTS, FOREST_CAP, FOREST_GRID, FOREST_LISTS};
 use crate::renderer::frame::{CULL_OFFSET, SHADOW_OFFSET, Table};
 use crate::renderer::resources::label;
 
@@ -56,6 +56,7 @@ impl FramePass for ForestPass {
             table.setAddress_atIndex(f.lods.gpuAddress(), 10);
             table.setTexture_atIndex(c.cover.gpuResourceID(), 0);
             table.setTexture_atIndex(f.vegetation.gpuResourceID(), 1);
+            table.setTexture_atIndex(c.macro_detail.gpuResourceID(), 2);
             table.setAddress_atIndex(f.vegetation_table.gpuAddress(), 11);
         }
         enc.setComputePipelineState(&ctx.r.pipelines.forest_place);
@@ -67,7 +68,7 @@ impl FramePass for ForestPass {
             MTL4VisibilityOptions::Device,
         );
         enc.setComputePipelineState(&ctx.r.pipelines.forest_finish);
-        enc.dispatchThreads_threadsPerThreadgroup(size2(FOREST_LISTS, 1), size2(16, 1));
+        enc.dispatchThreads_threadsPerThreadgroup(size2(FOREST_LISTS, 1), size2(32, 1));
         enc.endEncoding();
     }
 }
@@ -119,7 +120,7 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
     enc.pushDebugGroup(&label("forest: plants (indirect)"));
     enc.setRenderPipelineState(&ctx.r.pipelines.plant);
     enc.setCullMode(MTLCullMode::None);
-    for list in 0..9 {
+    for list in 0..CAMERA_LISTS {
         draw_list(ctx, enc, table, list);
     }
     enc.popDebugGroup();
@@ -139,7 +140,7 @@ pub(in crate::renderer) fn draw_shadow(ctx: &PassCtx, enc: &RenderEncoder, k: us
         table.setTexture_atIndex(f.albedo.gpuResourceID(), 0);
     }
     enc.setRenderPipelineState(&ctx.r.pipelines.plant_shadow);
-    for list in 9..11 {
+    for list in CAMERA_LISTS..FOREST_LISTS {
         draw_list(ctx, enc, table, list);
     }
 }

@@ -107,12 +107,18 @@
       "Copernicus DEM GLO-30: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
       "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium, CC BY 4.0",
       "© участники OpenStreetMap (openstreetmap.org/copyright), ODbL 1.0",
-      "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)"
+      "出典：国土地理院 基盤地図情報（数値標高モデル）を加工して作成 (GSI Japan, DEM5A/DEM10B)",
+      "1/25,000植生図（環境省生物多様性センター）, processed by Pacific Spatial Solutions inc., CC BY 4.0"
     ]
   },
   "macro": {
     "file": "macro.png",
     "size": 4097,
     "channels": "R видимость неба, G кривизна (0,5 ровно), B влажность, A осыпь"
+  },
+  "vegetation": {
+    "file": "vegetation.png",
+    "legend": "vegetation.json",
+    "size": 2049
   }
 }

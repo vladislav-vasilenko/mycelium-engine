@@ -64,7 +64,34 @@ impl App {
             );
         }
         for _ in 0..ticks {
+            // Вода реки у игрока (03.6): уровень и течение — для брода и плавания.
+            self.sim.water = self
+                .world
+                .features
+                .as_ref()
+                .filter(|_| !self.river_levels.is_empty())
+                .and_then(|f| {
+                    let p = self.sim.curr.position;
+                    let g = self
+                        .world
+                        .sample_ground(p.x, p.z)
+                        .map_or(f32::MIN, |g| g.height);
+                    self.hydrology
+                        .water_at(f, &self.river_levels, glam::Vec2::new(p.x, p.z), g)
+                        .map(|(level, flow)| crate::sim::Water { level, flow })
+                });
             self.sim.step(&input, Some(&*self.world));
+            if self.sim.tick % 60 == 0 && std::env::var_os("ECHO_SWIM_LOG").is_some() {
+                let p = self.sim.curr.position;
+                eprintln!(
+                    "вода: {:?}, плывёт {}, позиция ({:.1}, {:.2}, {:.1})",
+                    self.sim.water.map(|w| (w.level, w.flow)),
+                    self.sim.swimming,
+                    p.x,
+                    p.y,
+                    p.z
+                );
+            }
         }
         self.advance_time(ticks);
 

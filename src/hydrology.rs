@@ -334,6 +334,51 @@ impl Hydrology {
         out
     }
 
+    /// Вода реки над точкой `p` (03.6, сессия 4): уровень, м, и скорость
+    /// течения (x, z), м/с — вниз по уровню (на плёсе — по дну), величина
+    /// 0,6 м/с + уклон поверхности × 15, до 3,5 м/с; у берега (край полосы)
+    /// течение слабеет. `None` — не в реке или рельеф выше воды.
+    pub fn water_at(
+        &self,
+        set: &FeatureSet,
+        levels: &[[f32; 4]],
+        p: Vec2,
+        ground: f32,
+    ) -> Option<(f32, Vec2)> {
+        let mut best: Option<(f32, f32, Vec2)> = None;
+        for r in &self.reaches {
+            for i in r.segs.clone() {
+                let (Some(s), Some(lv)) = (set.segments.get(i), levels.get(i)) else {
+                    continue;
+                };
+                let (a, b) = (Vec2::from(s.a), Vec2::from(s.b));
+                let ab = b - a;
+                let len = ab.length().max(0.1);
+                let t = ((p - a).dot(ab) / (len * len)).clamp(0.0, 1.0);
+                let d = p.distance(a + ab * t);
+                let half = s.half_width + lv[2] * 2.5;
+                if d > half {
+                    continue;
+                }
+                let w = lv[0] + (lv[1] - lv[0]) * t;
+                if w <= ground || best.is_some_and(|(bd, _, _)| d >= bd) {
+                    continue;
+                }
+                let bed = self.bed.get(i).copied().unwrap_or([lv[0], lv[1]]);
+                let down = if (lv[0] - lv[1]).abs() > 1e-3 {
+                    lv[0] > lv[1]
+                } else {
+                    bed[0] >= bed[1]
+                };
+                let dir = if down { ab / len } else { -ab / len };
+                let slope = (lv[0] - lv[1]).abs() / len;
+                let speed = (0.6 + slope * 15.0).min(3.5) * (1.0 - (d / half).powi(2)).max(0.15);
+                best = Some((d, w, dir * speed));
+            }
+        }
+        best.map(|(_, w, f)| (w, f))
+    }
+
     /// Уровень воды реки над точкой `p` (м) — по профилю `levels`
     /// (`Hydrology::levels`), если точка в полосе разлива реки (полуширина +
     /// подъём × 2,5, как у ленты в `river.metal`) и рельеф под ней ниже уровня.

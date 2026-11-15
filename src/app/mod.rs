@@ -236,6 +236,20 @@ impl App {
         } else {
             None
         };
+        // Проверка плавания (03.6): игрок пешком на оси ближайшей реки,
+        // лицом вниз по течению.
+        if args.swim
+            && let Some(r) = raft::Raft::new(&world, &hydrology, sim.curr.position)
+        {
+            let (p, dir) = r.start();
+            let g = world.sample_ground(p.x, p.y).map_or(0.0, |g| g.height);
+            sim = Sim::new(crate::sim::CameraState {
+                position: Vec3::new(p.x, g + crate::sim::EYE_HEIGHT_M, p.y),
+                yaw: (-dir.x).atan2(-dir.y),
+                pitch: -0.1,
+            });
+            sim.set_mode(MoveMode::Walk, &world);
+        }
         let tiles_only = args.tiles;
         let site = sky::site_of(&world);
         let time = sky::initial_time(&args, site);

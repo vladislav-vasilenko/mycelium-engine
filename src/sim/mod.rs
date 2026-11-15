@@ -146,7 +146,34 @@ pub struct Sim {
     pub head_bob: bool,
     /// Препятствия-цилиндры (x, z, радиус): стволы и валуны рядом с игроком (02.4).
     pub obstacles: Vec<Vec3>,
+    /// Вода реки у игрока (03.6), ставит приложение.
+    pub water: Option<Water>,
+    /// Плывёт (глубже `SWIM_DEPTH_M`).
+    pub swimming: bool,
 }
+
+/// Вода реки у игрока (03.6): уровень поверхности, м, и течение (x, z), м/с.
+/// Ставит приложение перед тиками; `None` — суша.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Water {
+    pub level: f32,
+    pub flow: Vec2,
+}
+
+/// Глубина, с которой игрок плывёт, м (по грудь).
+pub const SWIM_DEPTH_M: f32 = 1.2;
+/// Глубина брода: медленнее, течение толкает, м.
+const WADE_DEPTH_M: f32 = 0.3;
+/// Быстрая вода сбивает с ног: глубина, м, и скорость течения, м/с.
+const KNOCK_DEPTH_M: f32 = 0.6;
+const KNOCK_FLOW: f32 = 2.0;
+/// Скорость гребков, м/с; ныряние и всплытие, м/с.
+const SWIM_SPEED: f32 = 1.4;
+const DIVE_SPEED: f32 = 1.2;
+/// Глаза над водой на плаву, м.
+const FLOAT_EYE_M: f32 = 0.12;
+/// Сопротивление воды: как быстро скорость тянется к «гребок + течение», 1/с.
+const WATER_DRAG: f32 = 2.5;
 
 /// Радиус игрока для столкновений со стволами, м.
 pub const PLAYER_RADIUS_M: f32 = 0.35;
@@ -189,6 +216,8 @@ impl Sim {
             bob_weight: 0.0,
             head_bob: true,
             obstacles: Vec::new(),
+            water: None,
+            swimming: false,
         }
     }
 
@@ -225,7 +254,21 @@ impl Sim {
         c.pitch = (c.pitch - input.look_dy * MOUSE_SENSITIVITY).clamp(-PITCH_LIMIT, PITCH_LIMIT);
 
         if let (MoveMode::Walk, Some(ground)) = (self.mode, ground) {
-            self.walk(input, ground);
+            let feet = self.curr.position.y - EYE_HEIGHT_M;
+            let deep = self.water.is_some_and(|w| {
+                let g = ground
+                    .sample_ground(self.curr.position.x, self.curr.position.z)
+                    .map_or(feet, |g| g.height);
+                // Плывёт на глубине; быстрая вода сбивает с ног раньше (по пояс).
+                let depth = w.level - g;
+                depth > SWIM_DEPTH_M || (depth > KNOCK_DEPTH_M && w.flow.length() > KNOCK_FLOW)
+            });
+            self.swimming = deep;
+            if deep {
+                self.swim(input, ground);
+            } else {
+                self.walk(input, ground);
+            }
             self.tick += 1;
             return;
         }
@@ -266,6 +309,69 @@ impl Sim {
         Some(g.height)
     }
 
+    /// Плавание (03.6, сессия 4): гребки по взгляду, течение сносит, вода
+    /// тормозит; плавучесть держит глаза над водой, Q — нырнуть, пробел —
+    /// всплыть; дно и берег — твёрдые (выход — где мельче `SWIM_DEPTH_M`).
+    fn swim(&mut self, input: &TickInput, ground: &dyn Ground) {
+        let dt = TICK_DT as f32;
+        let water = self.water.expect("swim без воды");
+        let c = &mut self.curr;
+        let (sy, cy) = c.yaw.sin_cos();
+        let forward = Vec2::new(-sy, -cy);
+        let right = Vec2::new(cy, -sy);
+        let mut wish = forward * input.forward + right * input.right;
+        if wish.length_squared() > 1.0 {
+            wish = wish.normalize();
+        }
+        let speed = if input.fast {
+            SWIM_SPEED * 1.5
+        } else {
+            SWIM_SPEED
+        };
+        let target = wish * speed + water.flow;
+        let mut vel = Vec2::new(self.velocity.x, self.velocity.z);
+        vel += (target - vel) * (1.0 - (-WATER_DRAG * dt).exp());
+        let pos = Vec2::new(c.position.x, c.position.z);
+        let mut feet = c.position.y - EYE_HEIGHT_M;
+        let mut new_pos = pos + vel * dt;
+        // Берег выше ног больше ступеньки — упор (скорость вдоль берега).
+        if let Some(g) = ground.sample_ground(new_pos.x, new_pos.y)
+            && g.height > feet + MAX_STEP_M
+        {
+            new_pos = pos;
+            vel = Vec2::ZERO;
+        }
+        new_pos = push_out(new_pos, &self.obstacles);
+        self.velocity = Vec3::new(vel.x, 0.0, vel.y);
+        // Вертикаль: плавучесть к поверхности, нырок вниз, всплытие вверх.
+        let eye = feet + EYE_HEIGHT_M;
+        let float_eye = water.level + FLOAT_EYE_M;
+        let vy = if input.up < 0.0 {
+            -DIVE_SPEED
+        } else if input.up > 0.0 {
+            DIVE_SPEED
+        } else {
+            (float_eye - eye) * 2.0
+        };
+        self.vertical_speed += (vy - self.vertical_speed) * (1.0 - (-4.0 * dt).exp());
+        feet += self.vertical_speed * dt;
+        // Не выше «плавающего» положения и не ниже дна.
+        feet = feet.min(float_eye - EYE_HEIGHT_M);
+        let ground_h = ground
+            .sample_ground(new_pos.x, new_pos.y)
+            .map_or(feet, |g| g.height);
+        if feet < ground_h {
+            feet = ground_h;
+            self.vertical_speed = self.vertical_speed.max(0.0);
+        }
+        self.on_ground = false;
+        c.position = Vec3::new(new_pos.x, feet + EYE_HEIGHT_M, new_pos.y);
+        // Качает на волне, без шагов.
+        self.bob_weight += (0.0 - self.bob_weight) * (1.0 - (-dt / 0.15).exp());
+        self.eye_lag = 0.0;
+        self.view_dy = 0.03 * ((self.tick as f32) * TICK_DT as f32 * 1.6).sin();
+    }
+
     fn walk(&mut self, input: &TickInput, ground: &dyn Ground) {
         let dt = TICK_DT as f32;
         let c = &mut self.curr;
@@ -288,7 +394,17 @@ impl Sim {
             let rise = -(dir.x * g.normal.x + dir.y * g.normal.z) / g.normal.y;
             target_speed /= 1.0 + UPHILL_SLOWDOWN * rise.max(0.0);
         }
-        let target = wish * target_speed;
+        // Брод (03.6): в воде по пояс медленнее, течение толкает.
+        let mut current = Vec2::ZERO;
+        if let (Some(w), Some(g)) = (self.water, ground.sample_ground(pos.x, pos.y)) {
+            let depth = (w.level - g.height).max(0.0);
+            if depth > WADE_DEPTH_M {
+                let k = ((depth - WADE_DEPTH_M) / (SWIM_DEPTH_M - WADE_DEPTH_M)).clamp(0.0, 1.0);
+                target_speed *= 1.0 - 0.6 * k;
+                current = w.flow * 0.8 * k;
+            }
+        }
+        let target = wish * target_speed + current;
         let mut vel = Vec2::new(self.velocity.x, self.velocity.z);
         let rate = if !self.on_ground {
             AIR_ACCEL

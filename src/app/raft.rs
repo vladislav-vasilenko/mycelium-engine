@@ -92,6 +92,14 @@ impl Raft {
         })
     }
 
+    /// Точка старта на оси реки и направление вниз по течению (для `--swim`).
+    pub fn start(&self) -> (Vec2, Vec2) {
+        let lv: Vec<[f32; 4]> = Vec::new();
+        let (p, _) = self.at(self.s, &lv);
+        let (q, _) = self.at(self.s + 2.0, &lv);
+        (p, (q - p).normalize_or(Vec2::X))
+    }
+
     /// Точка и уровень воды на расстоянии `s` вдоль пути (`levels` —
     /// `Hydrology::levels`, тот же профиль, что рисует реку).
     fn at(&self, s: f32, levels: &[[f32; 4]]) -> (Vec2, f32) {

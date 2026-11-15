@@ -406,3 +406,51 @@ fn trunk_blocks_walking() {
     let far = glam::Vec2::new(5.0, 0.0);
     assert_eq!(super::push_out(far, &[glam::Vec3::new(0.0, 0.0, 1.0)]), far);
 }
+
+/// Плавание (03.6): в глубокой реке течение сносит игрока, плавучесть держит
+/// глаза над водой, нырок опускает, без ввода — всплытие.
+#[test]
+fn river_current_carries_swimmer_and_buoyancy_floats() {
+    let ground = flat();
+    let mut sim = Sim::new(CameraState {
+        position: Vec3::new(0.0, 1.7, 0.0),
+        yaw: 0.0,
+        pitch: 0.0,
+    });
+    sim.set_mode(MoveMode::Walk, &ground);
+    sim.water = Some(crate::sim::Water {
+        level: 3.0,
+        flow: glam::Vec2::new(1.5, 0.0),
+    });
+    for _ in 0..180 {
+        sim.step(&TickInput::default(), Some(&ground));
+    }
+    assert!(sim.swimming, "не плывёт на глубине 3 м");
+    assert!(
+        sim.curr.position.x > 2.0,
+        "течение не сносит: x = {}",
+        sim.curr.position.x
+    );
+    let eye = sim.curr.position.y;
+    assert!((eye - 3.12).abs() < 0.15, "глаза не у поверхности: {eye}");
+    let dive = TickInput {
+        up: -1.0,
+        ..Default::default()
+    };
+    for _ in 0..60 {
+        sim.step(&dive, Some(&ground));
+    }
+    assert!(
+        sim.curr.position.y < eye - 0.5,
+        "нырок не опускает: {}",
+        sim.curr.position.y
+    );
+    for _ in 0..240 {
+        sim.step(&TickInput::default(), Some(&ground));
+    }
+    assert!(
+        (sim.curr.position.y - 3.12).abs() < 0.2,
+        "не всплыл: {}",
+        sim.curr.position.y
+    );
+}

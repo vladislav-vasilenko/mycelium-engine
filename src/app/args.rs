@@ -44,6 +44,8 @@ pub struct Args {
     pub raft: bool,
     /// Сплав сразу под водой (проверка подводного вида).
     pub dive: bool,
+    /// Пешком в реке у начала тропы (проверка плавания, 03.6).
+    pub swim: bool,
     /// Предмет в руке с начала (0 — корзина, 1 — совок, 2 — фонарь, 3 — рация).
     pub prop: Option<usize>,
     /// Действие предметом с начала (проверка): `talk`, `dig`, `aim`.
@@ -101,6 +103,7 @@ impl Args {
                 "--puddles" => args.puddles = it.next().and_then(|v| v.parse().ok()),
                 "--raft" => args.raft = true,
                 "--dive" => args.dive = true,
+                "--swim" => args.swim = true,
                 "--act" => args.act = it.next(),
                 "--prop" => args.prop = it.next().and_then(|v| v.parse::<usize>().ok()),
                 "--date" => {

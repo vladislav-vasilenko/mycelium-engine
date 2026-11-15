@@ -40,5 +40,13 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
         float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
         c = mix(c, lum * float3(0.62, 0.78, 1.05), scotopic * 0.75);
     }
-    return float4(aces(c), 1.0);
+    // ACES по каналам уводит яркие цвета в кислотно-жёлтый; кривая по
+    // яркости сохраняет оттенок. Смесь — оттенок почти сохранён, а светлые
+    // места всё же мягко выцветают к белому (02.10).
+    float lum = max(dot(c, float3(0.2126, 0.7152, 0.0722)), 1e-6);
+    float3 hue = c * (aces(float3(lum)).x / lum);
+    float3 mapped = mix(aces(c), hue, 0.65);
+    float over = max(max(mapped.r, mapped.g), mapped.b);
+    mapped = over > 1.0 ? mix(mapped / over, float3(1.0), saturate(over - 1.0)) : mapped;
+    return float4(saturate(mapped), 1.0);
 }

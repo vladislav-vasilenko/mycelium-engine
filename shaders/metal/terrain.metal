@@ -535,7 +535,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float f = final_w[i] / max(sum, 1e-4);
         final_w[i] = f;
         if (f > 0.0) {
-            albedo += ms[i].albedo * f;
+            float3 la = ms[i].albedo;
+            if (i == MAT_GRASS) {
+                // Скан Grass004 — сочный газон; луга Якусимы — приглушённые,
+                // оливковые (02.10): меньше насыщенность и яркость.
+                la = mix(float3(dot(la, float3(0.3, 0.5, 0.2))), la, 0.55) * float3(0.78, 0.76, 0.66);
+            }
+            albedo += la * f;
             nxy += ms[i].nxy * f;
             rough += ms[i].rough * f;
             mat_ao += ms[i].ao * f;
@@ -601,9 +607,11 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
 
     // Асфальт дорог (мир с поясами — дороги OSM): тёмно-серый, без рисунка камня.
     if (belts && road_px > 0.0) {
-        float3 asphalt = float3(0.085, 0.085, 0.09) * (0.85 + 0.3 * macro);
+        // Тёплый серый и шероховатый: в тени тёмный асфальт иначе отражал
+        // небо синим (02.10).
+        float3 asphalt = float3(0.13, 0.125, 0.115) * (0.85 + 0.3 * macro);
         albedo = mix(albedo, asphalt, road_px * 0.85);
-        rough = mix(rough, 0.75, road_px);
+        rough = mix(rough, 0.92, road_px);
         nxy *= 1.0 - 0.7 * road_px;
     }
 
@@ -707,14 +715,18 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // гасят и часть прямого света (02.9).
     float3 sun = sky_sun_term(skyf) * shadow * mix(1.0, sky_vis * (1.0 - 0.4 * hollow), 0.6);
     // Затенение рельефом (02.9): дно ущелий видит мало неба.
-    float occ = sky_vis * sky_vis * sky_vis * (1.0 - 0.6 * hollow);
+    // Степень 1,5, а не куб (02.10): в ущелье небо не гаснет до черноты.
+    float occ = sky_vis * sqrt(sky_vis) * (1.0 - 0.4 * hollow);
     // Щели материала (AO фотоскана) гасят свет неба; самозатенение параллакса — солнце.
     float3 sky = sky_ambient_term(skyf, N) * occ * mix(1.0, mat_ao, 0.8);
     sun *= pom_shadow;
     // Под пологом: пятна солнца и приглушённое зелёное небо сквозь кроны.
     float3 sky_c = sky * mix(float3(1.0), float3(0.45, 0.55, 0.40), canopy_shade);
     // Блик — физический: BRDF × освещённость (π · «солнце»).
-    float3 color = albedo * (sun * nl * sun_flecks + sky_c) + SKY_PI * sun * spec * sun_flecks;
+    // Отражённый свет (02.10, до GI этапа 11): освещённые склоны и кроны
+    // подсвечивают тень — сильнее там, где неба видно мало.
+    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.16 * (1.0 - 0.5 * sky_vis) * mix(float3(1.0), float3(0.6, 0.75, 0.45), canopy_shade);
+    float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:

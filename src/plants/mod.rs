@@ -16,8 +16,22 @@ use crate::layout::PlantVertex;
 /// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
 /// дерево, 13 лесной сор, 14 подушка мха; 15 гриб — только с CPU.
 pub const SPECIES: [&str; 16] = [
-    "sugi_a", "sugi_b", "sugi_old", "broad_a", "broad_b", "broad_c", "boulder", "fern", "sasa",
-    "shrub", "log", "stump", "windfall", "debris", "moss_cushion", "mushroom",
+    "sugi_a",
+    "sugi_b",
+    "sugi_old",
+    "broad_a",
+    "broad_b",
+    "broad_c",
+    "boulder",
+    "fern",
+    "sasa",
+    "shrub",
+    "log",
+    "stump",
+    "windfall",
+    "debris",
+    "moss_cushion",
+    "mushroom",
 ];
 pub const LODS: usize = 3;
 /// Сторона слоя массива текстур растений.

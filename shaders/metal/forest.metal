@@ -585,7 +585,9 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float3 sun = sky_sun_term(skyf) * shadow;
     float ao = in.attr.z;
     float3 sky = sky_ambient_term(skyf, n) * ao;
-    float3 color = albedo * (sun * nl + sky) + glow;
+    // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
+    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.14 * float3(0.75, 0.85, 0.6);
+    float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {
         // Просвет листвы против солнца.
         float back = pow(saturate(dot(-V, L)), 3.0);

@@ -17,12 +17,12 @@ constant int FOREST_GRID = 160;               // клеток по сторон�
 // 10 упавший ствол, 11 полый пень, 12 вывороченное дерево, 13 лесной сор,
 // 14 подушка мха, 15 корни и камни на тропе; 16 — гриб, только из списка
 // предметов с CPU.
-constant uint GPU_SPECIES = 38;
+constant uint GPU_SPECIES = 41;
 constant uint TREE_MESHES = 6;
 constant uint CAMERA_LISTS = GPU_SPECIES * 3;                 // вид × LOD
 constant uint PROPS_LIST = CAMERA_LISTS + TREE_MESHES;        // 54
 constant uint FOREST_LISTS = PROPS_LIST + 1;                  // 55
-constant uint COUNTS_WORDS = 128;               // счётчики, затем indirect-аргументы
+constant uint COUNTS_WORDS = 160;               // счётчики, затем indirect-аргументы
 constant uint FOREST_CAP = 8192;             // экземпляров в списке
 constant uint SPECIES_SUGI = 0;
 constant uint SPECIES_SUGI_OLD = 2;
@@ -37,12 +37,16 @@ constant uint SPECIES_WINDFALL = 12;
 constant uint SPECIES_DEBRIS = 13;
 constant uint SPECIES_MOSS = 14;
 constant uint SPECIES_TRAIL_ROOTS = 15;
-constant uint SPECIES_GRASS = 33;           // 33–37 — пучки травы (сканы)
-constant uint SPECIES_MUSHROOM = 38;
+constant uint SPECIES_GRASS = 33;           // 33–37 — широколистные травы под пологом (сканы shrub_03/04)
+constant uint SPECIES_BLADES = 38;          // 38–40 — пучки травинок (густая трава)
+constant uint SPECIES_MUSHROOM = 41;
+// Густая трава: шаг 0,35 м до GRASS_DIST.
+constant float GRASS_DIST = 45.0;
+constant int GRASS_SUB = 17;
 // Высота вида при масштабе 1, м (сфера отсечения).
 constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3,
                                          2.2, 2.2, 2.2, 1.0, 1.0, 1.0, 2.4, 2.4, 1.0, 2.0, 0.3, 0.3, 0.3,
-                                         0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5};
+                                         0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.7, 0.7};
 // Подлесок: подклетки 2 м до UNDER_DIST (кусты — до SHRUB_DIST), LOD на 15 и 35 м.
 constant float UNDER_DIST = 70.0;
 constant float SHRUB_DIST = 100.0;
@@ -80,7 +84,8 @@ static uint variant_of(uint species, uint h) {
         case 11: return pick(11, 25, 25, 25, 25, 2);     // пень
         case 15: return pick(15, 26, 27, 28, 28, 4);     // корни на тропе
         case 13: return pick(13, 29, 30, 31, 32, 5);     // сор
-        case 33: return pick(33, 34, 35, 36, 37, 5);     // трава
+        case 33: return pick(33, 34, 35, 36, 37, 5);     // трава (сканы)
+        case 38: return pick(38, 39, 40, 40, 40, 3);     // пучки травинок
         default: return species;
     }
 }
@@ -323,6 +328,90 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             out[list * FOREST_CAP + k] = inst;
         }
     }
+    // Густая трава (02.11): пучки травинок на сетке 0,35 м в клетках у
+    // камеры — сплошь на лугах, у троп и на открытом, умеренно под пологом,
+    // редко на полотне тропы; пятнами по шуму.
+    if (distance(cc, frame.camera_pos.xz) > GRASS_DIST + 6.0) {
+        return;
+    }
+    FeatureDist fdc = feature_distances(cc, frame.map_size_m, feat_segs, feat_cells, feat_list);
+    bool near_trail = fdc.trail < 9.0 || fdc.road < 9.0 || fdc.river < 9.0;
+    for (int j = 0; j < GRASS_SUB; ++j) {
+        for (int i = 0; i < GRASS_SUB; ++i) {
+            uint h = hash3(cell.x * GRASS_SUB + i, cell.y * GRASS_SUB + j, 0x6B1Du);
+            float2 p = (float2(cell) + (float2(i, j) + 0.1 + 0.8 * float2(rnd(h, 1), rnd(h, 2))) / float(GRASS_SUB))
+                     * FOREST_CELL_M;
+            float dxz = distance(p, frame.camera_pos.xz);
+            if (dxz > GRASS_DIST) {
+                continue;
+            }
+            float cn = float(cover.get_width());
+            float4 cv = cover.sample(ls2, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
+            float forest = cv.x + cv.y;
+            // Гранит и скалы (cv.w) — трава лишь в трещинах.
+            float dens = (cv.z * 1.0 + max(1.0 - forest - cv.w, 0.0) * 0.95 + forest * 0.12) * (1.0 - 0.9 * cv.w);
+            dens *= 0.65 + 0.7 * patch_noise(p, 8.0, 0x6B1Eu);
+            float brook_g = 0.0;
+            if (near_trail) {
+                FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
+                brook_g = 1.0 - smoothstep(0.5, 6.0, fd.river);
+                if (fd.road < 0.5 || fd.river < 0.3) {
+                    continue;
+                }
+                // Каменистое полотно тропы — без травы, лишь узкая полоса у
+                // кромки; за краем — полоса густой травы.
+                dens = fd.trail < 0.0 ? 0.35 * smoothstep(-0.45, 0.0, fd.trail)
+                                      : dens + 0.6 * (1.0 - smoothstep(0.0, 2.5, fd.trail));
+            }
+            // У ствола дерева этой клетки (кандидат 0, как в цикле деревьев)
+            // трава редеет: тень и мшистый бугор корней.
+            {
+                uint ht = hash3(cell.x, cell.y, 0xF0E5u);
+                float2 tp = (float2(cell) + 0.12 + 0.76 * float2(rnd(ht, 1), rnd(ht, 2))) * FOREST_CELL_M;
+                dens *= mix(1.0, smoothstep(0.8, 2.5, distance(p, tp)), saturate(forest * 1.5));
+            }
+            if (rnd(h, 3) > dens) {
+                continue;
+            }
+            float y = ground_height(p, heights, zone_heights, zone, frame);
+            if (y < 2.0) {
+                continue;
+            }
+            // К краю дальности пучки мельчают — нет резкой границы травы.
+            float scale = (0.7 + 0.6 * rnd(h, 5)) * (1.0 - smoothstep(0.65 * GRASS_DIST, GRASS_DIST, dxz));
+            if (scale < 0.05) {
+                continue;
+            }
+            float3 base = float3(p.x, y - 0.02, p.y);
+            float3 center = base + float3(0, 0.3 * scale, 0);
+            bool visible = true;
+            for (int k2 = 0; k2 < 6 && visible; ++k2) {
+                visible = dot(view.planes[k2].xyz, center) + view.planes[k2].w >= -0.6 * scale;
+            }
+            if (!visible) {
+                continue;
+            }
+            PlantInstance inst;
+            inst.position = packed_float3(base);
+            inst.scale = scale;
+            inst.yaw = rnd(h, 7) * 6.2831853;
+            inst.tint = rnd(h, 8);
+            inst.phase = rnd(h, 9) * 6.2831853;
+            inst._pad = 0.0;
+            // Ярус: низкая густая (основа), средняя, высокая — редкими пятнами;
+            // у воды гуще и выше, на гребнях — ниже.
+            float tall_patch = patch_noise(p, 5.0, 0x6B2Fu);
+            float rv = rnd(h, 13);
+            uint tier = rv < 0.6 - 0.2 * brook_g ? 0u
+                      : (rv < 0.93 - 0.1 * tall_patch ? 1u : (tall_patch > 0.55 ? 2u : 1u));
+            uint lod = dxz < 10.0 ? 0 : (dxz < 24.0 ? 1 : 2);
+            uint list = (SPECIES_BLADES + tier) * 3 + lod;
+            uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
+            if (k < FOREST_CAP) {
+                out[list * FOREST_CAP + k] = inst;
+            }
+        }
+    }
     // Мелочь под ногами (02.4, итерация 4): сор и подушки мха в подклетках
     // 1,5 м у камеры — в лесу и на тропах по краю; мох — во влажном.
     if (distance(cc, frame.camera_pos.xz) > CLUTTER_DIST + 6.0) {
@@ -350,10 +439,15 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         bool on_trail = fd.trail < -0.2 && forest > 0.2;
         // Низкая трава (02.11): густо на лугах и открытом, умеренно под
         // пологом, пятнами; сор потеснился.
-        float grass_p = (cv.z * 0.9 + forest * 0.35 + max(1.0 - forest - cv.w, 0.0) * 0.7)
+        // Под пологом — широколистные травы (как лесной покров), на открытом
+        // их мало: там густая трава из травинок (цикл выше).
+        float grass_p = (forest * 0.75 + cv.z * 0.15 + max(1.0 - forest - cv.w, 0.0) * 0.15)
                       * (0.45 + 0.8 * patch_noise(p, 9.0, 0x6A55u));
         float dp = debris_p * 0.6;
-        uint species = on_trail ? (rnd(h, 10) < 0.35 ? SPECIES_TRAIL_ROOTS : 99u)
+        // Тропа (02.11): корни поперёк; за краем — полоса трав.
+        grass_p += 0.6 * (1.0 - smoothstep(0.0, 2.5, fd.trail)) * step(0.0, fd.trail);
+        // На полотне тропы — только корни; травы — у кромки (цикл травы).
+        uint species = on_trail ? (rnd(h, 10) < 0.3 ? SPECIES_TRAIL_ROOTS : 99u)
                                 : (r < moss_p ? SPECIES_MOSS
                                    : (r < moss_p + dp ? SPECIES_DEBRIS
                                       : (r < moss_p + dp + grass_p ? SPECIES_GRASS : 99u)));
@@ -381,7 +475,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         if (length(float2(gx, gz)) / 0.7 > 0.7) {
             continue;
         }
-        float scale = 0.6 + 0.6 * rnd(h, 5);
+        // Травы-сканы мелкие (10–40 см) — крупнее.
+        float scale = (0.6 + 0.6 * rnd(h, 5)) * (species == SPECIES_GRASS ? 2.2 : 1.0);
         float3 base = float3(p.x, y - 0.03, p.y);
         bool visible = true;
         for (int i = 0; i < 6 && visible; ++i) {
@@ -404,6 +499,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             out[list * FOREST_CAP + k] = inst;
         }
     }
+
 }
 
 // Indirect-аргументы drawIndexedPrimitives по спискам; `lods` — (первый
@@ -484,7 +580,8 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     // радиальные, и ветви «дышали» бы (02.10).
     float mat = float(v.attr.x);
     // Листва сканов (02.11): материал ≥ 16 с силой ветра.
-    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 15.5 && w > 0.02);
+    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 8.5 && mat < 9.5)
+                 || (mat > 15.5 && w > 0.02);
     float fph = dot(q, float3(1.3, 0.7, 1.1)) + inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
     float flutter = leafy ? sin(t * (5.0 + 3.0 * fract(inst.phase)) + fph) * 0.035 * w * gust * gust : 0.0;
     // Раскачка растёт с высотой точки: верх кроны качается, папоротник — едва.
@@ -562,9 +659,17 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     float3 albedo;
     // 2 хвоя, 3 листья, 5 папоротник, 6 якудзаса — листва; 4 — камень.
-    bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 15.5 && in.attr.y > 0.02);
+    bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 8.5 && mat < 9.5)
+                || (mat > 15.5 && in.attr.y > 0.02);
     float3 glow = 0.0;
-    if (mat > 15.5) {
+    if (mat > 8.5 && mat < 9.5) {
+        // Травинки (02.11): от тёмного основания к светлому кончику; часть
+        // пучков подсохла (tint).
+        float t = saturate(in.uv.y);
+        float3 green = mix(float3(0.05, 0.08, 0.025), float3(0.20, 0.27, 0.07), t);
+        float3 dry = mix(float3(0.10, 0.09, 0.04), float3(0.42, 0.36, 0.17), t);
+        albedo = mix(green, dry, smoothstep(0.55, 1.0, in.tint) * 0.8);
+    } else if (mat > 15.5) {
         // Фотоскан (02.11): свой цвет и нормаль (слой = материал − 16), базис
         // нормали — по производным, как у коры (AD-66).
         uint layer = uint(mat - 16.0);

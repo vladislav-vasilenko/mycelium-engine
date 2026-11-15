@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from mesh import BARK_BROAD, LEAVES, ROCK, SOIL, Mesh, atlas_rect, card, tube
+from mesh import BARK_BROAD, BLADE, LEAVES, ROCK, SOIL, Mesh, atlas_rect, card, tube
 
 
 def pebble(m, rng, c, r, sub):
@@ -118,4 +118,45 @@ def trail_roots(lod, seed=0x7207):
     return m
 
 
-SPECIES = {"debris": debris, "moss_cushion": moss_cushion, "trail_roots": trail_roots}
+def grass_blades(lod, seed=0x6A55, kind="medium"):
+    """Пучок травинок (02.11): изогнутые сужающиеся полоски геометрией, без
+    альфы. uv.y — доля высоты (цвет от основания к кончику — в шейдере,
+    материал 9), ветер растёт к кончику. ~100 треугольников на LOD 0."""
+    rng = np.random.default_rng(seed)
+    m = Mesh()
+    # Ярусы (02.11): низкая густая, средняя, высокая редкая.
+    n0, hmin, hmax, wmul, radius = {"short": (40, 0.08, 0.2, 0.8, 0.22),
+                                     "medium": (30, 0.2, 0.45, 1.0, 0.25),
+                                     "tall": (12, 0.5, 0.9, 1.4, 0.18)}[kind]
+    blades, segs = [n0, max(n0 * 6 // 10, 6), max(n0 // 3, 4)][lod], [4, 3, 2][lod]
+    for b in range(blades):
+        # Широкий пучок: соседние смыкаются в ковёр.
+        r = radius * math.sqrt(rng.uniform())
+        th = rng.uniform(0, 6.28)
+        base = np.array([r * math.cos(th), 0.0, r * math.sin(th)])
+        h = rng.uniform(hmin, hmax) * (1.0 - 0.4 * r / radius)
+        lean = rng.uniform(0.2, 0.6)
+        az = math.atan2(base[2], base[0]) + rng.uniform(-0.8, 0.8) if r > 0.03 else rng.uniform(0, 6.28)
+        out = np.array([math.cos(az), 0.0, math.sin(az)])
+        side = np.array([-out[2], 0.0, out[0]])
+        w0 = rng.uniform(0.007, 0.012) * wmul * [1.0, 1.5, 2.2][lod]
+        prev = None
+        for s in range(segs + 1):
+            t = s / segs
+            p = base + out * lean * h * t * t + np.array([0, h * t * (1 - 0.25 * lean * t), 0])
+            w = w0 * (1.0 - t * 0.92)
+            n = np.cross(side, out * (2 * lean * h * t) + np.array([0, h, 0]))
+            n = n / (np.linalg.norm(n) + 1e-9) + np.array([0, 0.5, 0])
+            a = m.vert(p - side * w, n, (0.0, t), BLADE, 0.9 * t, 0.55 + 0.45 * t)
+            c = m.vert(p + side * w, n, (1.0, t), BLADE, 0.9 * t, 0.55 + 0.45 * t)
+            if prev:
+                m.tri(prev[0], prev[1], c)
+                m.tri(prev[0], c, a)
+            prev = (a, c)
+    return m
+
+
+SPECIES = {"debris": debris, "moss_cushion": moss_cushion, "trail_roots": trail_roots,
+           "grass_blades_a": lambda l: grass_blades(l, 0x6A55, "short"),
+           "grass_blades_b": lambda l: grass_blades(l, 0x6A56, "medium"),
+           "grass_blades_c": lambda l: grass_blades(l, 0x6A57, "tall")}

@@ -41,11 +41,11 @@ pub const SCAN_SPECIES: [(usize, &str, f32); 28] = [
     (30, "dry_branches_medium_01_b", 0.0),
     (31, "bark_debris_01_a", 0.0),
     (32, "stone_01", 0.0),
-    (33, "grass_medium_02_a", 0.0),
-    (34, "grass_medium_02_b", 0.0),
-    (35, "grass_medium_02_c", 0.0),
-    (36, "grass_medium_02_d", 0.0),
-    (37, "grass_medium_02_e", 0.0),
+    (33, "shrub_03_a", 0.0),
+    (34, "shrub_03_b", 0.0),
+    (35, "shrub_03_c", 0.0),
+    (36, "shrub_03_d", 0.0),
+    (37, "shrub_04", 0.0),
 ];
 
 pub fn scans_dir() -> PathBuf {

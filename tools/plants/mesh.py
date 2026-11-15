@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA, MUSHROOM, SOIL = 0, 1, 2, 3, 4, 5, 6, 7, 8
+BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA, MUSHROOM, SOIL, BLADE = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 
 
 class Mesh:

@@ -18,7 +18,7 @@ pub mod scans;
 /// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
 /// дерево, 13 лесной сор, 14 подушка мха, 15 корни и камни на тропе; 16–37 —
 /// варианты сканов и трава; 38 гриб — только с CPU.
-pub const SPECIES: [&str; 39] = [
+pub const SPECIES: [&str; 42] = [
     "sugi_a",
     "sugi_b",
     "sugi_old",
@@ -58,6 +58,10 @@ pub const SPECIES: [&str; 39] = [
     "grass_c",
     "grass_d",
     "grass_e",
+    // 38–40 — пучки травинок для густой травы (02.11), процедурные.
+    "grass_blades_a",
+    "grass_blades_b",
+    "grass_blades_c",
     "mushroom",
 ];
 pub const LODS: usize = 3;
@@ -258,7 +262,7 @@ mod tests {
         let max = a.vertices.len() as u32;
         assert!(a.indices.iter().all(|&i| i < max));
         // Процедурные материалы 0–8, сканы — 16 + слой (02.11).
-        assert!(a.vertices.iter().all(|v| v.attr[0] <= 8 || v.attr[0] >= 16));
+        assert!(a.vertices.iter().all(|v| v.attr[0] <= 9 || v.attr[0] >= 16));
         assert!(a.scans.layers() > 0, "сканы не загружены");
     }
 }

@@ -306,7 +306,6 @@ impl App {
                     e.goal = b;
                 }
             }
-            let mut e = e;
             if let (Some(e), Some(t)) = (
                 e.as_mut(),
                 std::env::var("ECHO_ESCAPE_CONTACT")

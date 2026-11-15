@@ -14,6 +14,7 @@ pub mod generator;
 pub mod heightfield;
 pub mod layers;
 pub mod noise;
+pub mod rivers;
 pub mod zone;
 
 use glam::{Vec2, Vec3};

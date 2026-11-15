@@ -542,6 +542,19 @@ pub fn import(dir: &Path) -> Result<World, String> {
     if let Some(meta) = &m.height_zone {
         world.zone = Some(fine::import_zone(dir, meta, &mut world.heightfield)?);
     }
+    // Реки — по дну долин (03.2): линии OSM сдвигаются к тальвегу рельефа
+    // (зона 1 м, где есть, иначе поле острова).
+    if let Some(mut f) = world.features.take() {
+        let far = &world.heightfield;
+        let zone = world.zone.as_ref();
+        let shift = super::rivers::snap_to_valleys(&mut f, world.size_m().x, |p| {
+            zone.and_then(|z| z.sample(far, p.x, p.y))
+                .or_else(|| far.sample(p.x, p.y))
+                .map(|(h, _)| h)
+        });
+        eprintln!("реки: сдвиг к тальвегу в среднем {shift:.1} м");
+        world.features = Some(f);
+    }
     // Тропы и дороги — полкой в рельефе (поле острова и зона 1 м).
     if let Some(f) = &world.features {
         super::carve::carve_paths(&mut world.heightfield, glam::Vec2::ZERO, f);

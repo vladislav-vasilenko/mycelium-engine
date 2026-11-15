@@ -117,6 +117,21 @@ impl FeatureSet {
                 }
             }
         }
+        let mut set = FeatureSet {
+            json: text.to_string(),
+            segments,
+            cells_n: 0,
+            cells: Vec::new(),
+            list: Vec::new(),
+        };
+        set.index(map_size_m);
+        Ok(set)
+    }
+
+    /// Раскладка отрезков по ячейкам (после разбора и после правки отрезков —
+    /// привязки рек к тальвегу, 03.2).
+    pub fn index(&mut self, map_size_m: f32) {
+        let segments = &self.segments;
         let n = cells_for(map_size_m);
         let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); (n * n) as usize];
         for (i, s) in segments.iter().enumerate() {
@@ -143,13 +158,9 @@ impl FeatureSet {
             cells.push([list.len() as u32, b.len() as u32]);
             list.extend_from_slice(b);
         }
-        Ok(FeatureSet {
-            json: text.to_string(),
-            segments,
-            cells_n: n,
-            cells,
-            list,
-        })
+        self.cells_n = n;
+        self.cells = cells;
+        self.list = list;
     }
 
     /// Точные расстояния в точке — тот же расчёт, что в `features.h`.

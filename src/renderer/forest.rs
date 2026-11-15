@@ -21,7 +21,8 @@ pub const CAMERA_LISTS: usize = GPU_SPECIES * 3;
 pub const PROPS_LIST: usize = CAMERA_LISTS + TREE_MESHES;
 pub const FOREST_LISTS: usize = PROPS_LIST + 1;
 /// Радиус ствола у груди при масштабе 1 по видам деревьев, м (столкновения).
-const TRUNK_R: [f32; TREE_MESHES] = [0.9, 0.75, 2.0, 0.45, 0.4, 0.5];
+// Пихта-скан × 1,4 / 1,6 (02.13): ствол ~0,4 м.
+const TRUNK_R: [f32; TREE_MESHES] = [0.55, 0.55, 2.0, 0.45, 0.4, 0.5];
 pub const FOREST_CAP: usize = 8192;
 pub const FOREST_GRID: usize = 160;
 /// u32 в буфере счётчиков: 128 счётчиков (121 занят), затем аргументы по 5 u32.

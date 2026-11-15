@@ -44,8 +44,8 @@ constant uint SPECIES_MUSHROOM = 41;
 constant float GRASS_DIST = 45.0;
 constant int GRASS_SUB = 24;
 // Высота вида при масштабе 1, м (сфера отсечения).
-constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3,
-                                         2.2, 2.2, 2.2, 1.0, 1.0, 1.0, 2.4, 2.4, 1.0, 2.0, 0.3, 0.3, 0.3,
+constant float SPECIES_H[GPU_SPECIES] = {27.0, 23.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3,
+                                         2.2, 2.2, 2.2, 1.0, 1.0, 1.0, 4.2, 4.6, 1.0, 2.0, 0.3, 0.3, 0.3,
                                          0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.7, 0.7};
 // Подлесок: подклетки 2 м до UNDER_DIST (кусты — до SHRUB_DIST), LOD на 15 и 35 м.
 constant float UNDER_DIST = 70.0;
@@ -230,7 +230,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         inst.yaw = rnd(h, 7) * 6.2831853;
         inst.tint = rnd(h, 8);
         inst.phase = rnd(h, 9) * 6.2831853;
-        inst._pad = 0.0;
+        // Метка дерева (02.13): `plant_world` не гнёт его как низкое растение.
+        inst._pad = kind == 0 ? 20.0 : 0.0;
         if (kind == 0 && dist < SHADOW_DIST) {
             uint k = atomic_fetch_add_explicit(&counts[CAMERA_LISTS + species], 1, memory_order_relaxed);
             if (k < FOREST_CAP) {
@@ -596,7 +597,7 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     // Низкие растения (папоротник, саса, сканы трав и кустов) — без фазы по
     // вершине: иначе карточка коробится («сжимается и растягивается»).
     bool blade = mat > 8.5 && mat < 9.5;
-    bool low = blade || (mat > 4.5 && mat < 6.5) || mat > 15.5;
+    bool low = inst._pad < 15.5 && (blade || (mat > 4.5 && mat < 6.5) || mat > 15.5);
     if (low) {
         fph = inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
     }

@@ -110,6 +110,66 @@ def decimated(obj, target):
     return c
 
 
+def tree_lod(obj, target, alpha_slots, seed=7):
+    """Дерево-скан (02.13): листва прореживается целыми веточками (островками),
+    оставшиеся веточки увеличиваются вокруг своего центра — крона сохраняет
+    плотность (Decimate схлопывал карточки хвои и крона «облетала»);
+    Decimate — только древесина (группа вершин `wood`)."""
+    c = obj.copy()
+    c.data = obj.data.copy()
+    bpy.context.collection.objects.link(c)
+    bm = bmesh.new()
+    bm.from_mesh(c.data)
+    bm.faces.ensure_lookup_table()
+    leaf = [f for f in bm.faces if f.material_index in alpha_slots]
+    leaf_tris = sum(len(f.verts) - 2 for f in leaf)
+    wood_tris = sum(len(f.verts) - 2 for f in bm.faces) - leaf_tris
+    leaf_target = int(target * 0.75)
+    keep = min(1.0, leaf_target / max(leaf_tris, 1))
+    grow = min(2.5, (1.0 / keep) ** 0.5)
+    rng = np.random.default_rng(seed)
+    seen, kill = set(), []
+    for f in leaf:
+        if f.index in seen:
+            continue
+        island, stack = [], [f]
+        seen.add(f.index)
+        while stack:
+            g = stack.pop()
+            island.append(g)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h.index not in seen and h.material_index in alpha_slots:
+                        seen.add(h.index)
+                        stack.append(h)
+        if rng.random() > keep:
+            kill.extend(island)
+        elif grow > 1.01:
+            verts = {v for g in island for v in g.verts}
+            # Центр — у основания веточки (ближайшая к стволу вершина), чтобы
+            # увеличенная веточка не отрывалась от ветви.
+            base = min(verts, key=lambda v: v.co.x * v.co.x + v.co.y * v.co.y).co.copy()
+            for v in verts:
+                v.co = base + (v.co - base) * grow
+    bmesh.ops.delete(bm, geom=kill, context="FACES")
+    bm.to_mesh(c.data)
+    bm.free()
+    c.data.update()
+    wood_target = max(target - leaf_target, 500)
+    if wood_tris > wood_target:
+        vg = c.vertex_groups.new(name="wood")
+        ids = {v for p in c.data.polygons if p.material_index not in alpha_slots for v in p.vertices}
+        vg.add(list(ids), 1.0, "REPLACE")
+        mod = c.modifiers.new("dec", "DECIMATE")
+        mod.decimate_type = "COLLAPSE"
+        mod.vertex_group = "wood"
+        mod.ratio = max(wood_target / wood_tris, 0.002)
+        mod.use_collapse_triangulate = True
+        bpy.context.view_layer.objects.active = c
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    return c
+
+
 def thin_foliage(obj, target, alpha_slots, seed=7):
     """Листва из отдельных карточек не упрощается Decimate: на дальних LOD
     выбрасываем часть островков листвы (связных кусков) случайно."""
@@ -264,9 +324,12 @@ def process(name, catalog):
         for budget in BUDGET[role]:
             # LOD 1 и 2 — не больше 45 % и 35 % предыдущего: дешевеют всегда.
             target = min(budget, src_tris if not counts else int(counts[-1] * (0.45 if len(counts) == 1 else 0.35)))
-            d = decimated(obj, target)
             alpha_slots = {i for i, m in slot_map.items() if mats[m]["alpha"] != "OPAQUE"}
-            thin_foliage(d, target, alpha_slots)
+            if role == "tree" and alpha_slots:
+                d = tree_lod(obj, target, alpha_slots)
+            else:
+                d = decimated(obj, target)
+                thin_foliage(d, target, alpha_slots)
             lods.append(mesh_arrays(d, slot_map, wind_of_slot, height))
             counts.append(len(lods[-1][4]) // 3)
             bpy.data.objects.remove(d, do_unlink=True)

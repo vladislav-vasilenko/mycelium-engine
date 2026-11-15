@@ -239,7 +239,7 @@
   "island_tree_02": {
     "role": "широколиственное дерево",
     "triangles": 1762064,
-    "bytes": 46172406,
+    "bytes": 46229844,
     "heavy": true,
     "source": "https://polyhaven.com/a/island_tree_02",
     "authors": [
@@ -251,7 +251,7 @@
   "tree_small_02": {
     "role": "молодое широколиственное",
     "triangles": 4652585,
-    "bytes": 100974143,
+    "bytes": 101238854,
     "heavy": true,
     "source": "https://polyhaven.com/a/tree_small_02",
     "authors": [
@@ -262,7 +262,7 @@
   "fir_tree_01": {
     "role": "хвойное (замена криптомерии до своего скана)",
     "triangles": 7853731,
-    "bytes": 487358833,
+    "bytes": 487729859,
     "heavy": true,
     "source": "https://polyhaven.com/a/fir_tree_01",
     "authors": [

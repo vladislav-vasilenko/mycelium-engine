@@ -22,6 +22,28 @@ inline float3 aces(float3 x) {
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
+// AgX (02.13; аппроксимация Б. Врэнша кривой Т. Собатки, как в Blender 4):
+// вход — линейный HDR, выход — линейный дисплейный. Насыщенные яркие цвета
+// плавно выцветают, как у плёнки и сенсора камеры, — без «кислотной» зелени.
+static float3 agx_curve(float3 x) {
+    float3 x2 = x * x, x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+static float3 agx(float3 c) {
+    const float3x3 inset = float3x3(float3(0.842479062253094, 0.0423282422610123, 0.0423756549057051),
+                                    float3(0.0784335999999992, 0.878468636469772, 0.0784336),
+                                    float3(0.0792237451477643, 0.0791661274605434, 0.879142973793104));
+    const float3x3 outset = float3x3(float3(1.19687900512017, -0.0528968517574562, -0.0529716355144438),
+                                     float3(-0.0980208811401368, 1.15190312990417, -0.0980434501171241),
+                                     float3(-0.0990297440797205, -0.0989611768448433, 1.15107367264116));
+    const float min_ev = -12.47393, max_ev = 4.026069;
+    float3 v = inset * max(c, 1e-10);
+    v = (clamp(log2(v), min_ev, max_ev) - min_ev) / (max_ev - min_ev);
+    v = outset * agx_curve(v);
+    return pow(saturate(v), 2.2);
+}
+
 fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
                            constant FrameUniforms& frame [[buffer(1)]],
                            device const float4* exposure_state [[buffer(2)]],
@@ -46,14 +68,12 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
         float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
         c = mix(c, lum * float3(0.62, 0.78, 1.05), scotopic * 0.75);
     }
-    // ACES по каналам уводит яркие цвета в кислотно-жёлтый; кривая по
-    // яркости сохраняет оттенок. Смесь — оттенок почти сохранён, а светлые
-    // места всё же мягко выцветают к белому (02.10).
-    float lum = max(dot(c, float3(0.2126, 0.7152, 0.0722)), 1e-6);
-    float3 hue = c * (aces(float3(lum)).x / lum);
-    float3 mapped = mix(aces(c), hue, 0.65);
-    float over = max(max(mapped.r, mapped.g), mapped.b);
-    mapped = over > 1.0 ? mix(mapped / over, float3(1.0), saturate(over - 1.0)) : mapped;
+    // AgX (02.13) вместо смеси ACES и кривой по яркости (02.10): та
+    // сохраняла оттенок, и трава с цветами выходили кислотно-яркими.
+    // Сверху — мягкое общее снижение насыщенности (−10 %), как у плёнки.
+    float3 mapped = agx(c * 1.35);  // 1,35: средний серый 0,18 → 0,267, как у прежней кривой
+    float ml = dot(mapped, float3(0.2126, 0.7152, 0.0722));
+    mapped = max(ml + 0.9 * (mapped - ml), 0.0);
     // Дизеринг ±½ шага 8-битного вывода (02.10): плавный градиент неба без полос.
     uint2 px = uint2(in.position.xy);
     uint h = (px.x * 0x8da6b343u) ^ (px.y * 0xd8163841u) ^ uint(frame.time * 60.0) * 0x9e3779b9u;

@@ -212,15 +212,19 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         .and_then(|t| serde_json::from_str(&t).ok());
     let mut tex = scans::ScanTextures::default();
     for (s, name) in SPECIES.iter().enumerate() {
+        // Скан — если он есть в каталоге и его сетка на диске (тяжёлые
+        // деревья-сканы не в git). Пихта-скан вместо криптомерий (виды 0–1)
+        // — только с `ECHO_SCAN_TREES=1`: +8 мс GPU (перерисовка карточек
+        // хвои), до бюджета кадра 02.13 сессии 3.
         let scan = catalog.as_ref().and_then(|c| {
             scans::SCAN_SPECIES
                 .iter()
-                .find(|x| x.0 == s)
+                .find(|x| x.0 == s && scan_dir.join(format!("{}.glb", x.1)).exists() && (x.0 >= 2 || std::env::var_os("ECHO_SCAN_TREES").is_some()))
                 .map(|x| (c, x))
         });
         a.lods[s] = match scan {
-            Some((c, &(_, variant, yaw))) => {
-                scans::load_variant(&scan_dir, c, variant, yaw, &mut tex, &mut a)?
+            Some((c, &(_, variant, yaw, scale))) => {
+                scans::load_variant(&scan_dir, c, variant, yaw, scale, &mut tex, &mut a)?
             }
             None => load_glb(&models.join(format!("{name}.glb")), &mut a)?,
         };

@@ -1353,9 +1353,9 @@
   "role": "tree",
   "source_triangles": 1072212,
   "lod_triangles": [
-   80000,
-   16000,
-   4000
+   62057,
+   14705,
+   5633
   ],
   "size_m": [
    4.208,
@@ -1366,6 +1366,7 @@
    {
     "name": "island_tree_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "island_tree_02/island_tree_02_diff_1k.jpg",
     "normal": "island_tree_02/island_tree_02_nor_gl_1k.jpg",
     "rough": "island_tree_02/island_tree_02_arm_1k.jpg"
@@ -1373,6 +1374,7 @@
    {
     "name": "island_tree_02_leaves",
     "alpha": "BLEND",
+    "mask": "island_tree_02/island_tree_02_leaves_alpha_1k.png",
     "albedo": "island_tree_02/island_tree_02_leaves_diff_1k.jpg",
     "normal": "island_tree_02/island_tree_02_leaves_nor_gl_1k.jpg",
     "rough": "island_tree_02/island_tree_02_leaves_arm_1k.jpg"
@@ -1380,6 +1382,7 @@
    {
     "name": "island_tree_02_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "island_tree_02/island_tree_02_branches_diff_1k.jpg",
     "normal": "island_tree_02/island_tree_02_branches_nor_gl_1k.jpg",
     "rough": "island_tree_02/island_tree_02_branches_arm_1k.jpg"
@@ -1391,9 +1394,9 @@
   "role": "tree",
   "source_triangles": 2062487,
   "lod_triangles": [
-   80000,
-   16443,
-   8755
+   55356,
+   11276,
+   2492
   ],
   "size_m": [
    2.917,
@@ -1404,6 +1407,7 @@
    {
     "name": "tree_small_02_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "tree_small_02/tree_small_02_branch_diff_1k.jpg",
     "normal": "tree_small_02/tree_small_02_branch_nor_gl_1k.jpg",
     "rough": "tree_small_02/tree_small_02_branch_arm_1k.jpg"
@@ -1411,6 +1415,7 @@
    {
     "name": "tree_small_02_leaves",
     "alpha": "BLEND",
+    "mask": "tree_small_02/tree_small_02_leaves_alpha_1k.png",
     "albedo": "tree_small_02/tree_small_02_leaves_diff_1k.jpg",
     "normal": "tree_small_02/tree_small_02_leaves_nor_gl_1k.jpg",
     "rough": "tree_small_02/tree_small_02_leaves_arm_1k.jpg"
@@ -1418,6 +1423,7 @@
    {
     "name": "tree_small_02_trunk",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "tree_small_02/tree_small_02_diff_1k.jpg",
     "normal": "tree_small_02/tree_small_02_nor_gl_1k.jpg",
     "rough": "tree_small_02/tree_small_02_arm_1k.jpg"
@@ -1429,9 +1435,9 @@
   "role": "tree",
   "source_triangles": 4176819,
   "lod_triangles": [
-   80000,
-   16000,
-   7563
+   69135,
+   21253,
+   12454
   ],
   "size_m": [
    6.534,
@@ -1442,6 +1448,7 @@
    {
     "name": "fir_tree_01_bark",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1449,6 +1456,7 @@
    {
     "name": "fir_tree_01_trunk_a",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
@@ -1456,6 +1464,7 @@
    {
     "name": "fir_tree_01_twig",
     "alpha": "BLEND",
+    "mask": "fir_tree_01/fir_tree_01_twig_alpha_1k.png",
     "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
@@ -1463,6 +1472,7 @@
    {
     "name": "fir_tree_01_dead_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1470,6 +1480,7 @@
    {
     "name": "fir_tree_01_trunk_b",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
@@ -1477,6 +1488,7 @@
    {
     "name": "fir_tree_01_trunk_c",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1554,9 +1566,9 @@
   "role": "tree",
   "source_triangles": 2300624,
   "lod_triangles": [
-   80000,
-   15999,
-   4030
+   65950,
+   15967,
+   6982
   ],
   "size_m": [
    5.613,
@@ -1567,6 +1579,7 @@
    {
     "name": "fir_tree_01_bark",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1574,6 +1587,7 @@
    {
     "name": "fir_tree_01_trunk_a",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
@@ -1581,6 +1595,7 @@
    {
     "name": "fir_tree_01_twig",
     "alpha": "BLEND",
+    "mask": "fir_tree_01/fir_tree_01_twig_alpha_1k.png",
     "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
@@ -1588,6 +1603,7 @@
    {
     "name": "fir_tree_01_dead_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1595,6 +1611,7 @@
    {
     "name": "fir_tree_01_trunk_b",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
@@ -1602,6 +1619,7 @@
    {
     "name": "fir_tree_01_trunk_c",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1611,11 +1629,11 @@
  "fir_tree_01_c": {
   "scan": "fir_tree_01",
   "role": "tree",
-  "source_triangles": 505492,
+  "source_triangles": 505494,
   "lod_triangles": [
-   80000,
-   16000,
-   4019
+   65448,
+   16686,
+   7843
   ],
   "size_m": [
    6.306,
@@ -1626,6 +1644,7 @@
    {
     "name": "fir_tree_01_bark",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1633,6 +1652,7 @@
    {
     "name": "fir_tree_01_trunk_a",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
@@ -1640,6 +1660,7 @@
    {
     "name": "fir_tree_01_twig",
     "alpha": "BLEND",
+    "mask": "fir_tree_01/fir_tree_01_twig_alpha_1k.png",
     "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
@@ -1647,6 +1668,7 @@
    {
     "name": "fir_tree_01_dead_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
@@ -1654,6 +1676,7 @@
    {
     "name": "fir_tree_01_trunk_b",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
@@ -1661,6 +1684,7 @@
    {
     "name": "fir_tree_01_trunk_c",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"

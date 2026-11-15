@@ -60,6 +60,8 @@ const RES_RT: ResourceId = ResourceId(14);
 pub(super) const RES_AO: ResourceId = ResourceId(15);
 /// Объёмный свет (11, сессия 2).
 const RES_VOL: ResourceId = ResourceId(16);
+/// Пробы освещённости (11, сессия 3).
+const RES_PROBES: ResourceId = ResourceId(17);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -276,6 +278,12 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_RT, Stages::DISPATCH | Stages::ACCEL)],
         },
         PassDecl {
+            name: "probes",
+            kind: PassKind::Compute,
+            reads: vec![(RES_RT, Stages::DISPATCH)],
+            writes: vec![(RES_PROBES, Stages::DISPATCH)],
+        },
+        PassDecl {
             name: "shadows",
             kind: PassKind::Render,
             reads: vec![(RES_CULL, Stages::VERTEX), (RES_FOREST, Stages::VERTEX)],
@@ -293,6 +301,7 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
                 (RES_FOREST, Stages::VERTEX),
                 (RES_RT, Stages::FRAGMENT),
                 (RES_AO, Stages::FRAGMENT),
+                (RES_PROBES, Stages::FRAGMENT),
             ],
             writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
         },

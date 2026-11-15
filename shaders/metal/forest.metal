@@ -2,6 +2,7 @@
 #include "features.h"
 #include "sky.h"
 #include "terrain_patch.h"
+#include "probes.h"
 
 // Лес (02.4 + 02.8). Расстановка и отсечение — на GPU каждый кадр: сетка
 // клеток FOREST_CELL_M вокруг камеры, в клетке — кандидат на детерминированном
@@ -520,7 +521,8 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                          texture3d<float> aerial [[texture(2)]],
                          texture2d_array<float> mat_albedo [[texture(3)]],
                          texture2d_array<float> bark_normal [[texture(4)]],
-                         texture2d<float> rt_ao_tex [[texture(5)]]) {
+                         texture2d<float> rt_ao_tex [[texture(5)]],
+                         device const float4* probes [[buffer(9)]]) {
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
     constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
@@ -612,6 +614,14 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float3 sky = sky_ambient_term(skyf, n) * ao;
     // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
     float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.24 * float3(0.75, 0.85, 0.6);
+    // Пробы освещённости (11, сессия 3) вместо неба и отражения.
+    if (shadows.params.y > 0.5) {
+        float3 pe = probe_irradiance(probes, frame, in.world, n);
+        if (pe.x >= 0.0) {
+            sky = pe * ao;
+            bounce = 0.0;
+        }
+    }
     // Затенение лучами (11) — кора, камни, валежник (листва — карточки, её
     // свет уже приглушён затенением внутри кроны).
     if (shadows.params.z > 0.5 && !leaf) {

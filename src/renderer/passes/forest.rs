@@ -144,6 +144,8 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(t.albedo.gpuResourceID(), 3);
         table.setTexture_atIndex(f.bark_normal.gpuResourceID(), 4);
         table.setTexture_atIndex(ctx.targets.rt_ao.gpuResourceID(), 5);
+        let probes = ctx.r.rt.as_ref().map_or(&f.vertices, |rt| &rt.probes);
+        table.setAddress_atIndex(probes.gpuAddress(), 9);
     }
     bind_ground(ctx, table);
     enc.pushDebugGroup(&label("forest: plants (indirect)"));

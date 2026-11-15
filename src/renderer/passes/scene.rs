@@ -131,6 +131,11 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
             .as_ref()
             .map_or(&terrain.detail, |c| &c.macro_detail);
         table.setTexture_atIndex(macro_tex.gpuResourceID(), 9);
+        // Затенение и пробы (11) не используются (params.z/y = 0), но
+        // привязки шейдера должны быть заданы.
+        table.setTexture_atIndex(ctx.targets.rt_ao.gpuResourceID(), 10);
+        let probes = ctx.r.rt.as_ref().map_or(&terrain.vertices, |rt| &rt.probes);
+        table.setAddress_atIndex(probes.gpuAddress(), 13);
     }
     enc.pushDebugGroup(&label(&format!("terrain: {} tiles", terrain.tile_count)));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain);
@@ -188,6 +193,10 @@ fn draw_clusters(
         table.setTexture_atIndex(c.macro_detail.gpuResourceID(), 9);
         // Затенение лучами прошлого кадра (11): шейдер читает его при params.z = 1.
         table.setTexture_atIndex(ctx.targets.rt_ao.gpuResourceID(), 10);
+        // Пробы освещённости (11, сессия 3); без сцены лучей — любой буфер
+        // (шейдер его не читает при params.y = 0).
+        let probes = ctx.r.rt.as_ref().map_or(&c.heights, |rt| &rt.probes);
+        table.setAddress_atIndex(probes.gpuAddress(), 13);
     }
     enc.pushDebugGroup(&label(&match count {
         Some(n) => format!("terrain: {n} clusters (CPU cut)"),

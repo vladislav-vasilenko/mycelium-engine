@@ -71,6 +71,8 @@ pub struct Pipelines {
     pub rt_instances: Obj<dyn MTLComputePipelineState>,
     pub rt_count_finish: Obj<dyn MTLComputePipelineState>,
     pub rt_ao: Obj<dyn MTLComputePipelineState>,
+    /// Пробы освещённости (11, сессия 3).
+    pub probe_update: Obj<dyn MTLComputePipelineState>,
     /// Объёмный свет (11, сессия 2).
     pub volumetric_light: Obj<dyn MTLComputePipelineState>,
     /// LUT воздушной перспективы (04.2).
@@ -427,6 +429,7 @@ pub fn build_pipelines(
         rt_instances: compute_pipeline(compiler, &rt_lib, "rt.metal", "rt_instances")?,
         rt_count_finish: compute_pipeline(compiler, &rt_lib, "rt.metal", "rt_count_finish")?,
         rt_ao: compute_pipeline(compiler, &rt_lib, "rt.metal", "rt_ao")?,
+        probe_update: compute_pipeline(compiler, &rt_lib, "rt.metal", "probe_update")?,
         volumetric_light: compute_pipeline(
             compiler,
             &vol_lib,

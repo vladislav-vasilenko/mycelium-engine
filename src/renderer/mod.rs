@@ -499,6 +499,8 @@ impl Renderer {
             && input.taa.is_some()
             && input.shadows.is_some();
         shadow_u.params[2] = if rt_on { 1.0 } else { 0.0 };
+        // Пробы освещённости (11, сессия 3) — с той же сценой для лучей.
+        shadow_u.params[1] = if rt_on { 1.0 } else { 0.0 };
         upload_bytes(&slot.upload, SHADOW_OFFSET, bytemuck::bytes_of(&shadow_u));
         if let Some(c) = &input.cull {
             upload_bytes(&slot.upload, CULL_OFFSET, bytemuck::cast_slice(&c.views));

@@ -143,3 +143,46 @@ impl FramePass for RtAoPass {
         enc.endEncoding();
     }
 }
+
+/// Проход `probes` (11, сессия 3): лучи проб освещённости по сцене этого кадра.
+pub(in crate::renderer) struct ProbesPass;
+
+impl FramePass for ProbesPass {
+    fn name(&self) -> &'static str {
+        "probes"
+    }
+
+    fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier) {
+        if !active(ctx) {
+            return;
+        }
+        let (rt, c) = (ctx.r.rt.as_ref().unwrap(), ctx.r.clusters.as_ref().unwrap());
+        let enc = ctx
+            .slot
+            .cmd
+            .computeCommandEncoder()
+            .expect("compute encoder");
+        enc.setLabel(Some(&label("rt: irradiance probes")));
+        barrier.apply(&*enc);
+        let table = ctx.slot.table(Table::Rt);
+        unsafe {
+            table.setAddress_atIndex(rt.probes.gpuAddress(), 0);
+            table.setAddress_atIndex(rt.probe_cells.gpuAddress(), 1);
+            table.setAddress_atIndex(ctx.upload_addr, 2);
+            table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 3);
+            table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
+            table.setResource_atBufferIndex(rt.tlas[ctx.slot_index].gpuResourceID(), 5);
+            table.setAddress_atIndex(c.heights.gpuAddress(), 6);
+            table.setAddress_atIndex(c.zone_heights.gpuAddress(), 7);
+            table.setAddress_atIndex(c.zone_info.gpuAddress(), 8);
+            table.setTexture_atIndex(c.cover.gpuResourceID(), 0);
+        }
+        enc.setArgumentTable(Some(table));
+        enc.setComputePipelineState(&ctx.r.pipelines.probe_update);
+        enc.dispatchThreadgroups_threadsPerThreadgroup(
+            size2(crate::renderer::rt::PROBE_COUNT / 2, 1),
+            size2(crate::renderer::rt::PROBE_RAYS, 1),
+        );
+        enc.endEncoding();
+    }
+}

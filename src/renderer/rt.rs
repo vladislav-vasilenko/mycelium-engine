@@ -58,7 +58,16 @@ pub(super) struct RtGpu {
     pub tlas: Vec<Obj<dyn MTLAccelerationStructure>>,
     pub scratch: Vec<Obj<dyn MTLBuffer>>,
     terrain_scratch_size: usize,
+    /// Пробы освещённости (11, сессия 3): `PROBE_COUNT × 36` float4 и мировая
+    /// клетка каждой пробы (int4) — общие для кадров.
+    pub probes: Obj<dyn MTLBuffer>,
+    pub probe_cells: Obj<dyn MTLBuffer>,
 }
+
+/// Проб в сетке (`PROBE_DIM` в `probes.h`: 32 × 8 × 32).
+pub const PROBE_COUNT: usize = 32 * 8 * 32;
+/// Лучей пробы за кадр (`PROBE_RAYS` в `rt.metal`).
+pub const PROBE_RAYS: usize = 64;
 
 fn range(b: &ProtocolObject<dyn MTLBuffer>, offset: usize, len: usize) -> MTL4BufferRange {
     MTL4BufferRange {
@@ -182,7 +191,16 @@ impl RtGpu {
             tlas: Vec::new(),
             scratch: Vec::new(),
             terrain_scratch_size: 0,
+            // Нули: w = 0 — проба не прогрета, шейдер её не берёт.
+            probes: buffer_with(device, &vec![0u8; PROBE_COUNT * 36 * 16], "rt: probes"),
+            probe_cells: buffer_with(
+                device,
+                bytemuck::cast_slice(&vec![i32::MIN; PROBE_COUNT * 4]),
+                "rt: probe cells",
+            ),
         };
+        residency.addAllocation(as_allocation(&*g.probes));
+        residency.addAllocation(as_allocation(&*g.probe_cells));
         residency.addAllocation(as_allocation(&*g.sources));
         for s in 0..FRAME_SLOTS {
             let tv = shared_buffer(device, vb, &format!("rt: terrain grid, slot {s}"));

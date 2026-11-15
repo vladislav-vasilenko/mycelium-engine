@@ -87,7 +87,6 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
     }
     float3 mean = m1 / 9.0;
     float3 sigma = sqrt(max(m2 / 9.0 - mean * mean, 0.0));
-    float3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
 
     // Перепроекция: NDC пикселя без сдвига → относительно камеры (однородно:
     // небо с глубиной 0 даёт направление, w = 0) → прошлый кадр.
@@ -106,10 +105,15 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
     if (valid) {
         float3 h = sample_history(hist, puv, float2(size));
         h = h / (1.0 + dot(h, float3(0.2126, 0.7152, 0.0722)));
-        h = ycocg_to_rgb(clip_aabb(lo, hi, rgb_to_ycocg(center), rgb_to_ycocg(h)));
-        // Быстрое движение по экрану — меньше доверия истории.
+        // Почти неподвижный пиксель — коробка шире (±2,5σ) и истории больше:
+        // контрастные текстуры не «дрожат» от сдвига субпикселя (04.5). При
+        // движении — строже, против шлейфов.
         float motion = length((puv - own) * float2(size));
-        float a = mix(0.1, 0.35, saturate(motion / 24.0));
+        float still = 1.0 - saturate(motion / 2.0);
+        float gamma = mix(1.25, 2.5, still);
+        float3 lo = mean - gamma * sigma, hi = mean + gamma * sigma;
+        h = ycocg_to_rgb(clip_aabb(lo, hi, rgb_to_ycocg(center), rgb_to_ycocg(h)));
+        float a = mix(0.1, 0.35, saturate(motion / 24.0)) * mix(1.0, 0.6, still);
         result = mix(h, center, a);
     }
     // Обратно из веса по яркости.

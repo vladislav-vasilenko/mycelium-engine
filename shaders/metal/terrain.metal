@@ -2,6 +2,7 @@
 #include "features.h"
 #include "sky.h"
 #include "terrain_patch.h"
+#include "probes.h"
 
 // Ландшафт LOD 0: все тайлы одним instanced draw. Номер экземпляра — номер
 // тайла, вершины тайла лежат подряд по TILE_SAMPLES² штук.
@@ -335,7 +336,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            depth2d_array<float> shadow_map [[texture(7)]],
                            texture3d<float> aerial [[texture(8)]],
                            texture2d<float> macro_tex [[texture(9)]],
-                           texture2d<float> rt_ao_tex [[texture(10)]]) {
+                           texture2d<float> rt_ao_tex [[texture(10)]],
+                           device const float4* probes [[buffer(13)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -787,6 +789,15 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Отражённый свет (02.10, до GI этапа 11): освещённые склоны и кроны
     // подсвечивают тень — сильнее там, где неба видно мало.
     float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.30 * (1.0 - 0.5 * sky_vis) * mix(float3(1.0), float3(0.6, 0.75, 0.45), canopy_shade);
+    // Пробы освещённости (11, сессия 3): настоящий непрямой свет — небо с
+    // пологом, отсветы склонов и крон — вместо неба и константы отражения.
+    if (shadows.params.y > 0.5) {
+        float3 pe = probe_irradiance(probes, frame, in.world, N);
+        if (pe.x >= 0.0) {
+            sky_c = pe * sqrt(occ) * mix(1.0, mat_ao, 0.8);
+            bounce = 0.0;
+        }
+    }
     // Затенение лучами (11): небо и отражённый свет у корней, камней, стволов.
     if (shadows.params.z > 0.5) {
         constexpr sampler aos(filter::linear, address::clamp_to_edge);

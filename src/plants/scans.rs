@@ -82,7 +82,7 @@ impl ScanTextures {
         // Альфа-маска листвы и травы — в альфа-канал цвета (отсечение в шейдере).
         if let Some(m) = mask {
             let a = gray_png(&dir.join(m))?;
-            for (px, v) in rgba.chunks_exact_mut(4).zip(a) {
+            for (px, v) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(a) {
                 px[3] = v;
             }
         }

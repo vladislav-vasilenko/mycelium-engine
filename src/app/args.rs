@@ -26,6 +26,8 @@ pub struct Args {
     pub tiles: bool,
     /// Срез кластеров на CPU (02.3) вместо GPU (02.5) — для сравнения.
     pub cpu_cull: bool,
+    /// Чувство мицелия включено без удержания C (05.2, отладка и снимки).
+    pub sense: bool,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -70,6 +72,7 @@ impl Args {
                 }
                 "--tiles" => args.tiles = true,
                 "--cpu-cull" => args.cpu_cull = true,
+                "--sense" => args.sense = true,
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

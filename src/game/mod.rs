@@ -4,6 +4,13 @@
 //! по сообществам карты растительности, влажности и впадинам `macro.png`;
 //! не на тропах и не на крутых склонах. Определение вида — осмотр (клавиша F);
 //! журнал (J) хранит найденные виды.
+//!
+//! 05.2: чувство мицелия и узел Мориты — [`sense`], макро-осмотр — [`closeup`],
+//! интерфейс — [`ui`].
+
+pub mod closeup;
+pub mod sense;
+mod ui;
 
 use glam::{Vec2, Vec3};
 
@@ -58,6 +65,15 @@ pub struct Mushroom {
     pub yaw: f32,
     pub scale: f32,
     pub inspected: bool,
+    /// Волна чувства мицелия дошла: гриб обведён ещё столько секунд.
+    pub marked: f32,
+}
+
+/// Что под взглядом.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Focus {
+    Mushroom(usize),
+    Trace(usize),
 }
 
 pub struct Game {
@@ -67,11 +83,20 @@ pub struct Game {
     pub journal_open: bool,
     /// Сообщение и оставшееся время показа, с.
     pub toast: Option<(String, f32)>,
-    /// Гриб под взглядом (номер в `mushrooms`).
-    pub focus: Option<usize>,
+    /// Гриб или след под взглядом.
+    pub focus: Option<Focus>,
+    pub sense: sense::Sense,
+    pub traces: Vec<sense::Trace>,
+    pub node: Option<sense::Node>,
+    pub closeup: closeup::Closeup,
+    /// Записи журнала помимо видов (следы, аномалии).
+    pub notes: Vec<sense::Note>,
+    pub subtitles: sense::Subtitles,
+    /// Игра управляет позой рук (App возвращает позу 1, когда перестаёт).
+    pub hands_override: bool,
 }
 
-fn hash(x: i32, z: i32, salt: u32) -> u32 {
+pub(crate) fn hash(x: i32, z: i32, salt: u32) -> u32 {
     let mut h = (x as u32).wrapping_mul(0x8da6_b343)
         ^ (z as u32).wrapping_mul(0xd816_3841)
         ^ salt.wrapping_mul(0xcb1a_b31f);
@@ -82,24 +107,40 @@ fn hash(x: i32, z: i32, salt: u32) -> u32 {
     h ^ (h >> 16)
 }
 
-fn unit(h: u32, k: u32) -> f32 {
+pub(crate) fn unit(h: u32, k: u32) -> f32 {
     (hash(h as i32, k as i32, 0x51) & 0xff_ffff) as f32 / 16_777_216.0
 }
 
 impl Game {
-    /// Грибы зоны Сиратани; без зоны — пусто (мир генератора).
+    /// Грибы, следы и узел зоны Сиратани; без зоны — пусто (мир генератора).
     pub fn new(world: &World) -> Game {
+        let zone = world.zone.is_some();
         Game {
             mushrooms: place(world),
             found: [0; SPECIES.len()],
             journal_open: false,
             toast: None,
             focus: None,
+            sense: sense::Sense::default(),
+            traces: if zone {
+                sense::place_traces(world)
+            } else {
+                Vec::new()
+            },
+            node: if zone { sense::place_node(world) } else { None },
+            closeup: closeup::Closeup::default(),
+            notes: Vec::new(),
+            subtitles: Default::default(),
+            hands_override: false,
         }
     }
 
-    /// Гриб под взглядом: ближайший в 3 м, луч проходит в 12 см от шляпки.
+    /// Под взглядом: гриб в 3 м (луч в 12 см от шляпки) или помеченный
+    /// чувством след в 4 м (луч в 50 см).
     pub fn update_focus(&mut self, eye: Vec3, dir: Vec3) {
+        if self.closeup.active() {
+            return;
+        }
         self.focus = None;
         let mut best = f32::MAX;
         for (i, m) in self.mushrooms.iter().enumerate() {
@@ -111,14 +152,34 @@ impl Game {
             let miss = (eye + dir * t).distance(c);
             if miss < 0.12 + 0.04 * m.scale && t < best {
                 best = t;
-                self.focus = Some(i);
+                self.focus = Some(Focus::Mushroom(i));
+            }
+        }
+        for (i, tr) in self.traces.iter().enumerate() {
+            if tr.marked <= 0.0 && !tr.found {
+                continue;
+            }
+            let t = (tr.position - eye).dot(dir);
+            if !(0.0..4.0).contains(&t) {
+                continue;
+            }
+            if (eye + dir * t).distance(tr.position) < 0.5 && t < best {
+                best = t;
+                self.focus = Some(Focus::Trace(i));
             }
         }
     }
 
-    /// Осмотр гриба под взглядом: запись в журнал.
-    pub fn inspect(&mut self) {
-        let Some(i) = self.focus else { return };
+    /// F: присесть к грибу (макро-осмотр), встать или осмотреть след.
+    pub fn inspect(&mut self, camera: &crate::sim::CameraState) {
+        match self.focus {
+            Some(Focus::Trace(i)) if !self.closeup.active() => self.inspect_trace(i),
+            _ => self.toggle_closeup(camera),
+        }
+    }
+
+    /// Запись гриба в журнал (когда игрок присел к нему).
+    fn record_mushroom(&mut self, i: usize) {
         let m = &mut self.mushrooms[i];
         if m.inspected {
             return;
@@ -136,6 +197,8 @@ impl Game {
     }
 
     pub fn tick(&mut self, dt: f32) {
+        self.update_closeup(dt);
+        self.tick_subtitles(dt);
         if let Some((_, t)) = &mut self.toast {
             *t -= dt;
             if *t <= 0.0 {
@@ -159,126 +222,26 @@ impl Game {
             })
             .collect()
     }
-
-    /// Интерфейс: прицел, подсказка осмотра, сообщение, журнал.
-    pub fn ui(&self, b: &mut crate::ui::UiBuilder, w: f32, h: f32) {
-        let (cx, cy) = (w * 0.5, h * 0.5);
-        let focus = self.focus.map(|i| &self.mushrooms[i]);
-        let dot = if focus.is_some() { 6.0 } else { 3.0 };
-        b.rect(
-            cx - dot * 0.5,
-            cy - dot * 0.5,
-            dot,
-            dot,
-            [255, 255, 255, 170],
-        );
-        if let Some(m) = focus {
-            let sp = &SPECIES[m.species as usize];
-            let what = if self.found[m.species as usize] > 0 {
-                sp.name
-            } else {
-                "неизвестный гриб"
-            };
-            let label = if m.inspected {
-                format!("{what} — уже в журнале")
-            } else {
-                format!("F — осмотреть: {what}")
-            };
-            let tw = b.font.width(&label, 18.0);
-            b.rect(
-                cx - tw * 0.5 - 10.0,
-                cy + 26.0,
-                tw + 20.0,
-                30.0,
-                [10, 14, 10, 140],
-            );
-            b.text(cx - tw * 0.5, cy + 29.0, 18.0, [235, 240, 225, 255], &label);
-        }
-        if let Some((t, left)) = &self.toast {
-            let a = (left.min(1.0) * 255.0) as u8;
-            let tw = b.font.width(t, 20.0);
-            b.rect(
-                cx - tw * 0.5 - 14.0,
-                40.0,
-                tw + 28.0,
-                36.0,
-                [10, 20, 12, (a as f32 * 0.6) as u8],
-            );
-            b.text(cx - tw * 0.5, 45.0, 20.0, [210, 245, 200, a], t);
-        }
-        let total: u32 = self.found.iter().sum();
-        let known = self.found.iter().filter(|&&n| n > 0).count();
-        b.text(
-            20.0,
-            h - 34.0,
-            16.0,
-            [220, 225, 210, 200],
-            &format!(
-                "J — журнал · видов {known}/{} · находок {total}",
-                SPECIES.len()
-            ),
-        );
-        if self.journal_open {
-            let (pw, ph) = (640.0f32.min(w - 40.0), 520.0f32.min(h - 80.0));
-            let (px, py) = ((w - pw) * 0.5, (h - ph) * 0.5);
-            b.rect(px, py, pw, ph, [18, 22, 16, 225]);
-            b.text(
-                px + 24.0,
-                py + 18.0,
-                28.0,
-                [240, 235, 210, 255],
-                "Полевой журнал — Сиратани",
-            );
-            let mut y = py + 70.0;
-            for (s, sp) in SPECIES.iter().enumerate() {
-                if self.found[s] == 0 {
-                    b.text(
-                        px + 24.0,
-                        y,
-                        18.0,
-                        [140, 140, 130, 255],
-                        "? ? ?  — вид не найден",
-                    );
-                    y += 34.0;
-                    continue;
-                }
-                b.text(
-                    px + 24.0,
-                    y,
-                    20.0,
-                    [230, 240, 215, 255],
-                    &format!("{} — {} (×{})", sp.name, sp.latin, self.found[s]),
-                );
-                y += b.line(20.0);
-                for line in wrap(b, sp.note, 16.0, pw - 48.0) {
-                    b.text(px + 32.0, y, 16.0, [190, 200, 180, 255], &line);
-                    y += b.line(16.0);
-                }
-                y += 10.0;
-            }
-        }
-    }
 }
 
-fn wrap(b: &crate::ui::UiBuilder, text: &str, px: f32, width: f32) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut line = String::new();
-    for word in text.split(' ') {
-        let cand = if line.is_empty() {
-            word.to_string()
-        } else {
-            format!("{line} {word}")
-        };
-        if b.font.width(&cand, px) > width && !line.is_empty() {
-            out.push(std::mem::replace(&mut line, word.to_string()));
-        } else {
-            line = cand;
-        }
-    }
-    if !line.is_empty() {
-        out.push(line);
-    }
-    out
+/// Доля леса и якусуги в сообществе карты растительности под точкой.
+pub(crate) fn community(world: &World, p: Vec2) -> (f32, f32) {
+    let map = world.size_m().x;
+    world.vegetation.as_ref().map_or((0.5, 0.5), |v| {
+        let k = ((p.y / map * (v.size - 1) as f32).round() as usize) * v.size as usize
+            + (p.x / map * (v.size - 1) as f32).round() as usize;
+        let f = v.forest[v.ids[k.min(v.ids.len() - 1)] as usize];
+        (f[0], f[1])
+    })
+}
+
+/// Маски `macro.png`: видимость неба, кривизна, влажность, осыпь.
+pub(crate) fn macro_at(world: &World, p: Vec2) -> [f32; 4] {
+    let map = world.size_m().x;
+    world
+        .macro_detail
+        .as_ref()
+        .map_or([1.0, 0.5, 0.3, 0.0], |m| m.at(p.x, p.y, map))
 }
 
 /// Расстановка в зоне 1 м: кандидат в клетке 3 м, вид по сообществу и маскам.
@@ -288,7 +251,6 @@ fn place(world: &World) -> Vec<Mushroom> {
     };
     let origin = zone.origin(&world.heightfield);
     let size = (zone.grid.nx - 1) as f32 * zone.grid.step_m;
-    let map = world.size_m().x;
     let cell = 3.0;
     let n = (size / cell) as i32;
     let mut out = Vec::new();
@@ -301,16 +263,8 @@ fn place(world: &World) -> Vec<Mushroom> {
                 gx as f32 + 0.1 + 0.8 * unit(h, 1),
                 gz as f32 + 0.1 + 0.8 * unit(h, 2),
             ) * cell;
-            let (forest, cedar) = world.vegetation.as_ref().map_or((0.5, 0.5), |v| {
-                let k = ((p.y / map * (v.size - 1) as f32).round() as usize) * v.size as usize
-                    + (p.x / map * (v.size - 1) as f32).round() as usize;
-                let f = v.forest[v.ids[k.min(v.ids.len() - 1)] as usize];
-                (f[0], f[1])
-            });
-            let mc = world
-                .macro_detail
-                .as_ref()
-                .map_or([1.0, 0.5, 0.3, 0.0], |m| m.at(p.x, p.y, map));
+            let (forest, cedar) = community(world, p);
+            let mc = macro_at(world, p);
             let damp = mc[2];
             let hollow = ((0.5 - mc[1]) * 2.5).clamp(0.0, 1.0);
             let ridge = ((mc[1] - 0.5) * 2.5).clamp(0.0, 1.0);
@@ -351,6 +305,7 @@ fn place(world: &World) -> Vec<Mushroom> {
                 yaw: unit(h, 5) * std::f32::consts::TAU,
                 scale: sp.scale * (0.8 + 0.4 * unit(h, 6)),
                 inspected: false,
+                marked: 0.0,
             });
         }
     }
@@ -374,5 +329,32 @@ mod tests {
         }
         // Детерминизм.
         assert_eq!(super::Game::new(&w).mushrooms.len(), g.mushrooms.len());
+    }
+
+    /// 05.2: узел у тропы, следы зверей; импульс доходит до узла, долгое
+    /// вслушивание у узла запускает эхо Мориты один раз.
+    #[test]
+    fn sense_reaches_node_and_echo_plays_once() {
+        use glam::Vec3;
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/world/yakushima/far");
+        let w = crate::world::layers::import(&dir).unwrap();
+        let mut g = super::Game::new(&w);
+        let node = g.node.as_ref().expect("узел у тропы Сиратани").position;
+        assert!(g.traces.len() > 20, "следов {}", g.traces.len());
+        assert!(g.traces.iter().any(|t| t.kind == 0) && g.traces.iter().any(|t| t.kind == 1));
+        // Слушаем в 3 м от узла: нити есть, эхо — одно.
+        let eye = node + Vec3::new(3.0, 1.7, 0.0);
+        for _ in 0..240 {
+            g.update_sense(1.0 / 60.0, eye, true, &w);
+        }
+        assert!(!g.sense_beads(eye, &w).is_empty());
+        assert!(g.node.as_ref().unwrap().heard);
+        assert_eq!(g.subtitles.len(), 3);
+        assert_eq!(g.notes.len(), 1);
+        for _ in 0..240 {
+            g.update_sense(1.0 / 60.0, eye, true, &w);
+        }
+        assert_eq!(g.notes.len(), 1);
     }
 }

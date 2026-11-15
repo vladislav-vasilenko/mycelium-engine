@@ -34,6 +34,8 @@ pub struct RigInput {
     pub bob_weight: f32,
     /// Сдвиг глаз по вертикали (ступеньки, приземление, покачивание), м.
     pub view_dy: f32,
+    /// Дополнительный сдвиг рук в пространстве глаза от игры (05.2), м.
+    pub offset: Vec3,
 }
 
 pub struct HandRig {
@@ -119,7 +121,7 @@ impl HandRig {
             -SWAY_Y_M * w * inp.bob_phase.sin().abs() + DIP_GAIN * self.dy_smooth.min(0.0),
             0.0,
         );
-        Mat4::from_translation(sway)
+        Mat4::from_translation(sway + inp.offset)
             * Mat4::from_rotation_y(self.lag.x)
             * Mat4::from_rotation_x(self.lag.y)
     }

@@ -27,6 +27,20 @@ impl App {
             if !self.hands_visible || self.sim.mode != MoveMode::Walk {
                 return None;
             }
+            // Поза рук от игры (05.2): ладони к земле в чувстве мицелия,
+            // указание при макро-осмотре; после — обратно «relaxed».
+            let (pose, offset) = self.game.hands_hint();
+            match pose {
+                Some(p) => {
+                    h.rig.set_pose(p);
+                    self.game.hands_override = true;
+                }
+                None if self.game.hands_override => {
+                    h.rig.set_pose(0);
+                    self.game.hands_override = false;
+                }
+                None => {}
+            }
             let (bob_phase, bob_weight) = self.sim.bob();
             let inp = RigInput {
                 dt: self.frame_dt,
@@ -35,6 +49,7 @@ impl App {
                 bob_phase,
                 bob_weight,
                 view_dy: self.sim.view_dy,
+                offset,
             };
             h.rig.update(&inp);
             h.palette(&inp)

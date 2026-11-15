@@ -72,6 +72,13 @@ impl App {
             (true, SceneMode::Terrain) => terrain_check_camera(&self.world),
             (false, _) => self.sim.interpolated(alpha),
         };
+        // Макро-осмотр (05.2): камера приседает к грибу.
+        let game_on = !selftest && self.scene == SceneMode::Terrain;
+        let camera = if game_on {
+            self.game.view(camera, &self.world)
+        } else {
+            camera
+        };
         let water_frame = self.water_frame(camera.position);
         // Глаза под водой: та же функция волн, что рисует море (03.1).
         let underwater_m = match (&water_frame, &self.shore) {
@@ -94,14 +101,22 @@ impl App {
             return;
         };
         let hands = self.hands_frame(&camera, w as f32 / h as f32);
-        // Срез Сиратани (05.1): гриб под взглядом, сообщения, интерфейс.
-        let game_on = !selftest && self.scene == SceneMode::Terrain;
+        // Срез Сиратани (05.1–05.2): гриб под взглядом, чувство мицелия,
+        // сообщения, интерфейс.
         self.game.tick(self.frame_dt);
         if game_on {
+            let sensing = (self.args.sense
+                || (self.keys.contains(&winit::keyboard::KeyCode::KeyC)
+                    && self.sim.mode == sim::MoveMode::Walk))
+                && !self.game.closeup.active();
+            self.game
+                .update_sense(self.frame_dt, camera.position, sensing, &self.world);
             self.game.update_focus(camera.position, camera.forward());
         }
         let props = if game_on {
-            self.game.instances(camera.position)
+            let mut p = self.game.instances(camera.position);
+            p.extend(self.game.sense_beads(camera.position, &self.world));
+            p
         } else {
             Vec::new()
         };
@@ -114,7 +129,12 @@ impl App {
             }
             _ => Vec::new(),
         };
-        let proj = sim::projection(w as f32 / h as f32);
+        let fov = if game_on {
+            self.game.fov_deg()
+        } else {
+            crate::game::closeup::FOV_DEG
+        };
+        let proj = sim::projection_fov(w as f32 / h as f32, fov);
         let view = camera.view();
         let cam_hi = (camera.position / 256.0).floor() * 256.0;
         let view_proj_rel = {

@@ -108,8 +108,14 @@ impl CameraState {
 }
 
 /// Проекция с reversed-Z: ближняя плоскость → 1, бесконечность → 0.
+#[cfg(test)]
 pub fn projection(aspect: f32) -> Mat4 {
-    Mat4::perspective_infinite_reverse_rh(70f32.to_radians(), aspect, NEAR_PLANE_M)
+    projection_fov(aspect, 70.0)
+}
+
+/// Проекция с заданным вертикальным углом обзора (макро-осмотр 05.2).
+pub fn projection_fov(aspect: f32, fov_deg: f32) -> Mat4 {
+    Mat4::perspective_infinite_reverse_rh(fov_deg.to_radians(), aspect, NEAR_PLANE_M)
 }
 
 /// Ближняя плоскость камеры, м. Глубина reversed-Z: `depth = NEAR_PLANE_M / z_view`.

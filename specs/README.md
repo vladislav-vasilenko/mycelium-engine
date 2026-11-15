@@ -32,6 +32,7 @@
 | ↳ [04.3. Погода и осадки](04-3-weather.md) | [04.1](04-1-sky-time.md), [04.2](04-2-light-shadows.md), [03.1](03-1-sea-surf.md) | [04.4](04-4-night-glow.md), [05](05-mycelium-gameplay.md) | Облака, морось и ливень, гроза, мокрая земля, лужи |
 | ↳ [04.4. Ночное свечение](04-4-night-glow.md) | [04.2](04-2-light-shadows.md), [04.3](04-3-weather.md), [02.4](02-4-vegetation.md) | [05](05-mycelium-gameplay.md) | Светящиеся грибы ночью |
 | ↳ [05.1. Взаимодействие и журнал](05-1-interaction-journal.md) | [02.7](02-7-real-terrain-yakushima.md), [02.9](02-9-terrain-macro-detail.md), [02.4](02-4-vegetation.md) | 05.2–05.6 | Интерфейс, грибы Сиратани, осмотр и журнал |
+| ↳ [05.2. Чувство мицелия и макро-осмотр](05-2-mycelium-sense.md) | [05.1](05-1-interaction-journal.md), [10](10-first-person-hands.md) | 05.3–05.7 | Нити к находкам и следам, узел и эхо Мориты, приседание к грибу |
 | [05. Мицелий и игровой срез](05-mycelium-gameplay.md) | [04](04-atmosphere.md) | [06](06-d3d12-port.md), [07 на Metal](07-shader-labs.md), [08](08-world-scaling.md), условно [09](09-survival-crafting.md) | Полевое задание со сканером, спорами и ростом перехода |
 | [06. Перенос на Direct3D 12](06-d3d12-port.md) | [05](05-mycelium-gameplay.md), Windows GPU | [07 на D3D12](07-shader-labs.md) | Тот же маршрут и сохранение на Windows |
 | [07. Лаборатории шейдеров](07-shader-labs.md) | [05](05-mycelium-gameplay.md) для прогона среза, [06](06-d3d12-port.md) для D3D12 | [08](08-world-scaling.md) при готовности 05, задачи из отчёта | Сравнения mesh и indexed, FFT, tile shading, DXR |

@@ -603,16 +603,20 @@ sequenceDiagram
 | Подлесок | виды 3 папоротник (`fern.glb`, вайи — изогнутые полосы карточек) и 4 якудзаса (`sasa.glb`, вертикальные карточки); атлас `foliage.png` 1024 × 1024 (четверти: хвоя, листья, вайи, саса); `forest_place` — 4 подклетки по 3 м в клетках до 70 м: папоротник по лесным поясам, влажности и впадинам (`macro.png`, `texture(2)`), саса — по поясу лугов; LOD 15/35 м; материалы 5 и 6 — листва; списки 17 (`CAMERA_LISTS` = 15, тени деревьев 15–16, `COUNTS_WORDS` = 32); ветер растёт с высотой точки |
 | Столкновения | `ForestGpu.obstacles` (x, z, радиус) — при `take_and_reset` из списков теней (деревья в 160 м) и LOD 0 валунов; `Renderer::forest_obstacles`; `Sim.obstacles` (в 12 м от игрока), `sim::push_out`, `PLAYER_RADIUS_M` = 0,35: выталкивание из цилиндров и гашение скорости в препятствие при ходьбе |
 
-### 4.9k. Интерфейс и игровой срез (05.1)
+### 4.9k. Интерфейс и игровой срез (05.1–05.2)
 
 | Файл | Элементы |
 | --- | --- |
 | `tools/ui/font_atlas.py`, `assets/ui/font.{png,json}` | SDF-атлас PT Sans (OFL) 1024², 177 знаков (ASCII, кириллица, знаки), размер 48, разброс 6 |
 | `src/ui/mod.rs` | `Font { pixels, atlas_size, … }` (`load`, `width`), `UiBuilder { font, verts, scale }` (`rect`, `text` с тенью, `line`), `assets_dir` |
 | `renderer/ui.rs`, `passes/ui.rs`, `ui.metal` | `UI_MAX_VERTS` = 65 536, буфер слота: размер экрана (16 Б) + `UiVertex`; `Renderer::set_ui_font`; проход `ui` после `tonemap` (загрузка drawable, `Blend::Alpha` — предумноженная альфа), `ui_vs`/`ui_fs` (sRGB → линейный, SDF через `fwidth`) |
-| `src/game/mod.rs` | `Species`, `SPECIES` (5 видов), `Mushroom`, `Game { mushrooms, found, journal_open, toast, focus }`: `new` (расстановка в зоне 1 м по сообществам, влажности и впадинам, клетка 3 м, хэш), `update_focus` (луч 3 м), `inspect`, `tick`, `instances` (до 120 м), `ui` |
+| `src/game/mod.rs` | `Species`, `SPECIES` (5 видов), `Mushroom { …, marked }`, `Focus { Mushroom(i), Trace(i) }`, `Game { mushrooms, found, journal_open, toast, focus, sense, traces, node, closeup, notes, subtitles, hands_override }`: `new` (грибы в зоне 1 м по сообществам, влажности и впадинам, клетка 3 м, хэш; следы и узел), `update_focus` (гриб — луч 3 м, помеченный след — 4 м; в осмотре не меняется), `inspect(&CameraState)` (след — запись, гриб — приседание или подъём), `record_mushroom`, `tick` (осмотр, субтитры, сообщение), `instances` (до 120 м); `community`, `macro_at` — сообщество и маски под точкой |
+| `src/game/sense.rs` (05.2) | `Sense { level, held_s, … }` (нити текущего импульса, возраст волны, часы); `Trace { position, kind, found, marked }`, `TRACE_KINDS` (олень, макаки); `Node { position, heard, hinted }`; `Subtitle { speaker, text, seconds }`, `Note { title, text }`, `Subtitles` = `VecDeque<Subtitle>`. `update_sense(dt, eye, sensing, world)` — сила 0…1 (0,6 с вверх, 0,8 с вниз), импульс каждые `PULSE_PERIOD_S` = 2,6 с, волна `PULSE_SPEED` = 9 м/с помечает цели (гриб 10 с, след 25 с), подсказка у узла в 25 м, эхо Мориты после `NODE_LISTEN_S` = 1,5 с в `NODE_RADIUS_M` = 6 м — один раз (3 реплики, запись журнала). `sense_beads` — бусины нитей и колец (`_pad` = `GLOW_MUSHROOM` 8 / `GLOW_TRACE` 9 / `GLOW_NODE` 10, `tint` — яркость). `place_node` (120–450 м от `TrailStart`, 6–14 м от тропы, максимум кедра, влажности, впадины), `place_traces` (клетка 30 м, 700 м от начала тропы) |
+| `src/game/closeup.rs` (05.2) | `Closeup { target, t, … }` (`active`, `weight`); `Game::toggle_closeup`, `update_closeup` (0,9 с вниз, 0,6 с вверх; запись в журнал, когда присел), `view(CameraState, &World) → CameraState` (глаз в 0,30 м от шляпки над землёй, дуга «вниз, потом вперёд», мышь ±0,35/±0,25 рад от взгляда при входе), `fov_deg` (`FOV_DEG` 70 → `MACRO_FOV_DEG` 30), `hands_hint` → (поза, сдвиг в пространстве глаза) |
+| `src/game/ui.rs` | Затемнение и надпись чувства, прицел, подсказки грибов и следов, карточка макро-осмотра, сообщение, субтитры (голос сети — голубой), строка клавиш, журнал с разделом «Наблюдения» |
 | Лес | вид 5 `mushroom` (`build_plants.py`), `PROPS_LIST` = 17, `FOREST_LISTS` = 18, `FrameInput.props` (CPU пишет экземпляры и счётчик до ядра), `PlantOut.kind`; материал 7 — гриб (цвет по виду, свечение мицена) |
-| Приложение | `App.game`, `App.font`; F — осмотр, J — журнал; `FrameInput.ui`, `FrameInput.props` |
+| Приложение | `App.game`, `App.font`; F — осмотр (приседание), J — журнал, C (удерживать) или `--sense` — чувство мицелия; камера кадра — `Game::view` после интерполяции симуляции, проекция `sim::projection_fov(aspect, Game::fov_deg)`; в осмотре оси ходьбы обнулены; `RigInput.offset` и поза рук от `Game::hands_hint` (после — `relaxed`); `FrameInput.props` = грибы + бусины |
+| Шейдер | `plant_fs`: материал 7 и `kind` > 7,5 — бусина: альбедо 0,04, свечение цвета вида × `tint` × 0,8 / `pre_exposure` (постоянная яркость на экране днём и ночью) |
 
 ### 4.10. Сборка `.app`
 
@@ -832,6 +836,8 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 10.4 · Движение | `HandRig` (смешивание поз 0,25 с, отставание, покачивание, проседание), клавиши 1–4, H, B | Частично: сгиб пальцев по параметрам не сделан |
 | 10.5 · Кожа, волосы, рукав | `hands_fs` — временный свет | Не начато |
 | 01 · Описание проходов, RAW/WAR/WAW | `frame_graph.rs`, `plan_after` | Выполнено, включая смену состава проходов между кадрами; стадия indirect — в 02 |
+| 05.1 · Интерфейс, грибы, осмотр, журнал | `ui`, `game` (раздел 4.9k) | Частично |
+| 05.2 · Чувство мицелия, узел и эхо Мориты, макро-осмотр | `game::sense`, `game::closeup` (раздел 4.9k), AD-64 | Частично: вручную не пройдено |
 
 ## 10. Архитектурные решения и причины
 
@@ -1292,6 +1298,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Сцены с ярким небом в кадре немного темнее, чем раньше.
 - **Пересмотреть.** С bloom (04.2 п. 4) и гистограммой.
 
+### AD-64. Нити чувства мицелия — экземпляры гриба с CPU, макро-осмотр — подмена камеры
+
+- **Решение.** Нити и кольца чувства мицелия — бусины: экземпляры сетки гриба в списке 17 леса (`FrameInput.props`), цвет — в `PlantInstance._pad` (8–10), яркость — в `tint`, свечение в `plant_fs` делится на предэкспозицию. Пути нитей строит CPU по `sample_ground` раз в импульс. Макро-осмотр — функция `Game::view`, подменяющая камеру кадра после симуляции, и угол обзора в проекции; симуляция игрока не знает о приседании.
+- **Почему.** Не меняет раскладку `FrameUniforms`, проходы и `terrain.metal` (жёлтая зона); бусины до ~1500 в кадре дешевле нового прохода; подмена камеры не ломает детерминизм симуляции и столкновения.
+- **Отброшено.** Прожилки в шейдере рельефа по маске импульсов (красивее, но новые поля кадра и рост `terrain.metal`); граф `MyceliumNode` на GPU (05, шаги 3–5) — рано; приседание в симуляции — капсула и столкновения у гриба не нужны.
+- **Цена.** Бусины — точки без свечения вокруг (bloom нет), на расстоянии мелкие; камера осмотра может пройти сквозь ветку или папоротник.
+- **Пересмотреть.** С bloom (04.2) и графом грибницы (05, шаг 3): прожилки по рельефу и импульсы по рёбрам на GPU.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1360,3 +1374,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 02.4 | после `41b010c` | Лес по сообществам: `VegetationLayer`, `layers/vegetation.rs`, параметры леса в `vegetation.json` (`tools/geo/vegetation.py`, `FOREST`), `cover_worldcover.png` как вход (идемпотентный пересчёт), `ForestGpu.vegetation`/`vegetation_table`, `buffer(11)`/`texture(1)` ядра `forest_place` |
 | 2026-11-15 | 02.4, 02.8 | после `4074b2d` | Подлесок: папоротник и якудзаса (`build_plants.py`: `fern`, `sasa`, `draw_frond`, `draw_sasa`, атлас 1024²), `SPECIES` 5, `FOREST_LISTS` 17, `CAMERA_LISTS`, подклетки 3 м в `forest_place`, `macro_detail` в таблице `forest`, ветер по высоте точки |
 | 2026-11-15 | 05.1 | после `9b76504` | Интерфейс (`ui`, `UiVertex`, проход `ui`, `Blend::Alpha`, таблица `ui` — 19 таблиц, раскладка 52 поля), игровой модуль `game` (грибы, фокус, осмотр, журнал), гриб — вид 5 и список 17 леса, `FrameInput.props`/`ui` |
+| 2026-11-15 | 05.2 | после `9436884` | AD-64: `game/sense.rs`, `game/closeup.rs`, `game/ui.rs` (интерфейс вынесен из `game/mod.rs`), `Focus`, бусины в `plant_fs` (`kind` 8–10), `sim::projection_fov`, `RigInput.offset`, `Args.sense` (`--sense`), клавиша C |

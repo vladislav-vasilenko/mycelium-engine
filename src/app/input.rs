@@ -7,7 +7,12 @@ use crate::sim::{MoveMode, TickInput};
 
 impl App {
     pub(super) fn tick_input(&self) -> TickInput {
+        // Макро-осмотр (05.2): игрок сидит у гриба и не ходит.
+        let frozen = self.game.closeup.active();
         let axis = |pos: KeyCode, neg: KeyCode| {
+            if frozen {
+                return 0.0;
+            }
             (self.keys.contains(&pos) as i32 - self.keys.contains(&neg) as i32) as f32
         };
         TickInput {
@@ -61,7 +66,10 @@ impl App {
                 self.update_title(true);
             }
             // Срез Сиратани (05.1): осмотр гриба под взглядом и журнал.
-            KeyCode::KeyF => self.game.inspect(),
+            KeyCode::KeyF => {
+                let cam = self.sim.curr;
+                self.game.inspect(&cam);
+            }
             KeyCode::KeyJ => self.game.journal_open = !self.game.journal_open,
             KeyCode::KeyH => {
                 self.hands_visible = !self.hands_visible;

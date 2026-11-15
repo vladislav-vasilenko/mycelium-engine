@@ -351,7 +351,15 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                                 float3(0.45, 0.36, 0.22)};
         uint k = min(uint(in.kind + 0.5), 4u);
         albedo = in.uv.y > 0.5 ? caps[k] : float3(0.75, 0.72, 0.62);
-        if (k == 0) {
+        if (in.kind > 7.5) {
+            // Бусина чувства мицелия (05.2): 8 — к грибам, 9 — к следам,
+            // 10 — узел. Яркость на экране не зависит от экспозиции.
+            const float3 beads[3] = {float3(0.45, 1.0, 0.55), float3(1.0, 0.72, 0.30),
+                                     float3(0.60, 0.80, 1.0)};
+            uint b = min(uint(in.kind - 7.5), 2u);
+            albedo = float3(0.04);
+            glow = beads[b] * in.tint * 0.8 / max(frame.pre_exposure, 1e-12);
+        } else if (k == 0) {
             glow = float3(0.35, 1.0, 0.45) * 3e-6 * (in.uv.y > 0.5 ? 1.0 : 0.4);
         }
     } else if (mat > 3.5 && mat < 4.5) {

@@ -128,6 +128,10 @@ fn draw_river(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 1);
         table.setAddress_atIndex(ctx.r.fish.gpuAddress(), 4);
     }
+    let Some(levels) = ctx.r.river_levels.as_ref() else {
+        return;
+    };
+    unsafe { table.setAddress_atIndex(levels.gpuAddress(), 5) };
     // Рыба (03.2) — непрозрачная, до полупрозрачной воды.
     if ctx.r.fish_count > 0 {
         enc.pushDebugGroup(&label("fish"));

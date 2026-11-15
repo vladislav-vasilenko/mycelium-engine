@@ -72,6 +72,8 @@ pub struct App {
     river_push_s: f32,
     /// Демо-сплав по реке (`--raft`).
     raft: Option<raft::Raft>,
+    /// Уровень воды рек на концах отрезков (03.2), обновляется с разливом.
+    river_levels: Vec<[f32; 2]>,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
     grade: bool,
     taa_frame: u32,
@@ -223,6 +225,7 @@ impl App {
             hydrology,
             river_push_s: 0.0,
             raft,
+            river_levels: Vec::new(),
             grade: true,
             taa_frame: 0,
             scene,

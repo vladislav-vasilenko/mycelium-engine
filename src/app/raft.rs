@@ -14,8 +14,8 @@ pub const LEVEL_SCALE: f32 = 3.0;
 const EYE_M: f32 = 1.0;
 
 pub struct Raft {
-    /// Ось реки вниз по течению и глубина на каждой точке.
-    path: Vec<(Vec2, f32)>,
+    /// Ось реки вниз по течению: точка, отрезок и его конец (0 — a, 1 — b).
+    path: Vec<(Vec2, usize, usize)>,
     /// Пройдено вдоль пути, м.
     s: f32,
     y: f32,
@@ -38,25 +38,29 @@ impl Raft {
                 da.total_cmp(&db)
             })?
             .0;
-        let mut path: Vec<(Vec2, f32)> = Vec::new();
+        let mut path: Vec<(Vec2, usize, usize)> = Vec::new();
         let mut cur = Some(first);
         let mut hops = 0;
         while let Some(k) = cur {
             let r = &hydro.reaches[k];
             let segs = &set.segments[r.segs.clone()];
-            let mut pts: Vec<Vec2> = segs.iter().map(|s| Vec2::from(s.a)).collect();
-            pts.push(Vec2::from(segs[segs.len() - 1].b));
+            let mut pts: Vec<(Vec2, usize, usize)> = r
+                .segs
+                .clone()
+                .map(|i| (Vec2::from(set.segments[i].a), i, 0))
+                .collect();
+            pts.push((Vec2::from(segs[segs.len() - 1].b), r.segs.end - 1, 1));
             // Вниз по течению — к устью участка.
-            if pts[0].distance(r.mouth) < pts[pts.len() - 1].distance(r.mouth) {
+            if pts[0].0.distance(r.mouth) < pts[pts.len() - 1].0.distance(r.mouth) {
                 pts.reverse();
             }
             // В следующем участке — с точки, ближайшей к концу пути.
-            let from = path.last().map_or(0, |(e, _)| {
+            let from = path.last().map_or(0, |(e, _, _)| {
                 (0..pts.len())
-                    .min_by(|&i, &j| pts[i].distance(*e).total_cmp(&pts[j].distance(*e)))
+                    .min_by(|&i, &j| pts[i].0.distance(*e).total_cmp(&pts[j].0.distance(*e)))
                     .unwrap_or(0)
             });
-            path.extend(pts[from..].iter().map(|p| (*p, r.depth)));
+            path.extend(pts[from..].iter().copied());
             cur = r.into;
             hops += 1;
             if hops > 40 {
@@ -85,36 +89,47 @@ impl Raft {
         })
     }
 
-    /// Точка и глубина на расстоянии `s` вдоль пути.
-    fn at(&self, s: f32) -> (Vec2, f32) {
+    /// Точка и уровень воды на расстоянии `s` вдоль пути (`levels` —
+    /// `Hydrology::levels`, тот же профиль, что рисует реку).
+    fn at(&self, s: f32, levels: &[[f32; 2]]) -> (Vec2, f32) {
+        let lv = |e: &(Vec2, usize, usize)| levels.get(e.1).map_or(0.0, |l| l[e.2]);
         let mut acc = 0.0;
         for w in self.path.windows(2) {
             let l = w[0].0.distance(w[1].0);
             if acc + l >= s {
                 let t = ((s - acc) / l.max(1e-4)).clamp(0.0, 1.0);
-                return (w[0].0.lerp(w[1].0, t), w[0].1);
+                return (
+                    w[0].0.lerp(w[1].0, t),
+                    lv(&w[0]) + (lv(&w[1]) - lv(&w[0])) * t,
+                );
             }
             acc += l;
         }
-        *self.path.last().unwrap()
+        let e = self.path.last().unwrap();
+        (e.0, lv(e))
     }
 
     /// Шаг сплава на `dt` реальных секунд; возвращает камеру.
-    pub fn step(&mut self, world: &World, dt: f32) -> CameraState {
+    pub fn step(&mut self, world: &World, dt: f32, levels: &[[f32; 2]]) -> CameraState {
         self.t += dt;
         let ground = |p: Vec2| world.sample_ground(p.x, p.y).map_or(0.0, |g| g.height);
-        let (p, depth) = self.at(self.s);
-        let (ahead, _) = self.at(self.s + 6.0);
-        // Скорость — по уклону: плёс медленно, перекат быстро.
-        let slope = ((ground(p) - ground(ahead)) / 6.0).max(0.0);
+        let (p, water0) = self.at(self.s, levels);
+        let (_, water_ahead) = self.at(self.s + 6.0, levels);
+        // Скорость — по уклону воды: плёс медленно, слив быстро.
+        let slope = ((water0 - water_ahead) / 6.0).max(0.0);
         let speed = (1.5_f32 + slope * 25.0).min(5.0);
         self.s += speed * dt;
-        let water = ground(p) + depth.max(0.1) * LEVEL_SCALE + 0.12;
+        // Уровни ещё не пришли (первые кадры) — по рельефу.
+        let water = if water0 > 0.0 {
+            water0
+        } else {
+            ground(p) + 0.5
+        };
         let target = water + EYE_M + (self.t * 1.7).sin() * 0.06;
         self.y += (target - self.y) * (1.0 - (-dt * 4.0).exp());
-        let (look, _) = self.at(self.s + 14.0);
+        let (look, water_look) = self.at(self.s + 14.0, levels);
         let eye = Vec3::new(p.x, self.y, p.y);
-        let to = Vec3::new(look.x, ground(look) + 0.4, look.y) - eye;
+        let to = Vec3::new(look.x, water_look.max(ground(look)) + 0.3, look.y) - eye;
         let f = to.normalize_or(Vec3::NEG_Z);
         CameraState {
             position: eye,

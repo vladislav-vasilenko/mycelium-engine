@@ -104,9 +104,15 @@ pub struct Reach {
     pub into: Option<usize>,
 }
 
+/// Наименьшая глубина воды демо, м (`LEVEL_MIN_M` в `river.metal`): ручьи по
+/// гидрологии — сантиметры, уровень ×3 от прежних 0,3 м.
+pub const LEVEL_MIN_M: f32 = 0.9;
+
 #[derive(Clone, Debug, Default)]
 pub struct Hydrology {
     pub reaches: Vec<Reach>,
+    /// Дно на концах каждого отрезка объектов карты (a, b), м; у не-рек — 0.
+    pub bed: Vec<[f32; 2]>,
 }
 
 fn manning_depth(q: f32, width: f32, slope: f32) -> f32 {
@@ -212,7 +218,17 @@ impl Hydrology {
             r.base_depth = manning_depth(q0, r.width_m, r.slope);
             r.depth = r.base_depth;
         }
-        Hydrology { reaches }
+        let mut bed = vec![[0.0f32; 2]; segs.len()];
+        for r in &reaches {
+            for i in r.segs.clone() {
+                let s = &segs[i];
+                bed[i] = [
+                    height(Vec2::from(s.a)).unwrap_or(0.0),
+                    height(Vec2::from(s.b)).unwrap_or(0.0),
+                ];
+            }
+        }
+        Hydrology { reaches, bed }
     }
 
     /// Шаг на `dt` игровых секунд при силе дождя `rain` и влажности земли `wet`.
@@ -236,6 +252,57 @@ impl Hydrology {
                 if i < out.len() {
                     out[i] = [s, r.depth];
                 }
+            }
+        }
+        out
+    }
+
+    /// Уровень воды на концах каждого отрезка (a, b), м: вода заполняет
+    /// русло до уровня и стремится к горизонтали. Идя от устья вверх по
+    /// течению, уровень не ниже уровня ниже по течению — ямы и ступени дна
+    /// заполняются до кромки следующего порога (плёсы), перепады дна больше
+    /// глубины остаются скатами; затем сглаживание с теми же ограничениями
+    /// (не ниже дна + половина глубины, не в гору). `scale` — множитель глубины.
+    pub fn levels(&self, segment_count: usize, scale: f32) -> Vec<[f32; 2]> {
+        let mut out = vec![[0.0; 2]; segment_count];
+        for r in &self.reaches {
+            let segs: Vec<usize> = r.segs.clone().filter(|&i| i < self.bed.len()).collect();
+            if segs.is_empty() {
+                continue;
+            }
+            let d = (r.depth * scale).max(LEVEL_MIN_M) + 0.12;
+            // Точки линии: a каждого отрезка и b последнего.
+            let mut bed: Vec<f32> = segs.iter().map(|&i| self.bed[i][0]).collect();
+            bed.push(self.bed[segs[segs.len() - 1]][1]);
+            let n = bed.len();
+            // Порядок вниз по течению: к низкому концу.
+            let down: Vec<usize> = if bed[0] >= bed[n - 1] {
+                (0..n).collect()
+            } else {
+                (0..n).rev().collect()
+            };
+            let mut w = vec![0.0f32; n];
+            let fill = |w: &mut Vec<f32>, min_d: f32| {
+                // От устья вверх: не ниже уровня ниже по течению.
+                let last = down[n - 1];
+                w[last] = w[last].max(bed[last] + min_d);
+                for k in (0..n - 1).rev() {
+                    let (here, below) = (down[k], down[k + 1]);
+                    w[here] = w[here].max(bed[here] + min_d).max(w[below]);
+                }
+            };
+            fill(&mut w, d);
+            // Сглаживание ~±20 м: перепад растягивается в слив, а не ступень
+            // (монотонный профиль после усреднения остаётся монотонным).
+            for _ in 0..24 {
+                let src = w.clone();
+                for k in 1..n - 1 {
+                    w[k] = src[k - 1] * 0.25 + src[k] * 0.5 + src[k + 1] * 0.25;
+                }
+                fill(&mut w, d * 0.5);
+            }
+            for (j, &i) in segs.iter().enumerate() {
+                out[i] = [w[j], w[j + 1]];
             }
         }
         out
@@ -305,5 +372,34 @@ mod tests {
             assert!(r.depth < *p, "спадает");
             assert!(r.depth >= r.base_depth - 1e-4, "не ниже межени");
         }
+    }
+
+    #[test]
+    fn water_level_is_flat_in_pools_and_never_uphill() {
+        // Река из 6 отрезков, дно падает к x = 0, посередине яма 20 м.
+        let json = r#"{"rivers": [{"kind": "river", "width_m": 8.0,
+            "line": [[600, 500], [500, 500], [400, 500], [300, 500], [200, 500], [100, 500], [0, 500]]}],
+            "trails": [], "roads": []}"#;
+        let set = FeatureSet::from_json(json, 2048.0).unwrap();
+        let mut h = Hydrology::build(&set, |p| Some(p.x * 0.05), None);
+        // Яма в точке x = 300 (конец отрезка 2 и начало отрезка 3).
+        h.bed[2][1] -= 20.0;
+        h.bed[3][0] -= 20.0;
+        let lv = h.levels(set.segments.len(), 1.0);
+        for i in 0..6 {
+            assert!(
+                lv[i][0] >= h.bed[i][0] - 1e-3 && lv[i][1] >= h.bed[i][1] - 1e-3,
+                "не ниже дна"
+            );
+            // Не в гору: вниз по течению (к x = 0) уровень не растёт.
+            assert!(lv[i][1] <= lv[i][0] + 1e-3, "в гору на отрезке {i}");
+        }
+        // Над ямой уровень не проваливается вслед за дном.
+        assert!(
+            lv[2][1] > h.bed[2][1] + 10.0,
+            "яма заполнена: {} над {}",
+            lv[2][1],
+            h.bed[2][1]
+        );
     }
 }

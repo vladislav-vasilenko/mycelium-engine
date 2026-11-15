@@ -97,6 +97,8 @@ pub struct Renderer {
     /// Рыба (03.2): точки прыжков (x, уровень воды, z, угол течения) и их число.
     fish: Obj<dyn MTLBuffer>,
     fish_count: usize,
+    /// Уровень воды рек на концах каждого отрезка объектов карты (03.2), float2.
+    river_levels: Option<Obj<dyn MTLBuffer>>,
     /// Временной апскейлер MetalFX под текущие цели (только при масштабе < 1).
     upscaler: Option<Obj<dyn objc2_metal_fx::MTL4FXTemporalScaler>>,
     pattern_tex: Obj<dyn MTLTexture>,
@@ -265,6 +267,7 @@ impl Renderer {
             render_scale: 1.0,
             fish,
             fish_count: 0,
+            river_levels: None,
             upscaler: None,
             pattern_tex,
             vertex_buf,
@@ -296,6 +299,26 @@ impl Renderer {
 
     pub fn size(&self) -> Option<(u32, u32)> {
         self.targets.as_ref().map(|t| (t.width, t.height))
+    }
+
+    /// Уровень воды рек (03.2): на каждый отрезок объектов карты (a, b), м.
+    pub fn set_river_levels(&mut self, levels: &[[f32; 2]]) {
+        let bytes = levels.len().max(1) * 8;
+        if self
+            .river_levels
+            .as_ref()
+            .is_none_or(|b| b.length() < bytes)
+        {
+            let b = resources::shared_buffer(&self.device, bytes, "river water levels");
+            self.residency.addAllocation(as_allocation(&*b));
+            self.residency.commit();
+            if let Some(old) = self.river_levels.replace(b) {
+                self.retire(Vec::new(), Some(Box::new(old)));
+            }
+        }
+        if let Some(b) = &self.river_levels {
+            resources::upload_bytes(b, 0, bytemuck::cast_slice(levels));
+        }
     }
 
     /// Рыба (03.2): до `FISH_MAX` точек прыжков (x, уровень воды, z, угол течения).

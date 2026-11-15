@@ -131,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `cull` (compute, срез кластеров на GPU, 02.5) → `forest` (compute, расстановка леса, 02.4) → `rt` (compute: сцена для лучей, 11) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `rt_ao` (compute: затенение лучами, 11) → `taa` (compute, временное сглаживание и копия в HDR, 04.5) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `bloom` (compute, 04.5) → `exposure` (compute) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `cull` (compute, срез кластеров на GPU, 02.5) → `forest` (compute, расстановка леса, 02.4) → `rt` (compute: сцена для лучей, 11) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `rt_ao` (compute: затенение лучами, 11) → `volumetric` (compute: объёмный свет, 11) → `taa` (compute, временное сглаживание и копия в HDR, 04.5) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `bloom` (compute, 04.5) → `exposure` (compute) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -1376,6 +1376,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Отставание на кадр и «след» при быстром повороте (без перепроекции истории); рельеф лучей — треугольники 0,6 м, не заплатка.
 - **Пересмотреть.** С пробами освещённости (сессия 3) и отражениями (сессия 4) — та же сцена.
 
+### AD-73. Объёмный свет — проход по глубине и карте теней, сложение в TAA
+
+- **Решение.** Проход `volumetric` (compute, после `scene`, до `taa`): на пиксель четверти разрешения — 24 шага вдоль луча взгляда до поверхности (≤ 90 м) со сдвигом по кадру, видимость солнца по каскаду карты теней, фаза Хеньи — Гринстейна (g = 0,6), плотность влажной дымки гуще у земли; результат (`Targets.vol`) добавляется к кадру в `taa_resolve` до статистики окрестности. Лист пропускает свет с обратной стороны (42 %).
+- **Почему.** «Свет сквозь листву» и лучи между стволами — главная примета леса Якусимы во влажной дымке (11, сессия 2); проход по уже готовой глубине дешевле объёма froxel, а шум убирает TAA.
+- **Отброшено.** Froxel-объём 160 × 90 × 64 со светом неба — дороже, отложен; лучи в экранном пространстве от солнца (radial blur) — неверны при солнце вне кадра.
+- **Цена.** Работает только с TAA; плотность одна на весь остров (без погоды 04.3); дальше 90 м — без лучей.
+- **Пересмотреть.** С погодой (04.3: туман и дождь меняют плотность) и froxel-объёмом.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1454,3 +1462,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 04.5 (сессия 1) | после `2c64f0b` | AD-70: `TaaUniforms` (layout 54 поля), `taa.metal` (`taa_resolve`), `passes/taa.rs`, `Targets.history`, глубина `ShaderRead` и Store при TAA, таблица `taa` (20 таблиц), `TAA_OFFSET` 13952, `UPLOAD_BYTES` 14336, `RES_TAA`, `PassCtx.frame_index`, `App.taa_prev`/`taa_frame`, `halton`, `--no-taa` |
 | 2026-11-15 | 04.5 (сессия 2) | после `7394979` | AD-71: `bloom.metal` (`bloom_down`, `bloom_up`), `passes/bloom.rs`, `Targets.bloom_down`/`bloom_up` и `textures()`, `BLOOM_LEVELS`, таблица `bloom` (21 таблица), `RES_BLOOM`, `FrameInput.bloom`, `texture(1)` тонмаппинга; `exposure_meter` — гистограмма; поворот диска PCSS по `ShadowUniforms.params.w`; сдвиг выборки тени заплатки 25 см к свету; листва в тени пропускает 55 %, отражённый свет 0,30 / 0,24 |
 | 2026-11-15 | 11 (сессия 1) | после `c89f98b` | AD-72: `renderer/rt.rs` (`RtGpu`, `MESHES`, `RT_GRID`, `RT_MAX_INSTANCES`), `rt.metal` (`rt_terrain_grid`, `rt_instances`, `rt_count_finish`, `rt_ao`), `rt_ao.h`, `passes/rt.rs` (`RtPass`, `RtAoPass`, `active`), `Stages::ACCEL` (разрешена compute-проходам), `RES_RT`, `RES_AO` (импортирован), таблица `rt` (22 таблицы), `Targets.rt_ao`, `ShadowUniforms.params.z`, `texture(10)` рельефа и `texture(5)` растений, `FrameInput.rt`, `--no-rt` |
+| 2026-11-15 | 11 (сессия 2) | после `4e2e888` | AD-73: `volumetric.metal` (`volumetric_light`), `VolumetricPass` в `passes/taa.rs`, `Targets.vol`, `RES_VOL`, таблица `volumetric` (23 таблицы), `texture(4)` в `taa_resolve`; пропускание листа в `plant_fs`; почва бугров ×0,6 |

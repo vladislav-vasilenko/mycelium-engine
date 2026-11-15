@@ -19,6 +19,8 @@ pub(super) struct Targets {
     pub bloom_up: Vec<Obj<dyn MTLTexture>>,
     /// Затенение лучами (11): половина кадра, R32Float, копится во времени.
     pub rt_ao: Obj<dyn MTLTexture>,
+    /// Объёмный свет (11): четверть кадра, добавляется в проходе `taa`.
+    pub vol: Obj<dyn MTLTexture>,
 }
 
 /// Уровней цепочки bloom: от 1/2 до 1/64 кадра.
@@ -72,6 +74,14 @@ impl Targets {
             MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
             "rt ambient occlusion",
         );
+        let vol = private_texture(
+            device,
+            shaders::HDR_FORMAT,
+            (width / 4).max(1),
+            (height / 4).max(1),
+            MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+            "volumetric light",
+        );
         Targets {
             width,
             height,
@@ -81,6 +91,7 @@ impl Targets {
             bloom_down,
             bloom_up,
             rt_ao,
+            vol,
         }
     }
 
@@ -91,6 +102,7 @@ impl Targets {
         v.extend(self.bloom_down.iter().cloned());
         v.extend(self.bloom_up.iter().cloned());
         v.push(self.rt_ao.clone());
+        v.push(self.vol.clone());
         v
     }
 }

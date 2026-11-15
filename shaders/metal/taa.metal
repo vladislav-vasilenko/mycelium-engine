@@ -52,6 +52,7 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
                         texture2d<float> hist [[texture(2)]],
                         texture2d<float, access::write> out [[texture(3)]],
                         constant TaaUniforms& t [[buffer(0)]],
+                        texture2d<float> vol [[texture(4)]],
                         uint2 gid [[thread_position_in_grid]]) {
     uint2 size = uint2(cur.get_width(), cur.get_height());
     if (any(gid >= size)) {
@@ -66,7 +67,10 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             int2 p = clamp(int2(gid) + int2(x, y), int2(0), int2(size) - 1);
-            float3 c = cur.read(uint2(p)).rgb;
+            // Объёмный свет (11) — четверть разрешения, добавляется здесь:
+            // TAA заодно усредняет его шум.
+            constexpr sampler vs(filter::linear, address::clamp_to_edge);
+            float3 c = cur.read(uint2(p)).rgb + vol.sample(vs, (float2(p) + 0.5) / float2(size), level(0)).rgb;
             c = c / (1.0 + dot(c, float3(0.2126, 0.7152, 0.0722)));
             float3 yc = rgb_to_ycocg(c);
             m1 += yc;

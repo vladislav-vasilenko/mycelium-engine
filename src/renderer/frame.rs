@@ -58,6 +58,8 @@ const RES_BLOOM: ResourceId = ResourceId(13);
 const RES_RT: ResourceId = ResourceId(14);
 /// Затенение лучами (11): пишет `rt_ao` после сцены, читает сцена следующего кадра.
 pub(super) const RES_AO: ResourceId = ResourceId(15);
+/// Объёмный свет (11, сессия 2).
+const RES_VOL: ResourceId = ResourceId(16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -146,9 +148,10 @@ pub(super) enum Table {
     Taa,
     Bloom,
     Rt,
+    Volumetric,
 }
 
-const TABLE_NAMES: [&str; 22] = [
+const TABLE_NAMES: [&str; 23] = [
     "pattern",
     "scene",
     "readback",
@@ -171,6 +174,7 @@ const TABLE_NAMES: [&str; 22] = [
     "taa",
     "bloom",
     "rt",
+    "volumetric",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -178,7 +182,7 @@ const TABLE_NAMES: [&str; 22] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 22],
+    tables: [Obj<dyn MTL4ArgumentTable>; 23],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -220,7 +224,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("22 таблиц")),
+                .unwrap_or_else(|_| unreachable!("23 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -311,6 +315,16 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
         kind: PassKind::Compute,
         reads: vec![(RES_DEPTH, Stages::DISPATCH), (RES_RT, Stages::DISPATCH)],
         writes: vec![(RES_AO, Stages::DISPATCH)],
+    });
+    // Объёмный свет (11): по глубине и карте теней — добавляет TAA.
+    passes.push(PassDecl {
+        name: "volumetric",
+        kind: PassKind::Compute,
+        reads: vec![
+            (RES_DEPTH, Stages::DISPATCH),
+            (RES_SHADOW, Stages::DISPATCH),
+        ],
+        writes: vec![(RES_VOL, Stages::DISPATCH)],
     });
     // Временное сглаживание (04.5): читает HDR и глубину сцены, пишет историю
     // и копирует её обратно в HDR — до рук (руки без сдвига и без шлейфа).

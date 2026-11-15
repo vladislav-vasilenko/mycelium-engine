@@ -536,7 +536,8 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         float3 mossc = mat_albedo.sample(ms, lp.xz / 2.0, 3).rgb;
         float side = 1.0 - saturate(abs(n.x) > abs(n.z) ? abs(n.x) : abs(n.z));
         float3 soil = mat_albedo.sample(ms, (abs(n.x) > abs(n.z) ? lp.zy : lp.xy) / 2.5, 2).rgb;
-        albedo = mix(soil, litter, saturate(side * 1.5));
+        // Почва бугра темнее подстилки рельефа: влажная, в тени ствола (11).
+        albedo = mix(soil, litter, saturate(side * 1.5)) * 0.6;
         float mm = smoothstep(0.35, 0.65, in.moss + (dot(mossc, float3(0.33)) - 0.25) * 0.8);
         albedo = mix(albedo, mossc, mm);
     } else if (mat > 6.5) {
@@ -621,9 +622,14 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     }
     float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {
-        // Просвет листвы против солнца.
-        float back = pow(saturate(dot(-V, L)), 3.0);
-        color += albedo * sun * back * 0.8 * float3(0.9, 1.1, 0.6);
+        // Свет сквозь лист (11, сессия 2): тонкий лист пропускает ~40 %
+        // света с обратной стороны (диффузно, по нормали — `sun` уже с тенью
+        // от других листьев) и желтеет: свет проходит через мякоть листа.
+        // Плюс узкий просвет против солнца, когда смотришь сквозь крону.
+        float3 leaf_t = albedo * float3(1.05, 1.15, 0.55);
+        float through = saturate(dot(-n, L));
+        float back = pow(saturate(dot(-V, L)), 4.0);
+        color += leaf_t * sun * (0.42 * through + 0.6 * back);
     }
     if (frame.underwater_m <= 0.0) {
         color = apply_aerial(aerial, frame, in.rel, color);

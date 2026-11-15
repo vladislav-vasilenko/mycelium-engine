@@ -84,7 +84,7 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 16] = [
+static REGISTRY: [&dyn FramePass; 17] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
@@ -95,6 +95,7 @@ static REGISTRY: [&dyn FramePass; 16] = [
     &scene::ScenePass,
     &readback::ReadbackPass,
     &rt::RtAoPass,
+    &taa::VolumetricPass,
     &taa::TaaPass,
     &viewmodel::ViewmodelPass,
     &bloom::BloomPass,

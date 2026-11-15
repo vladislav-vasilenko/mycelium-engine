@@ -5,7 +5,7 @@
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx, size2};
-use crate::renderer::frame::{TAA_OFFSET, Table};
+use crate::renderer::frame::{SHADOW_OFFSET, TAA_OFFSET, Table};
 use crate::renderer::resources::label;
 
 pub(in crate::renderer) struct TaaPass;
@@ -36,6 +36,7 @@ impl FramePass for TaaPass {
             table.setTexture_atIndex(t.depth.gpuResourceID(), 1);
             table.setTexture_atIndex(read.gpuResourceID(), 2);
             table.setTexture_atIndex(write.gpuResourceID(), 3);
+            table.setTexture_atIndex(t.vol.gpuResourceID(), 4);
         }
         enc.setComputePipelineState(&ctx.r.pipelines.taa_resolve);
         enc.setArgumentTable(Some(table));
@@ -50,6 +51,47 @@ impl FramePass for TaaPass {
             MTL4VisibilityOptions::Device,
         );
         unsafe { enc.copyFromTexture_toTexture(write, &t.hdr) };
+        enc.endEncoding();
+    }
+}
+
+/// Проход `volumetric` (11, сессия 2): лучи солнца в дымке — четверть
+/// разрешения по глубине и карте теней; при каждом TAA (без теней — нули).
+pub(in crate::renderer) struct VolumetricPass;
+
+impl FramePass for VolumetricPass {
+    fn name(&self) -> &'static str {
+        "volumetric"
+    }
+
+    fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier) {
+        if ctx.input.taa.is_none() {
+            return;
+        }
+        let t = ctx.targets;
+        let enc = ctx
+            .slot
+            .cmd
+            .computeCommandEncoder()
+            .expect("compute encoder");
+        enc.setLabel(Some(&label("volumetric light")));
+        barrier.apply(&*enc);
+        let table = ctx.slot.table(Table::Volumetric);
+        unsafe {
+            table.setTexture_atIndex(t.depth.gpuResourceID(), 0);
+            table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 1);
+            table.setTexture_atIndex(t.vol.gpuResourceID(), 2);
+            table.setAddress_atIndex(ctx.upload_addr, 1);
+            table.setAddress_atIndex(ctx.upload_addr + TAA_OFFSET as u64, 2);
+            table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 3);
+            table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
+        }
+        enc.setComputePipelineState(&ctx.r.pipelines.volumetric_light);
+        enc.setArgumentTable(Some(table));
+        enc.dispatchThreads_threadsPerThreadgroup(
+            size2(t.vol.width(), t.vol.height()),
+            size2(16, 16),
+        );
         enc.endEncoding();
     }
 }

@@ -35,6 +35,9 @@ pub(super) struct ForestGpu {
     pub instances: Vec<Obj<dyn MTLBuffer>>,
     pub counters: Vec<Obj<dyn MTLBuffer>>,
     counted: [bool; FRAME_SLOTS],
+    /// Стволы и крупные валуны завершённого кадра (x, z, радиус): деревья —
+    /// из списков теней (все в 160 м от камеры), валуны — из LOD 0 (45 м).
+    pub obstacles: Vec<[f32; 3]>,
 }
 
 impl ForestGpu {
@@ -50,6 +53,27 @@ impl ForestGpu {
             shadow: words[9..12].iter().map(|&n| n.min(FOREST_CAP as u32)).sum(),
             overflow: words[..12].iter().any(|&n| n as usize > FOREST_CAP),
         });
+        if self.counted[slot] {
+            let inst = &self.instances[slot];
+            // SAFETY: shared-буфер слота; GPU закончил кадр слота.
+            let all = unsafe {
+                std::slice::from_raw_parts(
+                    inst.contents().as_ptr().cast::<PlantInstance>(),
+                    FOREST_LISTS * FOREST_CAP,
+                )
+            };
+            self.obstacles.clear();
+            // (список, радиус ствола у груди при масштабе 1, м).
+            for (list, r) in [(9usize, 1.0f32), (10, 0.45), (6, 1.3)] {
+                let n = (words[list] as usize).min(FOREST_CAP);
+                for p in &all[list * FOREST_CAP..list * FOREST_CAP + n] {
+                    if list == 6 && p.scale < 0.6 {
+                        continue; // мелкий камень перешагивается
+                    }
+                    self.obstacles.push([p.position[0], p.position[2], r * p.scale]);
+                }
+            }
+        }
         words[..16].fill(0);
         self.counted[slot] = true;
         stats
@@ -105,6 +129,7 @@ impl super::Renderer {
                 })
                 .collect(),
             counted: [false; FRAME_SLOTS],
+            obstacles: Vec::new(),
         };
         for b in [&g.vertices, &g.indices, &g.lods]
             .into_iter()
@@ -128,6 +153,11 @@ impl super::Renderer {
             );
         }
         Ok(())
+    }
+
+    /// Препятствия леса последнего завершённого кадра (x, z, радиус).
+    pub fn forest_obstacles(&self) -> &[[f32; 3]] {
+        self.forest.as_ref().map_or(&[], |f| &f.obstacles)
     }
 
     pub fn has_forest(&self) -> bool {

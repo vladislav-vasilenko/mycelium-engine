@@ -598,6 +598,7 @@ sequenceDiagram
 | `passes/forest.rs` | `ForestPass` (`forest_place` 160² потоков, `forest_finish`), `active`, `draw_scene` (9 списков `drawIndexedPrimitives:…indirectBuffer:`), `draw_shadow` (каскады 0–1, списки теней) |
 | `shaders/metal/forest.metal` | `ground_height` (поле острова или зона 1 м), `forest_place` (клетка 6 м, хэш клетки мира; дерево и валун; пояса `cover`, уклон, тропы/дороги/реки, море; основание по нижней точке у ствола; LOD 45/150 м, предел 480 м, валуны 180 м; тени до 160 м), `forest_finish`, `plant_world` (поворот, масштаб, ветер), `plant_vs`/`plant_fs` (кора, листва с заострённой альфой, просвет, валун трёхпроекционно из слоёв рельефа 0 и 9, тени, небо, дымка), `plant_shadow_vs`/`plant_shadow_fs` |
 | Рельеф | `FrameUniforms.forest`: с лесом ложные пятна полога выключены, подкраска «кронами» — с 400–500 м |
+| Столкновения | `ForestGpu.obstacles` (x, z, радиус) — при `take_and_reset` из списков теней (деревья в 160 м) и LOD 0 валунов; `Renderer::forest_obstacles`; `Sim.obstacles` (в 12 м от игрока), `sim::push_out`, `PLAYER_RADIUS_M` = 0,35: выталкивание из цилиндров и гашение скорости в препятствие при ходьбе |
 
 ### 4.10. Сборка `.app`
 
@@ -1341,3 +1342,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 03.1 | после `5b0d3e5` | AD-60: маска мокрого песка RG16Float 1024² — окно вокруг камеры с кольцевой адресацией и меткой оборота (`wet_sand_update`), выборка в `terrain_fs` по XZ / 1024 с повтором и затуханием у края окна; размер маски не зависит от карты |
 | 2026-11-15 | 02.7 | после `1a37616` | AD-61: `tools/geo/vegetation.py`, пояса `cover.png` по карте растительности 1 : 25 000, `vegetation.png` + `vegetation.json` (47 сообществ), `assets/source/geo/vegetation/` (выборка и лицензия), источник в `world.json` |
 | 2026-11-15 | 02.4, 02.8 | после `9c43df9` | AD-62, AD-63: `tools/plants/build_plants.py`, `assets/models/plants/`, `src/plants/`, `renderer/forest.rs`, проход `forest` и `RES_FOREST`, таблицы `forest`/`plant`/`plant shadow` (18 таблиц), `forest.metal`, `PlantVertex`/`PlantInstance` (раскладка 51 поле), `FrameUniforms.forest` (вместо `_pad`), `depth_only_pipeline(…, fs)`, конвейеры `plant`, `plant_shadow`, `forest_place`, `forest_finish`, `PassCtx`-тип `RenderEncoder` в `passes/mod.rs`; защита светов в `exposure_meter` |
+| 2026-11-15 | 02.4 | после `c0bcf50` | Столкновения со стволами и валунами: `ForestGpu.obstacles`, `Renderer::forest_obstacles`, `Sim.obstacles`, `sim::push_out`, `PLAYER_RADIUS_M`; тест `trunk_blocks_walking` |

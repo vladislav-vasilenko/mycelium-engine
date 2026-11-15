@@ -138,6 +138,31 @@ pub struct Sim {
     bob_weight: f32,
     /// Покачивание головы при ходьбе (клавиша B).
     pub head_bob: bool,
+    /// Препятствия-цилиндры (x, z, радиус): стволы и валуны рядом с игроком (02.4).
+    pub obstacles: Vec<Vec3>,
+}
+
+/// Радиус игрока для столкновений со стволами, м.
+pub const PLAYER_RADIUS_M: f32 = 0.35;
+
+/// Выталкивает точку из цилиндров препятствий (несколько проходов: два ствола рядом).
+pub fn push_out(mut p: Vec2, obstacles: &[Vec3]) -> Vec2 {
+    for _ in 0..3 {
+        let mut moved = false;
+        for o in obstacles {
+            let d = p - Vec2::new(o.x, o.y);
+            let min = o.z + PLAYER_RADIUS_M;
+            let len = d.length();
+            if len < min {
+                p = Vec2::new(o.x, o.y) + d.try_normalize().unwrap_or(Vec2::X) * min;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    p
 }
 
 impl Sim {
@@ -157,6 +182,7 @@ impl Sim {
             bob_phase: 0.0,
             bob_weight: 0.0,
             head_bob: true,
+            obstacles: Vec::new(),
         }
     }
 
@@ -294,6 +320,18 @@ impl Sim {
             if stepped_to.is_none() {
                 self.blocked_ticks += 1;
                 vel = Vec2::ZERO;
+            }
+        }
+        // Стволы и валуны (02.4): точку выталкивает из цилиндра, скорость
+        // теряет составляющую в препятствие — игрок скользит вдоль ствола.
+        let pushed = push_out(new_pos, &self.obstacles);
+        if pushed != new_pos {
+            let n = (pushed - new_pos).normalize_or_zero();
+            vel -= n * vel.dot(n).min(0.0);
+            new_pos = pushed;
+            stepped_to = Self::can_step(ground, new_pos, feet);
+            if stepped_to.is_none() {
+                new_pos = pos;
             }
         }
         self.velocity = Vec3::new(vel.x, 0.0, vel.y);

@@ -50,6 +50,17 @@ impl App {
         self.look = (0.0, 0.0);
         let (ticks, alpha) = self.clock.advance(dt);
         let input = self.tick_input();
+        // Стволы рядом с игроком (02.4) — из расстановки GPU прошлых кадров.
+        self.sim.obstacles.clear();
+        if let Some(r) = self.renderer.as_ref() {
+            let p = self.sim.curr.position;
+            self.sim.obstacles.extend(
+                r.forest_obstacles()
+                    .iter()
+                    .filter(|o| (o[0] - p.x).abs() < 12.0 && (o[1] - p.z).abs() < 12.0)
+                    .map(|o| glam::Vec3::from(*o)),
+            );
+        }
         for _ in 0..ticks {
             self.sim.step(&input, Some(&self.world));
         }

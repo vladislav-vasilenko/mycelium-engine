@@ -394,3 +394,12 @@ fn walk_trail(world: &crate::world::World) {
         sim.blocked_ticks
     );
 }
+
+/// Ствол (02.4): игрок упирается в цилиндр и не проходит сквозь него.
+#[test]
+fn trunk_blocks_walking() {
+    let p = super::push_out(glam::Vec2::new(0.5, 0.0), &[glam::Vec3::new(0.0, 0.0, 1.0)]);
+    assert!((p.length() - (1.0 + super::PLAYER_RADIUS_M)).abs() < 1e-5, "{p}");
+    let far = glam::Vec2::new(5.0, 0.0);
+    assert_eq!(super::push_out(far, &[glam::Vec3::new(0.0, 0.0, 1.0)]), far);
+}

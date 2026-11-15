@@ -317,3 +317,51 @@ inline float shadow_factor(constant ShadowUniforms& sh, depth2d_array<float> map
     }
     return sum / 16.0;
 }
+
+// --- Облака (04.3, сессия 4): слой на высоте `CLOUD_H` над камерой, плотность
+// — фрактальный шум с покрытием из облачности погоды, дрейф по ветру. Тот же
+// слой гасит прямой свет, когда облако закрывает светило (`sky_ambient`).
+constant float CLOUD_H = 1500.0;   // высота слоя над камерой, м
+
+inline float cloud_hash(float2 p) {
+    p = fract(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+inline float cloud_noise(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(cloud_hash(i), cloud_hash(i + float2(1, 0)), u.x),
+               mix(cloud_hash(i + float2(0, 1)), cloud_hash(i + float2(1, 1)), u.x), u.y);
+}
+
+inline float cloud_fbm(float2 p) {
+    float s = 0.0, a = 0.5;
+    for (int k = 0; k < 5; ++k) {
+        s += a * cloud_noise(p);
+        p = p * 2.03 + 17.1;
+        a *= 0.5;
+    }
+    return s;
+}
+
+// Плотность слоя в мировой точке XZ (м); `cover` — облачность 0…1, `t` — с,
+// `wind` — ветер погоды 0…1.
+inline float cloud_density(float2 xz, float cover, float t, float wind) {
+    float2 drift = float2(0.8, 0.6) * t * (6.0 + 18.0 * wind);
+    float2 q = (xz + drift) / 1600.0;
+    // Крупная форма минус мелкая «эрозия»: рваные края кучевых облаков.
+    float n = cloud_fbm(q) - 0.18 * cloud_fbm(q * 4.3 + 7.7);
+    float th = 0.66 - 0.62 * cover;
+    return smoothstep(th, th + 0.1, n);
+}
+
+// Плотность слоя по направлению `d` из камеры (за горизонтом — 0).
+inline float cloud_along(float3 d, float2 cam_xz, float cover, float t, float wind) {
+    if (d.y < 0.01) {
+        return 0.0;
+    }
+    float2 p = cam_xz + d.xz * (CLOUD_H / d.y);
+    return cloud_density(p, cover, t, wind);
+}

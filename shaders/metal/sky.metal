@@ -268,14 +268,21 @@ kernel void sky_ambient(texture2d<float> skyview [[texture(0)]],
     float cloud = saturate(sky.view.z);
     float3 e_clear = light * max(ldir.y, 0.0) + total[9];
     float3 overcast_l = dot(e_clear, float3(0.2126, 0.7152, 0.0722)) * float3(0.92, 0.95, 1.0) * 0.4 / SKY_PI;
-    light *= 1.0 - 0.95 * cloud;
+    // Светило за облаком (сессия 4): плотность слоя по направлению на него;
+    // сплошная облачность закрывает всегда. Бегущие тени облаков — свет
+    // всей сцены то гаснет, то возвращается.
+    float sun_block = max(cloud_along(ldir, frame.camera_pos.xz, cloud, frame.time, frame.weather.w),
+                          smoothstep(0.85, 1.0, cloud));
+    light *= 1.0 - 0.92 * sun_block;
+    // Свет неба: ровный серый свод, когда облака закрыли большую часть неба.
+    float sky_cover = smoothstep(0.45, 1.0, cloud);
     for (int k = 0; k < 9; ++k) {
-        total[k] *= 1.0 - cloud;
+        total[k] *= 1.0 - sky_cover;
     }
     // Равномерная верхняя полусфера в SH (как земля снизу, с обратным знаком).
-    total[0] += overcast_l * 0.282095 * 2.0 * SKY_PI * cloud;
-    total[1] += overcast_l * 0.488603 * SKY_PI * cloud;
-    total[9] = mix(total[9], overcast_l * SKY_PI, cloud);
+    total[0] += overcast_l * 0.282095 * 2.0 * SKY_PI * sky_cover;
+    total[1] += overcast_l * 0.488603 * SKY_PI * sky_cover;
+    total[9] = mix(total[9], overcast_l * SKY_PI, sky_cover);
     float3 e_sky = total[9];
     // Земля под горизонтом: альбедо 0,1 от неба и светила.
     float3 ground_l = 0.1 / SKY_PI * (e_sky + light * max(ldir.y, 0.0));
@@ -363,11 +370,27 @@ fragment float4 sky_fs(SkyOut in [[stage_in]],
         moon_l += E * 2e-8;
         col += moon_l * t_view * hits_ground * smoothstep(1.0, 0.97, moon_r);
     }
-    // Пасмурный свод (04.3): ровная серая яркость, зенит светлее горизонта
-    // (как облачное небо CIE), солнце и луна скрыты; к земле — как было.
+    // Облака (04.3, сессия 4): слой на 1,5 км; освещены светилом (тень
+    // внутри облака — плотность чуть ближе к светилу: светлые края, тёмные
+    // днища) и небом; у горизонта тают в дымке. Диск светила закрывают.
     float cloud = saturate(sky.view.z);
+    float dens = cloud_along(view, frame.camera_pos.xz, cloud, frame.time, frame.weather.w)
+               * smoothstep(0.02, 0.15, view.y) * hits_ground;
+    if (dens > 0.0) {
+        float2 p = frame.camera_pos.xz + view.xz * (CLOUD_H / max(view.y, 0.02));
+        float toward = cloud_density(p + sun.xz * 350.0, cloud, frame.time, frame.weather.w);
+        float3 sun_l = E * SUN_TINT * sample_transmittance(transmittance, cam, sun) * smoothstep(-0.05, 0.05, sun.y);
+        float phase = 0.6 + 0.8 * pow(saturate(dot(view, sun)), 6.0);
+        float3 amb = skyf.sh[0].rgb * 0.282095;
+        float3 cl = (sun_l * (1.0 - 0.75 * toward) * phase * 0.12 + amb * 0.9) * (1.0 - 0.35 * dens);
+        col = mix(col, cl, dens * 0.95);
+    }
+    // Пасмурный свод: ровная серая яркость, зенит светлее горизонта (как
+    // облачное небо CIE); к земле — как было.
     float3 overcast = skyf.exposure.w * float3(0.92, 0.95, 1.0) * (0.55 + 0.9 * saturate(view.y));
-    col = mix(col, overcast * hits_ground + col * (1.0 - hits_ground), smoothstep(0.0, 1.0, cloud));
+    // Слоистая облачность — едва заметная фактура свода.
+    overcast *= 0.9 + 0.2 * cloud_fbm((frame.camera_pos.xz + view.xz * (CLOUD_H / max(view.y, 0.05))) / 900.0);
+    col = mix(col, overcast * hits_ground + col * (1.0 - hits_ground), smoothstep(0.55, 1.0, cloud));
     return float4(col * frame.pre_exposure, 1.0);
 }
 

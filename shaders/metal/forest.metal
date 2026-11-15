@@ -589,6 +589,8 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     // бывают паузы; соседние растения качаются не в такт.
     float2 bp = float2(inst.position.x, inst.position.z);
     float gust = mix(0.15, 1.0, saturate(0.5 + 0.6 * sin(t * 0.21 + bp.x * 0.013) * cos(t * 0.13 + bp.y * 0.011)));
+    // Ветер погоды (04.3, сессия 4): в штиль слабее, в грозу — вдвое сильнее.
+    gust *= 0.6 + 1.6 * frame.weather.w;
     float sway = (sin(t * 0.9 + inst.phase) * 0.6 + sin(t * 2.3 + inst.phase * 1.7) * 0.25) * w * w * gust;
     // Дрожание вдоль нормали — только листве: у трубок ветвей нормали
     // радиальные, и ветви «дышали» бы (02.10).

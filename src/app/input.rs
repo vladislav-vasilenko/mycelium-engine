@@ -60,6 +60,9 @@ impl App {
                 self.use_clusters = !self.use_clusters;
                 self.update_title(true);
             }
+            // Срез Сиратани (05.1): осмотр гриба под взглядом и журнал.
+            KeyCode::KeyF => self.game.inspect(),
+            KeyCode::KeyJ => self.game.journal_open = !self.game.journal_open,
             KeyCode::KeyH => {
                 self.hands_visible = !self.hands_visible;
             }

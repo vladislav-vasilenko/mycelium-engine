@@ -19,6 +19,7 @@
 
 mod app;
 mod frame_graph;
+mod game;
 mod hands;
 mod layout;
 mod plants;
@@ -31,6 +32,7 @@ mod sky;
 mod terrain_clusters;
 mod terrain_materials;
 mod terrain_mesh;
+mod ui;
 mod water;
 mod world;
 

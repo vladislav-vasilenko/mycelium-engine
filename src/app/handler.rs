@@ -37,6 +37,7 @@ impl ApplicationHandler for App {
                 self.hands = hands;
                 self.clusters = Some(clusters);
                 self.forest_loaded = r.has_forest();
+                self.font = crate::ui::Font::load(&crate::ui::assets_dir()).ok();
                 let size = window.inner_size();
                 r.resize(size.width, size.height, window.scale_factor());
                 eprintln!(

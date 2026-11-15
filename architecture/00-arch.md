@@ -271,6 +271,7 @@ sequenceDiagram
 | `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
 | `PlantVertex` | 36 Б, 4 | `position` @0, `normal` @12, `uv` @24, `attr [u8;4]` @32 (материал, ветер, затенение) |
+| `UiVertex` | 20 Б, 4 | `pos` @0, `uv` @8 (u < 0 — сплошной цвет), `color [u8;4]` @16 |
 | `PlantInstance` | 32 Б, 4 | `position` @0, `scale` @12, `yaw` @16, `tint` @20, `phase` @24 |
 | `CullView` | 128 Б, 16 | `planes [[f32;4];6]` @0, `camera` @96 (w — пикселей на единицу), `params` @112 (znear, порог, орто, включён) |
 | `CullNode` | 32 Б, 4 | `sphere` @0, `error` @16, `group i32` @20, `child_offset` @24, `child_count` @28 |
@@ -601,6 +602,17 @@ sequenceDiagram
 | Сообщества | `World.vegetation: Option<VegetationLayer { size, ids, forest }>` (`layers/vegetation.rs`, ключ `vegetation` в `world.json`, экспорт не переносит); `set_forest(assets, vegetation)` → `ForestGpu.vegetation` (R8Unorm, номер сообщества) и `vegetation_table` (256 × 2 float4: густота, доля криптомерии, масштаб от–до; валуны); `forest_place` выбирает сообщество в точке со смещением ±10 м (граница не по сетке 15 м), без карты — по поясам; великаны якусуги (масштаб 1,6, 4 %) — только в естественном кедровом лесу |
 | Подлесок | виды 3 папоротник (`fern.glb`, вайи — изогнутые полосы карточек) и 4 якудзаса (`sasa.glb`, вертикальные карточки); атлас `foliage.png` 1024 × 1024 (четверти: хвоя, листья, вайи, саса); `forest_place` — 4 подклетки по 3 м в клетках до 70 м: папоротник по лесным поясам, влажности и впадинам (`macro.png`, `texture(2)`), саса — по поясу лугов; LOD 15/35 м; материалы 5 и 6 — листва; списки 17 (`CAMERA_LISTS` = 15, тени деревьев 15–16, `COUNTS_WORDS` = 32); ветер растёт с высотой точки |
 | Столкновения | `ForestGpu.obstacles` (x, z, радиус) — при `take_and_reset` из списков теней (деревья в 160 м) и LOD 0 валунов; `Renderer::forest_obstacles`; `Sim.obstacles` (в 12 м от игрока), `sim::push_out`, `PLAYER_RADIUS_M` = 0,35: выталкивание из цилиндров и гашение скорости в препятствие при ходьбе |
+
+### 4.9k. Интерфейс и игровой срез (05.1)
+
+| Файл | Элементы |
+| --- | --- |
+| `tools/ui/font_atlas.py`, `assets/ui/font.{png,json}` | SDF-атлас PT Sans (OFL) 1024², 177 знаков (ASCII, кириллица, знаки), размер 48, разброс 6 |
+| `src/ui/mod.rs` | `Font { pixels, atlas_size, … }` (`load`, `width`), `UiBuilder { font, verts, scale }` (`rect`, `text` с тенью, `line`), `assets_dir` |
+| `renderer/ui.rs`, `passes/ui.rs`, `ui.metal` | `UI_MAX_VERTS` = 65 536, буфер слота: размер экрана (16 Б) + `UiVertex`; `Renderer::set_ui_font`; проход `ui` после `tonemap` (загрузка drawable, `Blend::Alpha` — предумноженная альфа), `ui_vs`/`ui_fs` (sRGB → линейный, SDF через `fwidth`) |
+| `src/game/mod.rs` | `Species`, `SPECIES` (5 видов), `Mushroom`, `Game { mushrooms, found, journal_open, toast, focus }`: `new` (расстановка в зоне 1 м по сообществам, влажности и впадинам, клетка 3 м, хэш), `update_focus` (луч 3 м), `inspect`, `tick`, `instances` (до 120 м), `ui` |
+| Лес | вид 5 `mushroom` (`build_plants.py`), `PROPS_LIST` = 17, `FOREST_LISTS` = 18, `FrameInput.props` (CPU пишет экземпляры и счётчик до ядра), `PlantOut.kind`; материал 7 — гриб (цвет по виду, свечение мицена) |
+| Приложение | `App.game`, `App.font`; F — осмотр, J — журнал; `FrameInput.ui`, `FrameInput.props` |
 
 ### 4.10. Сборка `.app`
 
@@ -1347,3 +1359,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 02.4 | после `c0bcf50` | Столкновения со стволами и валунами: `ForestGpu.obstacles`, `Renderer::forest_obstacles`, `Sim.obstacles`, `sim::push_out`, `PLAYER_RADIUS_M`; тест `trunk_blocks_walking` |
 | 2026-11-15 | 02.4 | после `41b010c` | Лес по сообществам: `VegetationLayer`, `layers/vegetation.rs`, параметры леса в `vegetation.json` (`tools/geo/vegetation.py`, `FOREST`), `cover_worldcover.png` как вход (идемпотентный пересчёт), `ForestGpu.vegetation`/`vegetation_table`, `buffer(11)`/`texture(1)` ядра `forest_place` |
 | 2026-11-15 | 02.4, 02.8 | после `4074b2d` | Подлесок: папоротник и якудзаса (`build_plants.py`: `fern`, `sasa`, `draw_frond`, `draw_sasa`, атлас 1024²), `SPECIES` 5, `FOREST_LISTS` 17, `CAMERA_LISTS`, подклетки 3 м в `forest_place`, `macro_detail` в таблице `forest`, ветер по высоте точки |
+| 2026-11-15 | 05.1 | после `9b76504` | Интерфейс (`ui`, `UiVertex`, проход `ui`, `Blend::Alpha`, таблица `ui` — 19 таблиц, раскладка 52 поля), игровой модуль `game` (грибы, фокус, осмотр, журнал), гриб — вид 5 и список 17 леса, `FrameInput.props`/`ui` |

@@ -5,9 +5,12 @@ use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx, RenderEncoder, size2};
 use crate::layout::PlantInstance;
-use crate::renderer::forest::{ARGS_OFFSET, CAMERA_LISTS, FOREST_CAP, FOREST_GRID, FOREST_LISTS};
+use crate::renderer::forest::{
+    ARGS_OFFSET, CAMERA_LISTS, FOREST_CAP, FOREST_GRID, FOREST_LISTS, PROPS_LIST,
+};
 use crate::renderer::frame::{CULL_OFFSET, SHADOW_OFFSET, Table};
 use crate::renderer::resources::label;
+use crate::renderer::resources::upload_bytes;
 
 pub(in crate::renderer) struct ForestPass;
 
@@ -34,6 +37,19 @@ impl FramePass for ForestPass {
             ctx.r.terrain.as_ref().expect("ландшафт"),
         );
         let s = ctx.slot_index;
+        // Грибы с CPU (05.1): экземпляры и их число — до запуска ядра (слот свободен).
+        let n = ctx.input.props.len().min(FOREST_CAP);
+        let isz = std::mem::size_of::<PlantInstance>();
+        upload_bytes(
+            &f.instances[s],
+            PROPS_LIST * FOREST_CAP * isz,
+            bytemuck::cast_slice(&ctx.input.props[..n]),
+        );
+        upload_bytes(
+            &f.counters[s],
+            PROPS_LIST * 4,
+            bytemuck::bytes_of(&(n as u32)),
+        );
         let enc = ctx
             .slot
             .cmd
@@ -120,7 +136,7 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
     enc.pushDebugGroup(&label("forest: plants (indirect)"));
     enc.setRenderPipelineState(&ctx.r.pipelines.plant);
     enc.setCullMode(MTLCullMode::None);
-    for list in 0..CAMERA_LISTS {
+    for list in (0..CAMERA_LISTS).chain([PROPS_LIST]) {
         draw_list(ctx, enc, table, list);
     }
     enc.popDebugGroup();
@@ -140,7 +156,7 @@ pub(in crate::renderer) fn draw_shadow(ctx: &PassCtx, enc: &RenderEncoder, k: us
         table.setTexture_atIndex(f.albedo.gpuResourceID(), 0);
     }
     enc.setRenderPipelineState(&ctx.r.pipelines.plant_shadow);
-    for list in CAMERA_LISTS..FOREST_LISTS {
+    for list in CAMERA_LISTS..PROPS_LIST {
         draw_list(ctx, enc, table, list);
     }
 }

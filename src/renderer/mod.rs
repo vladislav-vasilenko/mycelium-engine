@@ -27,6 +27,7 @@ mod sky;
 mod targets;
 mod terrain;
 mod terrain_clusters;
+mod ui;
 mod water;
 
 use std::any::Any;
@@ -111,6 +112,8 @@ pub struct Renderer {
     /// Лес (02.4) и его числа последнего завершённого кадра.
     forest: Option<forest::ForestGpu>,
     forest_stats: Option<ForestStats>,
+    /// Интерфейс (05.1): шрифт и буферы вершин.
+    ui: Option<ui::UiGpu>,
     pub stats: Stats,
 }
 
@@ -248,6 +251,7 @@ impl Renderer {
             cull_stats: None,
             forest: None,
             forest_stats: None,
+            ui: None,
             stats: Stats::default(),
         })
     }

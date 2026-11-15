@@ -218,6 +218,16 @@ pub struct ShadowUniforms {
     pub params: [f32; 4],
 }
 
+/// Вершина интерфейса (05.1), 20 байт: пиксели окна, uv атласа шрифта
+/// (u < 0 — сплошной цвет), цвет sRGB с непрозрачностью.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct UiVertex {
+    pub pos: [f32; 2],
+    pub uv: [f32; 2],
+    pub color: [u8; 4],
+}
+
 /// Вершина растения (02.8), 36 байт: `PlantVertex` в `forest.metal`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
@@ -365,10 +375,11 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<CullCluster>() as u32,
         size_of::<PlantVertex>() as u32,
         size_of::<PlantInstance>() as u32,
+        size_of::<UiVertex>() as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 51;
+pub const LAYOUT_PROBE_LEN: usize = 52;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -422,6 +433,7 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(CullCluster)",
     "sizeof(PlantVertex)",
     "sizeof(PlantInstance)",
+    "sizeof(UiVertex)",
 ];
 
 #[cfg(test)]
@@ -436,7 +448,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32, 36, 32
+                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32, 36, 32, 20
             ]
         );
     }

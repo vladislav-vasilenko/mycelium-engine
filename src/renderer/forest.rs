@@ -1,5 +1,6 @@
 //! Лес на GPU (02.4): сетки и текстуры растений, списки экземпляров и
-//! indirect-аргументы слотов. Списки: вид × LOD (0–14) и тени деревьев (15–16),
+//! indirect-аргументы слотов. Списки: вид × LOD (0–14), тени деревьев (15–16)
+//! и грибы с CPU (17),
 //! по `FOREST_CAP` экземпляров; раскладка совпадает с `forest.metal`.
 
 use objc2_metal::*;
@@ -10,7 +11,9 @@ use super::shaders::Obj;
 use crate::layout::PlantInstance;
 use crate::plants::PlantAssets;
 
-pub const FOREST_LISTS: usize = 17;
+pub const FOREST_LISTS: usize = 18;
+/// Список грибов и предметов, расставленных на CPU (05.1): вид 5, LOD 0.
+pub const PROPS_LIST: usize = 17;
 /// Списки, которые рисует камера (вид × LOD); дальше — тени деревьев.
 pub const CAMERA_LISTS: usize = 15;
 pub const FOREST_CAP: usize = 16384;
@@ -58,7 +61,7 @@ impl ForestGpu {
                 .iter()
                 .map(|&n| n.min(FOREST_CAP as u32))
                 .sum(),
-            shadow: words[CAMERA_LISTS..FOREST_LISTS]
+            shadow: words[CAMERA_LISTS..PROPS_LIST]
                 .iter()
                 .map(|&n| n.min(FOREST_CAP as u32))
                 .sum(),

@@ -167,6 +167,13 @@ struct TerrainCluster {
 };
 
 // Входы неба от CPU (src/layout.rs, SkyInputs), 176 байт.
+// Интерфейс (05.1): src/layout.rs, UiVertex.
+struct UiVertex {
+    packed_float2 pos;
+    packed_float2 uv;
+    uchar4 color;
+};
+
 // Растения (02.8, 02.4): src/layout.rs, PlantVertex / PlantInstance.
 struct PlantVertex {
     packed_float3 position;

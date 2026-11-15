@@ -12,7 +12,14 @@ use zune_jpeg::zune_core::options::DecoderOptions;
 use crate::layout::PlantVertex;
 
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
-pub const SPECIES: [&str; 5] = ["yakusugi", "broadleaf", "boulder", "fern", "sasa"];
+pub const SPECIES: [&str; 6] = [
+    "yakusugi",
+    "broadleaf",
+    "boulder",
+    "fern",
+    "sasa",
+    "mushroom",
+];
 pub const LODS: usize = 3;
 /// Сторона слоя массива текстур растений.
 pub const TEXTURE_SIZE: usize = 1024;
@@ -179,6 +186,6 @@ mod tests {
         }
         let max = a.vertices.len() as u32;
         assert!(a.indices.iter().all(|&i| i < max));
-        assert!(a.vertices.iter().all(|v| v.attr[0] <= 6));
+        assert!(a.vertices.iter().all(|v| v.attr[0] <= 7));
     }
 }

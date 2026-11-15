@@ -10,7 +10,7 @@
 
 constant float FOREST_CELL_M = 6.0;
 constant int FOREST_GRID = 160;               // клеток по стороне: радиус ~480 м
-constant uint FOREST_LISTS = 17;              // 5 видов × 3 LOD + тени двух деревьев
+constant uint FOREST_LISTS = 18;              // 5 видов × 3 LOD + тени двух деревьев + грибы с CPU
 constant uint CAMERA_LISTS = 15;
 constant uint COUNTS_WORDS = 32;               // счётчики, затем indirect-аргументы
 constant uint FOREST_CAP = 16384;             // экземпляров в списке
@@ -254,8 +254,8 @@ kernel void forest_finish(device uint* counts [[buffer(9)]],
     if (i >= FOREST_LISTS) {
         return;
     }
-    uint species = i < CAMERA_LISTS ? i / 3 : i - CAMERA_LISTS;
-    uint lod = i < CAMERA_LISTS ? i % 3 : 1;
+    uint species = i < CAMERA_LISTS ? i / 3 : (i == 17 ? 5u : i - CAMERA_LISTS);
+    uint lod = i < CAMERA_LISTS ? i % 3 : (i == 17 ? 0u : 1u);
     uint4 r = lods[species * 3 + lod];
     device uint* a = counts + COUNTS_WORDS + i * 5;
     a[0] = r.y;
@@ -275,6 +275,7 @@ struct PlantOut {
     float2 uv;
     float3 attr;      // материал, ветер, затенение
     float tint;
+    float kind;       // вид гриба (05.1)
 };
 
 // Мир точки сетки растения: поворот, масштаб, ветер (по силе из атрибута).
@@ -311,6 +312,7 @@ vertex PlantOut plant_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.uv = float2(v.uv);
     o.attr = float3(float(v.attr.x), float(v.attr.y) / 255.0, float(v.attr.z) / 255.0);
     o.tint = inst.tint;
+    o.kind = inst._pad;
     return o;
 }
 
@@ -339,8 +341,20 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float3 n = normalize(in.normal);
     float3 albedo;
     // 2 хвоя, 3 листья, 5 папоротник, 6 якудзаса — листва; 4 — камень.
-    bool leaf = (mat > 1.5 && mat < 3.5) || mat > 4.5;
-    if (mat > 3.5 && mat < 4.5) {
+    bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
+    float3 glow = 0.0;
+    if (mat > 6.5) {
+        // Гриб (05.1): цвет шляпки и ножки по виду; светящийся мицен — свечение
+        // шляпки и пластинок (видно только ночью: экспозиция дня его гасит).
+        const float3 caps[5] = {float3(0.62, 0.66, 0.50), float3(0.30, 0.20, 0.12),
+                                float3(0.42, 0.24, 0.14), float3(0.35, 0.10, 0.05),
+                                float3(0.45, 0.36, 0.22)};
+        uint k = min(uint(in.kind + 0.5), 4u);
+        albedo = in.uv.y > 0.5 ? caps[k] : float3(0.75, 0.72, 0.62);
+        if (k == 0) {
+            glow = float3(0.35, 1.0, 0.45) * 3e-6 * (in.uv.y > 0.5 ? 1.0 : 0.4);
+        }
+    } else if (mat > 3.5 && mat < 4.5) {
         // Валун: камень сбоку, мшистый камень сверху (слои рельефа 0 и 9).
         constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
         float3 lp = in.rel + frame.cam_lo.xyz;
@@ -378,7 +392,7 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float3 sun = sky_sun_term(skyf) * shadow;
     float ao = in.attr.z;
     float3 sky = sky_ambient_term(skyf, n) * ao;
-    float3 color = albedo * (sun * nl + sky);
+    float3 color = albedo * (sun * nl + sky) + glow;
     if (leaf) {
         // Просвет листвы против солнца.
         float back = pow(saturate(dot(-V, L)), 3.0);
@@ -415,7 +429,7 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
 fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
                               texture2d_array<float> albedo_tex [[texture(0)]]) {
     float mat = round(in.mat);
-    if (((mat > 1.5 && mat < 3.5) || mat > 4.5) && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
+    if (((mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5)) && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
         discard_fragment();
     }
 }

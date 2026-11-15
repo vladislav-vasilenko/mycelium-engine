@@ -25,6 +25,8 @@ enum Blend {
     Transmit,
     /// Звёзды: `dst + цвет`.
     Additive,
+    /// Интерфейс: предумноженная альфа, `цвет + dst × (1 − α)`.
+    Alpha,
 }
 
 pub struct Pipelines {
@@ -32,6 +34,8 @@ pub struct Pipelines {
     pub layout_probe: Obj<dyn MTLComputePipelineState>,
     pub scene: Obj<dyn MTLRenderPipelineState>,
     pub tonemap: Obj<dyn MTLRenderPipelineState>,
+    /// Интерфейс поверх кадра (05.1).
+    pub ui: Obj<dyn MTLRenderPipelineState>,
     pub terrain: Obj<dyn MTLRenderPipelineState>,
     /// Кластерный рельеф (02.3): тот же фрагментный шейдер, вершины из поля высот.
     pub terrain_clusters: Obj<dyn MTLRenderPipelineState>,
@@ -265,6 +269,15 @@ fn render_pipeline(
         color.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
         color.setAlphaBlendOperation(MTLBlendOperation::Add);
     }
+    if blend == Blend::Alpha {
+        color.setBlendingState(MTL4BlendState::Enabled);
+        color.setSourceRGBBlendFactor(MTLBlendFactor::One);
+        color.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+        color.setRgbBlendOperation(MTLBlendOperation::Add);
+        color.setSourceAlphaBlendFactor(MTLBlendFactor::One);
+        color.setDestinationAlphaBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+        color.setAlphaBlendOperation(MTLBlendOperation::Add);
+    }
     if blend == Blend::Transmit {
         // Прозрачная вода: результат = цвет (index 0) + dst × пропускание (index 1).
         color.setBlendingState(MTL4BlendState::Enabled);
@@ -302,6 +315,7 @@ pub fn build_pipelines(
     let sky_lib = compile_library(device, dir, "sky.metal", over)?;
     let cull_lib = compile_library(device, dir, "cull.metal", over)?;
     let forest_lib = compile_library(device, dir, "forest.metal", over)?;
+    let ui_lib = compile_library(device, dir, "ui.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -405,6 +419,15 @@ pub fn build_pipelines(
             "plant shadow",
             "plant_shadow_vs",
             Some("plant_shadow_fs"),
+        )?,
+        ui: render_pipeline(
+            compiler,
+            &ui_lib,
+            "ui.metal",
+            "ui overlay",
+            ("ui_vs", "ui_fs"),
+            DRAWABLE_FORMAT,
+            Blend::Alpha,
         )?,
         forest_place: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_place")?,
         forest_finish: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_finish")?,

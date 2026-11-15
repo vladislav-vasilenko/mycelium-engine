@@ -107,6 +107,11 @@ impl App {
                 )
             }),
         })?;
+        // Шрифт интерфейса (05.1).
+        match crate::ui::Font::load(&crate::ui::assets_dir()) {
+            Ok(f) => r.set_ui_font(&f.pixels, f.atlas_size)?,
+            Err(e) => eprintln!("шрифт интерфейса не загружен: {e}"),
+        }
         // Лес (02.4) — у мира с поясами растительности (Якусима).
         if self.world.cover.is_some() {
             let t = std::time::Instant::now();

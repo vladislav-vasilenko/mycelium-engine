@@ -94,6 +94,26 @@ impl App {
             return;
         };
         let hands = self.hands_frame(&camera, w as f32 / h as f32);
+        // Срез Сиратани (05.1): гриб под взглядом, сообщения, интерфейс.
+        let game_on = !selftest && self.scene == SceneMode::Terrain;
+        self.game.tick(self.frame_dt);
+        if game_on {
+            self.game.update_focus(camera.position, camera.forward());
+        }
+        let props = if game_on {
+            self.game.instances(camera.position)
+        } else {
+            Vec::new()
+        };
+        let ui_verts = match (&self.font, game_on) {
+            (Some(font), true) => {
+                let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
+                let mut b = crate::ui::UiBuilder::new(font, scale);
+                self.game.ui(&mut b, w as f32 / scale, h as f32 / scale);
+                b.verts
+            }
+            _ => Vec::new(),
+        };
         let proj = sim::projection(w as f32 / h as f32);
         let view = camera.view();
         let cam_hi = (camera.position / 256.0).floor() * 256.0;
@@ -256,6 +276,8 @@ impl App {
             shadow_clusters: &self.shadow_clusters,
             cull,
             forest,
+            props: &props,
+            ui: &ui_verts,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {

@@ -84,6 +84,10 @@ pub struct FrameInput<'a> {
     pub cull: Option<super::cull::CullFrame>,
     /// Рисовать лес (02.4); нужны растения, кластеры и выбор на GPU.
     pub forest: bool,
+    /// Грибы и предметы с CPU (05.1): экземпляры вида «гриб», `_pad` — номер вида гриба.
+    pub props: &'a [crate::layout::PlantInstance],
+    /// Интерфейс кадра (05.1): треугольники в пикселях окна.
+    pub ui: &'a [crate::layout::UiVertex],
 }
 
 /// Вода в кадре (03.1).
@@ -122,9 +126,10 @@ pub(super) enum Table {
     Forest,
     Plant,
     PlantShadow,
+    Ui,
 }
 
-const TABLE_NAMES: [&str; 18] = [
+const TABLE_NAMES: [&str; 19] = [
     "pattern",
     "scene",
     "readback",
@@ -143,6 +148,7 @@ const TABLE_NAMES: [&str; 18] = [
     "forest",
     "plant",
     "plant shadow",
+    "ui",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -150,7 +156,7 @@ const TABLE_NAMES: [&str; 18] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 18],
+    tables: [Obj<dyn MTL4ArgumentTable>; 19],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -192,7 +198,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("18 таблиц")),
+                .unwrap_or_else(|_| unreachable!("19 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -290,6 +296,12 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             (RES_HDR, Stages::FRAGMENT),
             (RES_EXPOSURE, Stages::FRAGMENT),
         ],
+        writes: vec![(RES_DRAWABLE, Stages::FRAGMENT)],
+    });
+    passes.push(PassDecl {
+        name: "ui",
+        kind: PassKind::Render,
+        reads: vec![],
         writes: vec![(RES_DRAWABLE, Stages::FRAGMENT)],
     });
     passes

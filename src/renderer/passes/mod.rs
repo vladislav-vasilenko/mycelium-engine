@@ -14,6 +14,7 @@ mod scene;
 mod shadows;
 mod sky_lut;
 mod tonemap;
+mod ui;
 mod viewmodel;
 mod wet_sand;
 
@@ -78,7 +79,7 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 11] = [
+static REGISTRY: [&dyn FramePass; 12] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
@@ -90,6 +91,7 @@ static REGISTRY: [&dyn FramePass; 11] = [
     &viewmodel::ViewmodelPass,
     &exposure::ExposurePass,
     &tonemap::TonemapPass,
+    &ui::UiPass,
 ];
 
 /// Проход по имени из плана.

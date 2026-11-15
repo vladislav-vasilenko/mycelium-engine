@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 OUT = Path(__file__).resolve().parents[2] / "assets/models/plants"
-BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA = 0, 1, 2, 3, 4, 5, 6
+BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA, MUSHROOM = 0, 1, 2, 3, 4, 5, 6, 7
 
 
 class Mesh:
@@ -296,6 +296,38 @@ def sasa(lod, seed=0x5A5A):
     return m
 
 
+def mushroom(lod):
+    """Гриб 10 см: ножка и шляпка; uv.y = 0 — ножка, 1 — шляпка (цвет — в шейдере по виду)."""
+    m = Mesh()
+    sides = [12, 8, 5][lod]
+    stem = [np.array([0, y, 0]) for y in np.linspace(-0.01, 0.065, 4)]
+    tube(m, stem, [0.011, 0.01, 0.009, 0.008], sides, MUSHROOM, lambda q: 0.0, 0.8)
+    for i in range(len(m.uv)):
+        m.uv[i] = (0.0, 0.0)
+    first = len(m.p)
+    rings = [5, 3, 2][lod]
+    for r in range(rings + 1):
+        a = (math.pi / 2) * r / rings
+        for s in range(sides + 1):
+            th = 2 * math.pi * s / sides
+            n = np.array([math.cos(th) * math.sin(a), math.cos(a), math.sin(th) * math.sin(a)])
+            p = np.array([n[0] * 0.04, 0.06 + n[1] * 0.022, n[2] * 0.04])
+            m.vert(p, n, (0.0, 1.0), MUSHROOM, 0.0, 1.0)
+    for r in range(rings):
+        for s in range(sides):
+            a0 = first + r * (sides + 1) + s
+            b0 = a0 + sides + 1
+            m.tri(a0, a0 + 1, b0)
+            m.tri(a0 + 1, b0 + 1, b0)
+    # Пластинки снизу: диск чуть ниже края шляпки.
+    c = m.vert(np.array([0, 0.058, 0]), np.array([0, -1.0, 0]), (0.5, 1.0), MUSHROOM, 0.0, 0.5)
+    ring = [m.vert(np.array([math.cos(2 * math.pi * s / sides) * 0.039, 0.06, math.sin(2 * math.pi * s / sides) * 0.039]),
+                   np.array([0, -1.0, 0]), (0.5, 1.0), MUSHROOM, 0.0, 0.5) for s in range(sides + 1)]
+    for s in range(sides):
+        m.tri(c, ring[s + 1], ring[s])
+    return m
+
+
 # --- Валун -------------------------------------------------------------------
 
 def icosphere(sub):
@@ -536,7 +568,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     build_atlas().save(OUT / "foliage.png", optimize=True)
     for name, fn in (("yakusugi", yakusugi), ("broadleaf", broadleaf), ("boulder", boulder),
-                     ("fern", fern), ("sasa", sasa)):
+                     ("fern", fern), ("sasa", sasa), ("mushroom", mushroom)):
         lods = [fn(l) for l in range(3)]
         write_glb(OUT / f"{name}.glb", lods)
         print(f"{name}: треугольников по LOD {[m.tris() for m in lods]}")

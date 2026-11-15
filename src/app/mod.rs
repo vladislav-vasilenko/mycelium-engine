@@ -73,6 +73,9 @@ pub struct App {
     hands: Option<crate::hands::Hands>,
     /// Руки видны (клавиша H).
     hands_visible: bool,
+    /// Игровой срез (05.1): грибы, осмотр, журнал; шрифт интерфейса.
+    game: crate::game::Game,
+    font: Option<crate::ui::Font>,
     /// Кластерный рельеф (02.3): иерархия, срез кадра, режим (клавиша L).
     clusters: Option<crate::terrain_clusters::ClusterSet>,
     visible_clusters: Vec<u32>,
@@ -121,6 +124,7 @@ impl App {
             started.elapsed().as_secs_f64() * 1000.0,
             world.checksum()
         );
+        let game = crate::game::Game::new(&world);
         let mut sim = Sim::new(if let Some((from, to)) = args.camera {
             look_camera(from, to)
         } else if args.overview {
@@ -157,6 +161,8 @@ impl App {
             shore: None,
             hands: None,
             hands_visible: true,
+            game,
+            font: None,
             clusters: None,
             visible_clusters: Vec::new(),
             shadow_clusters: Vec::new(),

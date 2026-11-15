@@ -53,8 +53,10 @@ impl FlowGrid {
         }
         let n = info.width as usize;
         let log2 = buf[..info.buffer_size()]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
             .collect();
         Ok(FlowGrid {
             n,
@@ -225,14 +227,14 @@ impl Hydrology {
         }
     }
 
-    /// Расширение полосы реки на каждом отрезке от подъёма воды, м.
-    pub fn spread(&self, segment_count: usize) -> Vec<f32> {
-        let mut out = vec![0.0; segment_count];
+    /// На каждый отрезок: (расширение полосы от подъёма воды, глубина), м.
+    pub fn spread(&self, segment_count: usize) -> Vec<[f32; 2]> {
+        let mut out = vec![[0.0; 2]; segment_count];
         for r in &self.reaches {
             let s = ((r.depth - r.base_depth) * BANK_SPREAD).clamp(0.0, MAX_SPREAD_M);
             for i in r.segs.clone() {
                 if i < out.len() {
-                    out[i] = s;
+                    out[i] = [s, r.depth];
                 }
             }
         }

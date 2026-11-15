@@ -948,7 +948,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float3 Hw = normalize(L + V);
         float glint = pow(saturate(dot(Nw, Hw)), 400.0) * 3.0;
         float3 water = mix(bed * float3(0.7, 0.9, 0.9), sky_refl, fres) + sun * glint;
-        color = mix(color, water, stream * 0.9);
+        // Воду рисует поверхность рек (03.2, `river.metal`); здесь — мокрое
+        // каменистое дно под ней.
+        color = mix(color, bed * float3(0.85, 0.95, 0.9), stream * 0.6);
     }
     // Лужи (04.3): отражение неба по Френелю (нормаль — с кругами от капель),
     // под пологом — тусклее.

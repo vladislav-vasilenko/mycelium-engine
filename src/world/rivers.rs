@@ -77,7 +77,9 @@ pub fn snap_to_valleys(
         }
         let n = orig.len();
         let mut pts = orig.clone();
-        for k in 0..n {
+        // Концы — на месте: на них стыкуются куски одной реки и притоки
+        // (сдвиг концов давал разрывы ленты воды на стыках).
+        for k in 1..n.saturating_sub(1) {
             let t = (orig[(k + 1).min(n - 1)] - orig[k.saturating_sub(1)]).normalize_or_zero();
             if t == Vec2::ZERO {
                 continue;
@@ -126,6 +128,82 @@ pub fn snap_to_valleys(
     if count > 0 { total / count as f32 } else { 0.0 }
 }
 
+/// Глубина ложа под профилем дна, м; откос берега (подъём на метр в сторону).
+const BED_DEPTH_M: f32 = 0.35;
+const BANK_SLOPE: f32 = 0.6;
+/// Ширина откоса за полосой реки, м.
+const BANK_M: f32 = 4.0;
+
+/// Врезка ложа рек (03.2): вдоль каждой реки профиль дна по рельефу делается
+/// невозрастающим вниз по течению (горбы срезаются — лента воды не уходит под
+/// рельеф), и узлы поля у русла опускаются до «профиль − глубина ложа» с
+/// откосом к берегу. Только опускание: высокие места не засыпаются.
+/// `origin` — мировые XZ узла (0, 0) поля. Возвращает число изменённых узлов.
+pub fn carve_beds(
+    hf: &mut super::heightfield::HeightField,
+    origin: Vec2,
+    set: &FeatureSet,
+) -> usize {
+    let src = hf.clone();
+    let step = hf.step_m;
+    let size = Vec2::new((hf.nx - 1) as f32, (hf.nz - 1) as f32) * step;
+    let h_at = |p: Vec2| src.sample(p.x - origin.x, p.y - origin.y).map(|(h, _)| h);
+    let mut changed = 0;
+    for r in river_lines(set) {
+        let segs = &set.segments[r.clone()];
+        let mut pts: Vec<Vec2> = segs.iter().map(|s| Vec2::from(s.a)).collect();
+        pts.push(Vec2::from(segs[segs.len() - 1].b));
+        let Some(mut prof): Option<Vec<f32>> = pts.iter().map(|p| h_at(*p)).collect() else {
+            continue;
+        };
+        // Вниз по течению — к низкому концу; профиль не растёт по ходу воды.
+        let down = prof[0] >= prof[prof.len() - 1];
+        if down {
+            for k in 1..prof.len() {
+                prof[k] = prof[k].min(prof[k - 1]);
+            }
+        } else {
+            for k in (0..prof.len() - 1).rev() {
+                prof[k] = prof[k].min(prof[k + 1]);
+            }
+        }
+        for (k, s) in segs.iter().enumerate() {
+            let a = Vec2::from(s.a) - origin;
+            let b = Vec2::from(s.b) - origin;
+            let reach = s.half_width + BANK_M;
+            let lo = a.min(b) - Vec2::splat(reach);
+            let hi = a.max(b) + Vec2::splat(reach);
+            if hi.x < 0.0 || hi.y < 0.0 || lo.x > size.x || lo.y > size.y {
+                continue;
+            }
+            let i0 = (lo.x / step).floor().max(0.0) as usize;
+            let j0 = (lo.y / step).floor().max(0.0) as usize;
+            let i1 = ((hi.x / step).ceil() as usize).min(hf.nx - 1);
+            let j1 = ((hi.y / step).ceil() as usize).min(hf.nz - 1);
+            let ab = b - a;
+            let len2 = ab.length_squared().max(1e-6);
+            for j in j0..=j1 {
+                for i in i0..=i1 {
+                    let p = Vec2::new(i as f32, j as f32) * step;
+                    let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
+                    let d = p.distance(a + ab * t);
+                    if d >= reach {
+                        continue;
+                    }
+                    let bed = prof[k] + (prof[k + 1] - prof[k]) * t - BED_DEPTH_M;
+                    let allowed = bed + (d - s.half_width).max(0.0) * BANK_SLOPE;
+                    let n = j * hf.nx + i;
+                    if hf.heights[n] > allowed {
+                        hf.heights[n] = allowed;
+                        changed += 1;
+                    }
+                }
+            }
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +216,9 @@ mod tests {
         let mut set = FeatureSet::from_json(json, 256.0).unwrap();
         let shift = snap_to_valleys(&mut set, 256.0, |p| Some((p.x - 120.0).abs() * 0.5));
         assert!(shift > 4.0, "сдвиг {shift}");
-        for s in &set.segments {
+        // Внутренние точки — на дне (концы стыков остаются на месте).
+        let n = set.segments.len();
+        for s in &set.segments[3..n - 3] {
             assert!((s.a[0] - 120.0).abs() < 2.0, "точка {:?} не на дне", s.a);
         }
         // Ячейки пересобраны: река найдена у дна.
@@ -156,5 +236,28 @@ mod tests {
         for s in set.segments.iter().filter(|s| s.kind == KIND_RIVER) {
             assert!((s.a[0] - 120.0).abs() > 3.0, "ручей на тропе: {:?}", s.a);
         }
+    }
+
+    #[test]
+    fn bed_cuts_through_hump() {
+        use crate::world::heightfield::HeightField;
+        // Долина вниз по x с горбом 3 м посередине; река вдоль x.
+        let n = 64;
+        let mut h = vec![0.0; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                let x = i as f32;
+                h[j * n + i] = 50.0 - x * 0.3 + if (28..36).contains(&i) { 3.0 } else { 0.0 };
+            }
+        }
+        let mut hf = HeightField::new(n, n, 1.0, h);
+        let json = r#"{"rivers": [{"kind": "stream", "width_m": 2.0,
+            "line": [[2, 32], [20, 32], [40, 32], [60, 32]]}], "trails": [], "roads": []}"#;
+        let set = FeatureSet::from_json(json, 64.0).unwrap();
+        assert!(carve_beds(&mut hf, Vec2::ZERO, &set) > 0);
+        // На горбе дно не выше, чем до него.
+        let before = hf.at(25, 32);
+        let hump = hf.at(32, 32);
+        assert!(hump <= before, "горб срезан: {hump} > {before}");
     }
 }

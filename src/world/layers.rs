@@ -552,7 +552,14 @@ pub fn import(dir: &Path) -> Result<World, String> {
                 .or_else(|| far.sample(p.x, p.y))
                 .map(|(h, _)| h)
         });
-        eprintln!("реки: сдвиг к тальвегу в среднем {shift:.1} м");
+        // Ложе: профиль не растёт вниз по течению, горбы срезаются.
+        let mut cut = super::rivers::carve_beds(&mut world.heightfield, glam::Vec2::ZERO, &f);
+        if let Some(z) = &mut world.zone {
+            let o = z.origin(&world.heightfield);
+            cut += super::rivers::carve_beds(&mut z.grid, o, &f);
+            z.sync_far(&mut world.heightfield);
+        }
+        eprintln!("реки: сдвиг к тальвегу в среднем {shift:.1} м, ложе — {cut} узлов");
         world.features = Some(f);
     }
     // Тропы и дороги — полкой в рельефе (поле острова и зона 1 м).

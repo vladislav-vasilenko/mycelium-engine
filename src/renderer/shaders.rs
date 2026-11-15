@@ -73,6 +73,8 @@ pub struct Pipelines {
     pub rain: Obj<dyn MTLRenderPipelineState>,
     /// Брызги от ударов капель (04.3, сессия 3).
     pub rain_splash: Obj<dyn MTLRenderPipelineState>,
+    /// Поверхность рек (03.2, сессия 3).
+    pub river: Obj<dyn MTLRenderPipelineState>,
     /// Bloom (04.5): цепочки вниз и вверх.
     pub bloom_down: Obj<dyn MTLComputePipelineState>,
     pub bloom_up: Obj<dyn MTLComputePipelineState>,
@@ -404,6 +406,7 @@ pub fn build_pipelines(
     let forest_lib = compile_library(device, dir, "forest.metal", over)?;
     let taa_lib = compile_library(device, dir, "taa.metal", over)?;
     let rain_lib = compile_library(device, dir, "rain.metal", over)?;
+    let river_lib = compile_library(device, dir, "river.metal", over)?;
     let bloom_lib = compile_library(device, dir, "bloom.metal", over)?;
     let rt_lib = compile_library(device, dir, "rt.metal", over)?;
     let vol_lib = compile_library(device, dir, "volumetric.metal", over)?;
@@ -509,6 +512,16 @@ pub fn build_pipelines(
             "rain.metal",
             "rain",
             ("rain_vs", "rain_fs"),
+            HDR_FORMAT,
+            Blend::Alpha,
+            Motion::Masked,
+        )?,
+        river: render_pipeline(
+            compiler,
+            &river_lib,
+            "river.metal",
+            "river",
+            ("river_vs", "river_fs"),
             HDR_FORMAT,
             Blend::Alpha,
             Motion::Masked,

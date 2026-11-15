@@ -46,6 +46,7 @@ impl FramePass for ScenePass {
         draw_cubes(ctx, &enc);
         draw_sky(ctx, &enc);
         if ctx.input.draw_terrain {
+            draw_river(ctx, &enc);
             draw_rain(ctx, &enc);
         }
         enc.endEncoding();
@@ -106,6 +107,41 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
         .expect("render encoder");
     enc.setLabel(Some(&label("scene raster")));
     enc
+}
+
+/// Поверхность рек (03.2, сессия 3): лента над каждым отрезком реки,
+/// полупрозрачно, без записи глубины; экземпляр — отрезок объектов карты.
+fn draw_river(ctx: &PassCtx, enc: &RenderEncoder) {
+    let (Some(t), Some(c)) = (ctx.r.terrain.as_ref(), ctx.r.clusters.as_ref()) else {
+        return;
+    };
+    let n = t.feat_segments.length() / std::mem::size_of::<crate::layout::FeatureSegment>();
+    let table = ctx.slot.table(Table::River);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(t.feat_segments.gpuAddress(), 2);
+        table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 3);
+        table.setAddress_atIndex(c.heights.gpuAddress(), 6);
+        table.setAddress_atIndex(c.zone_heights.gpuAddress(), 7);
+        table.setAddress_atIndex(c.zone_info.gpuAddress(), 8);
+        table.setTexture_atIndex(t.detail.gpuResourceID(), 0);
+        table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 1);
+    }
+    enc.pushDebugGroup(&label("rivers"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.river);
+    enc.setDepthStencilState(Some(&ctx.r.water_depth_state));
+    enc.setCullMode(MTLCullMode::None);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            6,
+            n,
+        );
+    }
+    enc.setDepthStencilState(Some(&ctx.r.depth_state));
+    enc.popDebugGroup();
 }
 
 /// Капель дождя (экземпляров); при слабом дожде лишние схлопываются в шейдере.

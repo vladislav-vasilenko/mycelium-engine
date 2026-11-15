@@ -288,9 +288,9 @@ impl Renderer {
         self.targets.as_ref().map(|t| (t.width, t.height))
     }
 
-    /// Разлив рек (03.2): расширение полосы каждого отрезка объектов карты, м —
-    /// в `FeatureSegment._pad[0]` (у не-рек — 0). Буфер общий с CPU.
-    pub fn set_river_spread(&self, spread: &[f32]) {
+    /// Реки (03.2): на каждый отрезок объектов карты — разлив и глубина, м
+    /// (`FeatureSegment._pad`, у не-рек — 0). Буфер общий с CPU.
+    pub fn set_river_spread(&self, spread: &[[f32; 2]]) {
         let Some(t) = &self.terrain else { return };
         let stride = std::mem::size_of::<crate::layout::FeatureSegment>();
         let n = (t.feat_segments.length() / stride).min(spread.len());

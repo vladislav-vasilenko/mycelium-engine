@@ -38,9 +38,10 @@ pub(super) fn new_scaler(
     }
 }
 
-/// Записывает апскейл кадра. Дрожание — в пикселях рендера: сдвиг сэмпла
-/// относительно центра пикселя, обратный сдвигу картинки проекцией
-/// (`TaaUniforms.jitter.xy` — сдвиг в NDC, y вверх).
+/// Записывает апскейл кадра. Дрожание — в пикселях рендера, как в FSR: сдвиг
+/// картинки проекцией (x вправо, y вниз; `TaaUniforms.jitter.xy` — сдвиг в
+/// NDC, y вверх). С обратным знаком (сдвиг сэмпла) текстура вблизи
+/// подрагивала: кадры совмещались со сдвигом на доли пикселя.
 pub(super) fn encode(
     scaler: &ProtocolObject<dyn MTL4FXTemporalScaler>,
     cmd: &ProtocolObject<dyn MTL4CommandBuffer>,
@@ -54,8 +55,8 @@ pub(super) fn encode(
         scaler.setOutputTexture(Some(&t.hdr));
         scaler.setInputContentWidth(t.rw as usize);
         scaler.setInputContentHeight(t.rh as usize);
-        scaler.setJitterOffsetX(-taa.jitter[0] * t.rw as f32 * 0.5);
-        scaler.setJitterOffsetY(taa.jitter[1] * t.rh as f32 * 0.5);
+        scaler.setJitterOffsetX(taa.jitter[0] * t.rw as f32 * 0.5);
+        scaler.setJitterOffsetY(-taa.jitter[1] * t.rh as f32 * 0.5);
         // Векторы движения в uv → пиксели рендера.
         scaler.setMotionVectorScaleX(t.rw as f32);
         scaler.setMotionVectorScaleY(t.rh as f32);

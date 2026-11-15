@@ -296,7 +296,8 @@ impl Renderer {
         if width == 0 || height == 0 {
             // Свёрнутое окно: цели оставляем, вывод пропускается.
             if let Some(t) = self.targets.take() {
-                self.retire(vec![t.hdr, t.depth], None);
+                let [h0, h1] = t.history;
+                self.retire(vec![t.hdr, t.depth, h0, h1], None);
             }
             return;
         }
@@ -308,9 +309,13 @@ impl Renderer {
         let fresh = Targets::new(&self.device, width, height);
         self.residency.addAllocation(as_allocation(&*fresh.hdr));
         self.residency.addAllocation(as_allocation(&*fresh.depth));
+        for h in &fresh.history {
+            self.residency.addAllocation(as_allocation(&**h));
+        }
         self.residency.commit();
         if let Some(old) = self.targets.replace(fresh) {
-            self.retire(vec![old.hdr, old.depth], None);
+            let [h0, h1] = old.history;
+            self.retire(vec![old.hdr, old.depth, h0, h1], None);
         }
     }
 
@@ -488,6 +493,9 @@ impl Renderer {
         if let Some(c) = &input.cull {
             upload_bytes(&slot.upload, CULL_OFFSET, bytemuck::cast_slice(&c.views));
         }
+        if let Some(t) = &input.taa {
+            upload_bytes(&slot.upload, frame::TAA_OFFSET, bytemuck::bytes_of(t));
+        }
         if let Some(list) = input.clusters {
             let n = list.len().min(MAX_VISIBLE_CLUSTERS);
             upload_bytes(&slot.visible, 0, bytemuck::cast_slice(&list[..n]));
@@ -514,6 +522,7 @@ impl Renderer {
             r: self,
             slot,
             slot_index,
+            frame_index: self.frame_index,
             upload_addr: slot.upload.gpuAddress(),
             targets: self.targets.as_ref().expect("цели есть: размер проверен"),
             drawable: &drawable_tex,

@@ -15,7 +15,7 @@ pub(super) const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
 // Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
 // SeaParams @4096, WaterLevel[] @4608, HandsUniforms @8192,
 // палитра костей float4x4[MAX_JOINTS] @8448..12544, SkyInputs @12544..12704.
-pub(super) const UPLOAD_BYTES: usize = 14080;
+pub(super) const UPLOAD_BYTES: usize = 14336;
 pub(super) const INSTANCE_OFFSET: usize = 256;
 pub(super) const INSTANCE_END: usize = 4096;
 pub(super) const MAX_INSTANCES: usize =
@@ -30,6 +30,8 @@ pub(super) const SKY_OFFSET: usize = 12544;
 pub(super) const SHADOW_OFFSET: usize = 12800;
 /// `CullView` × 5 (02.5) после теней.
 pub(super) const CULL_OFFSET: usize = 13312;
+/// `TaaUniforms` (04.5) после видов среза (13312 + 5 × 128).
+pub(super) const TAA_OFFSET: usize = 13952;
 
 // Ресурсы для планировщика проходов.
 const RES_PATTERN: ResourceId = ResourceId(1);
@@ -48,6 +50,8 @@ const RES_SHADOW: ResourceId = ResourceId(9);
 const RES_CULL: ResourceId = ResourceId(10);
 /// Списки растений и их indirect-аргументы (02.4).
 const RES_FOREST: ResourceId = ResourceId(11);
+/// История временного сглаживания (04.5).
+const RES_TAA: ResourceId = ResourceId(12);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -88,6 +92,8 @@ pub struct FrameInput<'a> {
     pub props: &'a [crate::layout::PlantInstance],
     /// Интерфейс кадра (05.1): треугольники в пикселях окна.
     pub ui: &'a [crate::layout::UiVertex],
+    /// Временное сглаживание (04.5): параметры перепроекции; `None` — выключено.
+    pub taa: Option<crate::layout::TaaUniforms>,
 }
 
 /// Вода в кадре (03.1).
@@ -127,9 +133,10 @@ pub(super) enum Table {
     Plant,
     PlantShadow,
     Ui,
+    Taa,
 }
 
-const TABLE_NAMES: [&str; 19] = [
+const TABLE_NAMES: [&str; 20] = [
     "pattern",
     "scene",
     "readback",
@@ -149,6 +156,7 @@ const TABLE_NAMES: [&str; 19] = [
     "plant",
     "plant shadow",
     "ui",
+    "taa",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -156,7 +164,7 @@ const TABLE_NAMES: [&str; 19] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 19],
+    tables: [Obj<dyn MTL4ArgumentTable>; 20],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -198,7 +206,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("19 таблиц")),
+                .unwrap_or_else(|_| unreachable!("20 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -275,6 +283,14 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_READBACK, Stages::DISPATCH | Stages::BLIT)],
         });
     }
+    // Временное сглаживание (04.5): читает HDR и глубину сцены, пишет историю
+    // и копирует её обратно в HDR — до рук (руки без сдвига и без шлейфа).
+    passes.push(PassDecl {
+        name: "taa",
+        kind: PassKind::Compute,
+        reads: vec![(RES_HDR, Stages::DISPATCH), (RES_DEPTH, Stages::DISPATCH)],
+        writes: vec![(RES_HDR, Stages::BLIT), (RES_TAA, Stages::DISPATCH | Stages::BLIT)],
+    });
     // Руки поверх сцены: пишут HDR и очищают глубину после копий readback.
     passes.push(PassDecl {
         name: "viewmodel",

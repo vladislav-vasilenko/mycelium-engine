@@ -92,4 +92,7 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[49] = sizeof(PlantVertex);
     out[50] = sizeof(PlantInstance);
     out[51] = sizeof(UiVertex);
+    TaaUniforms ta;
+    out[52] = sizeof(TaaUniforms);
+    out[53] = uint((thread char*)&ta.cam_delta - (thread char*)&ta);
 }

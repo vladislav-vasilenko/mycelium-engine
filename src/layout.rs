@@ -218,6 +218,22 @@ pub struct ShadowUniforms {
     pub params: [f32; 4],
 }
 
+/// Временное сглаживание (04.5), 160 байт: перепроекция пикселя в прошлый кадр.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct TaaUniforms {
+    /// Обратная к (проекция × поворот вида) текущего кадра без сдвига
+    /// субпикселя: NDC и глубина → позиция относительно камеры.
+    pub inv_view_proj_rel: [[f32; 4]; 4],
+    /// Проекция × поворот вида прошлого кадра без сдвига субпикселя.
+    pub prev_view_proj_rel: [[f32; 4]; 4],
+    /// xyz — камера сейчас минус камера прошлого кадра, м; w — 1, если
+    /// история годна (0 — сброс: первый кадр, смена размера, телепорт).
+    pub cam_delta: [f32; 4],
+    /// xy — сдвиг субпикселя кадра в NDC; zw — ширина и высота, пикселей.
+    pub jitter: [f32; 4],
+}
+
 /// Вершина интерфейса (05.1), 20 байт: пиксели окна, uv атласа шрифта
 /// (u < 0 — сплошной цвет), цвет sRGB с непрозрачностью.
 #[repr(C)]
@@ -376,10 +392,12 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         size_of::<PlantVertex>() as u32,
         size_of::<PlantInstance>() as u32,
         size_of::<UiVertex>() as u32,
+        size_of::<TaaUniforms>() as u32,
+        offset_of!(TaaUniforms, cam_delta) as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 52;
+pub const LAYOUT_PROBE_LEN: usize = 54;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -434,6 +452,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(PlantVertex)",
     "sizeof(PlantInstance)",
     "sizeof(UiVertex)",
+    "sizeof(TaaUniforms)",
+    "TaaUniforms.cam_delta",
 ];
 
 #[cfg(test)]
@@ -448,7 +468,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32, 36, 32, 20
+                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32, 36, 32, 20, 160, 128
             ]
         );
     }

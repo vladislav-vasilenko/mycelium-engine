@@ -11,6 +11,8 @@ pub(super) struct Targets {
     pub height: u32,
     pub hdr: Obj<dyn MTLTexture>,
     pub depth: Obj<dyn MTLTexture>,
+    /// История временного сглаживания (04.5): кадр пишет одну, читает другую.
+    pub history: [Obj<dyn MTLTexture>; 2],
 }
 
 impl Targets {
@@ -28,14 +30,25 @@ impl Targets {
             shaders::DEPTH_FORMAT,
             width,
             height,
-            MTLTextureUsage::RenderTarget,
+            MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead,
             "depth (reversed-Z)",
         );
+        let history = [0, 1].map(|k| {
+            private_texture(
+                device,
+                shaders::HDR_FORMAT,
+                width,
+                height,
+                MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+                &format!("TAA history {k}"),
+            )
+        });
         Targets {
             width,
             height,
             hdr,
             depth,
+            history,
         }
     }
 }

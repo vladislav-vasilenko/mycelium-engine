@@ -146,14 +146,49 @@ impl App {
         } else {
             crate::game::closeup::FOV_DEG
         };
-        let proj = sim::projection_fov(w as f32 / h as f32, fov);
+        let proj0 = sim::projection_fov(w as f32 / h as f32, fov);
         let view = camera.view();
         let cam_hi = (camera.position / 256.0).floor() * 256.0;
-        let view_proj_rel = {
+        let rot = {
             let mut rot = view;
             rot.w_axis = glam::Vec4::W;
-            proj * rot
+            rot
         };
+        // Временное сглаживание (04.5): сдвиг субпикселя по Халтону (2, 3),
+        // 8 положений; матрицы без сдвига — для перепроекции в проходе `taa`.
+        let taa_on = !selftest
+            && self.scene == SceneMode::Terrain
+            && self.view_mode == TerrainView::Lit
+            && !self.args.no_taa;
+        let (proj, taa) = if taa_on {
+            self.taa_frame = self.taa_frame.wrapping_add(1);
+            let k = self.taa_frame % 8 + 1;
+            let j = glam::Vec2::new(halton(k, 2) - 0.5, halton(k, 3) - 0.5)
+                * glam::Vec2::new(2.0 / w as f32, 2.0 / h as f32);
+            let mut p = proj0;
+            // ndc.x = clip.x / (−z): прибавка к z_axis сдвигает ndc на −Δ.
+            p.z_axis.x -= j.x;
+            p.z_axis.y -= j.y;
+            let vp0 = proj0 * rot;
+            let prev = self.taa_prev.filter(|(_, c, size)| {
+                *size == (w, h) && c.distance(camera.position) < 5.0
+            });
+            let u = crate::layout::TaaUniforms {
+                inv_view_proj_rel: vp0.inverse().to_cols_array_2d(),
+                prev_view_proj_rel: prev.map_or(vp0, |(m, ..)| m).to_cols_array_2d(),
+                cam_delta: prev
+                    .map_or(glam::Vec3::ZERO, |(_, c, _)| camera.position - c)
+                    .extend(if prev.is_some() { 1.0 } else { 0.0 })
+                    .to_array(),
+                jitter: [j.x, j.y, w as f32, h as f32],
+            };
+            self.taa_prev = Some((vp0, camera.position, (w, h)));
+            (p, Some(u))
+        } else {
+            self.taa_prev = None;
+            (proj0, None)
+        };
+        let view_proj_rel = proj * rot;
         let terrain_scene = self.scene == SceneMode::Terrain;
         let sky = terrain_scene.then(|| self.sky_frame(view_proj_rel, self.frame_dt, h));
         let Some(r) = self.renderer.as_mut() else {
@@ -310,6 +345,7 @@ impl App {
             forest,
             props: &props,
             ui: &ui_verts,
+            taa,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {
@@ -333,4 +369,15 @@ impl App {
         }
         self.update_title(false);
     }
+}
+
+/// Последовательность Халтона: `index`-й член по основанию `base`, в [0, 1).
+fn halton(mut index: u32, base: u32) -> f32 {
+    let (mut f, mut r) = (1.0f32, 0.0f32);
+    while index > 0 {
+        f /= base as f32;
+        r += f * (index % base) as f32;
+        index /= base;
+    }
+    r
 }

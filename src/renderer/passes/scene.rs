@@ -69,7 +69,8 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
     depth.setTexture(Some(&ctx.targets.depth));
     depth.setLoadAction(MTLLoadAction::Clear);
     depth.setClearDepth(0.0);
-    depth.setStoreAction(if ctx.readback {
+    // Глубину читают readback и TAA (04.5).
+    depth.setStoreAction(if ctx.readback || ctx.input.taa.is_some() {
         MTLStoreAction::Store
     } else {
         MTLStoreAction::DontCare

@@ -168,6 +168,14 @@ struct TerrainCluster {
 
 // Входы неба от CPU (src/layout.rs, SkyInputs), 176 байт.
 // Интерфейс (05.1): src/layout.rs, UiVertex.
+// Временное сглаживание (04.5): src/layout.rs, TaaUniforms, 160 байт.
+struct TaaUniforms {
+    float4x4 inv_view_proj_rel;   // NDC + глубина → относительно камеры (без сдвига)
+    float4x4 prev_view_proj_rel;  // прошлый кадр, без сдвига
+    float4 cam_delta;             // xyz — камера сейчас − прошлая, м; w — история годна
+    float4 jitter;                // xy — сдвиг кадра в NDC; zw — размер, пикселей
+};
+
 struct UiVertex {
     packed_float2 pos;
     packed_float2 uv;

@@ -8,6 +8,7 @@
 mod cull;
 mod exposure;
 pub(super) mod forest;
+pub(super) mod taa;
 mod pattern;
 mod readback;
 mod scene;
@@ -61,6 +62,8 @@ pub(super) struct PassCtx<'a> {
     pub r: &'a Renderer,
     pub slot: &'a FrameSlot,
     pub slot_index: usize,
+    /// Номер кадра: чётность выбирает историю TAA (04.5).
+    pub frame_index: u64,
     pub upload_addr: u64,
     pub targets: &'a Targets,
     pub drawable: &'a ProtocolObject<dyn MTLTexture>,
@@ -79,7 +82,7 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 12] = [
+static REGISTRY: [&dyn FramePass; 13] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
@@ -88,6 +91,7 @@ static REGISTRY: [&dyn FramePass; 12] = [
     &shadows::ShadowsPass,
     &scene::ScenePass,
     &readback::ReadbackPass,
+    &taa::TaaPass,
     &viewmodel::ViewmodelPass,
     &exposure::ExposurePass,
     &tonemap::TonemapPass,

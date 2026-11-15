@@ -40,6 +40,8 @@ pub struct Args {
     pub weather: Option<String>,
     /// Начальный уровень луж 0…1 (04.3): без ожидания долгого ливня.
     pub puddles: Option<f32>,
+    /// Демо-сплав по реке (03.2).
+    pub raft: bool,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -91,6 +93,7 @@ impl Args {
                 "--render-scale" => args.render_scale = it.next().and_then(|v| v.parse().ok()),
                 "--weather" => args.weather = it.next(),
                 "--puddles" => args.puddles = it.next().and_then(|v| v.parse().ok()),
+                "--raft" => args.raft = true,
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

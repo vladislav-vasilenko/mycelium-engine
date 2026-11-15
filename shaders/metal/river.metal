@@ -9,6 +9,10 @@
 // участках (скаты, перекаты) — белая пена полосами вдоль потока. Мелкая вода
 // прозрачна (видно дно), глубокая темнее; отражение — небо и тёмные берега.
 
+// Уровень воды демо: глубина гидрологии × 3 (тот же множитель — в
+// `app::raft::LEVEL_SCALE`).
+constant float LEVEL_SCALE = 3.0;
+
 struct RiverOut {
     float4 position [[position]];
     float3 world;
@@ -68,7 +72,7 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float hb = ground_height(b, heights, zone_heights, zone, frame);
     // Течение — от высокого конца к низкому.
     float2 flow = hb > ha ? -dir : dir;
-    float depth = max(s._pad.y, 0.1);
+    float depth = max(s._pad.y * LEVEL_SCALE, 0.3);
     // Поверхность — над дном оси: запас 12 см, рельеф на GPU (сглаживание,
     // шум участка детализации, упрощение вдали) выше поля высот на сантиметры.
     // Рельеф между концами может выпирать над прямой (ложе врезано
@@ -123,23 +127,31 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     };
     float2 r = (rip(ph0, float2(1.6, 2.4)) * w0 + rip(ph1, float2(1.6, 2.4)) * (1.0 - w0))
              + 0.5 * (rip(ph0, float2(0.5, 0.9)) * w0 + rip(ph1, float2(0.5, 0.9)) * (1.0 - w0));
-    float turb = smoothstep(0.03, 0.15, slope);
-    float3 n = normalize(float3(fn * r.x + fd * r.y, 0.0).xzy * (0.25 + 0.9 * turb) + float3(0.0, 1.0, 0.0));
+    float turb = smoothstep(0.02, 0.12, slope);
+    // Бурление: на скатах волны выше и круче.
+    float3 n = normalize(float3(fn * r.x + fd * r.y, 0.0).xzy * (0.3 + 1.6 * turb) + float3(0.0, 1.0, 0.0));
     float3 V = normalize(frame.camera_pos.xyz - in.world);
-    float fres = 0.02 + 0.98 * pow(1.0 - saturate(V.y), 5.0);
+    // Френель — по нормали с рябью (пятна неба на волнах), не меньше, чем
+    // у ровной воды.
+    float fres = max(0.02 + 0.98 * pow(1.0 - saturate(dot(n, V)), 5.0), 0.02 + 0.98 * pow(1.0 - saturate(V.y), 5.0));
     float3 R = reflect(-V, n);
     float3 sky_up = sky_ambient_term(skyf, float3(0, 1, 0));
     float3 sun = sky_sun_term(skyf);
     // В отражении: у горизонта — тёмные берега и лес, выше — небо.
-    float3 refl = mix(sky_up * 0.08 * float3(0.7, 0.85, 0.7), sky_up * 0.4, smoothstep(0.1, 0.45, R.y));
+    // Отражение: небо — как в лужах, но ярче (открытая вода), у горизонта —
+    // тёмные берега и лес.
+    float3 refl = mix(sky_up * 0.08 * float3(0.7, 0.85, 0.7), sky_up * 0.75, smoothstep(0.05, 0.35, R.y));
     // Пена: на скатах сплошная полосами вдоль течения, на перекатах и у
     // берегов — клочьями; бежит с водой.
     float fnoise = detail.sample(s, (q - float2(0.0, t * speed)) / float2(0.35, 1.4)).b;
     float fnoise2 = detail.sample(s, (q - float2(0.0, t * speed * 1.3)) / float2(0.9, 0.6)).r;
     float edge = smoothstep(0.6, 1.0, abs(in.across));
-    float foam = saturate(smoothstep(0.6, 0.9, fnoise * 0.7 + fnoise2 * 0.5) * (turb + 0.2 * edge)
-                          + smoothstep(0.08, 0.25, slope) * smoothstep(0.35, 0.6, fnoise));
-    float3 foam_c = float3(0.9, 0.92, 0.94) * (sky_up + sun * max(-frame.light_dir.y, 0.0) * 0.6);
+    // Мягкая пена: широкий порог, крупные пятна (fnoise2) несут мелкие
+    // полосы (fnoise) — без резких белых штрихов.
+    float streak = smoothstep(0.35, 0.95, fnoise);
+    float patch = smoothstep(0.35, 0.8, fnoise2);
+    float foam = saturate(streak * patch * (turb * 1.2 + 0.2 * edge) + smoothstep(0.06, 0.2, slope) * patch * 0.6) * 0.75;
+    float3 foam_c = float3(0.82, 0.85, 0.86) * (sky_up + sun * max(-frame.light_dir.y, 0.0) * 0.5);
     // Толща: мелкая вода — прозрачная (видно дно), глубокая — тёмная бирюза.
     float path = in.depth / max(V.y, 0.15);
     float3 T = exp(-float3(0.35, 0.09, 0.06) * path * 3.0);
@@ -149,7 +161,96 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     // Край ленты растворяется — без резкой границы на берегу.
     float soft = 1.0 - smoothstep(0.75, 1.0, abs(in.across));
     float3 col = mix(water, foam_c, foam);
-    float a = mix(opacity, 0.95, foam) * soft;
+    float a = mix(opacity, 0.85, foam) * soft;
     col = apply_aerial(aerial, frame, in.world - frame.camera_pos.xyz, col);
     return float4(col * a * frame.pre_exposure, a);
+}
+
+// --- Рыба аю (03.2): выпрыгивает вверх по течению по параболе с брызгами.
+// Точки — с CPU (`Renderer::set_fish`): xz, уровень воды, угол течения.
+struct FishOut {
+    float4 position [[position]];
+    float3 normal;
+    float kind;   // 0 — тело, 1 — брызги
+    float fade;
+};
+
+static float fish_hash(uint x) {
+    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+    return float(x) / 4294967295.0;
+}
+
+vertex FishOut fish_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                       constant FrameUniforms& frame [[buffer(1)]],
+                       device const float4* fish [[buffer(4)]]) {
+    FishOut o;
+    float4 f = fish[iid];
+    float period = 3.0 + 5.0 * fish_hash(iid * 13u + 7u);
+    float ph = fract(frame.time / period + fish_hash(iid * 31u + 1u));
+    float jump_t = 0.75;                 // прыжок, с
+    float t = ph * period;
+    // Против течения: угол течения + π.
+    float ang = f.w + 3.14159;
+    float2 dir = float2(cos(ang), sin(ang));
+    const float v0 = 3.0, vh = 1.1, g = 9.8;
+    o.kind = 0.0;
+    o.fade = 1.0;
+    o.normal = float3(0, 1, 0);
+    uint part = vid / 6u, corner = vid % 6u;
+    float2 q = float2(corner == 1u || corner == 2u || corner == 4u ? 1.0 : -1.0,
+                      corner == 2u || corner == 4u || corner == 5u ? 1.0 : -1.0);
+    float3 base = float3(f.x, f.y, f.z);
+    float3 p;
+    if (part == 0u) {
+        // Тело: в воздухе только во время прыжка; ромб вдоль скорости.
+        if (t > jump_t) {
+            o.position = float4(0, 0, -2, 1);
+            return o;
+        }
+        float3 pos = base + float3(dir.x * vh * t, v0 * t - 0.5 * g * t * t, dir.y * vh * t);
+        float3 vel = normalize(float3(dir.x * vh, v0 - g * t, dir.y * vh));
+        float3 side = normalize(cross(vel, float3(0, 1, 0)) + 1e-4);
+        float3 up = normalize(cross(side, vel));
+        // Ромб: длина 0,28 м, высота 0,07 м; хвост — вторая пара вершин.
+        float along = q.x * 0.14;
+        float h = (1.0 - abs(q.x)) * 0.0 + (q.y > 0.0 ? 0.035 : -0.035) * (1.0 - abs(along) / 0.16);
+        p = pos + vel * along + up * h;
+        o.normal = side;
+    } else {
+        // Брызги: у взлёта (part 1–2) и у входа в воду (part 3–4).
+        bool at_entry = part >= 3u;
+        float te = at_entry ? t - jump_t : t;
+        if (te < 0.0 || te > 0.45) {
+            o.position = float4(0, 0, -2, 1);
+            return o;
+        }
+        float3 at = base + (at_entry ? float3(dir.x * vh * jump_t, 0.0, dir.y * vh * jump_t) : float3(0.0));
+        float a2 = float(part) * 1.7 + fish_hash(iid * 7u + part) * 6.28;
+        float3 v = float3(cos(a2) * 0.7, 1.8, sin(a2) * 0.7);
+        float3 pos = at + v * te - float3(0, 0.5 * g * te * te, 0);
+        float3 to_cam = normalize(frame.camera_pos.xyz - pos);
+        float3 side = normalize(cross(normalize(v), to_cam) + 1e-4);
+        p = pos + side * q.x * 0.008 + normalize(v) * q.y * 0.02;
+        o.kind = 1.0;
+        o.fade = 1.0 - te / 0.45;
+    }
+    o.position = frame.view_proj_rel * float4(camera_relative(frame, p), 1.0);
+    return o;
+}
+
+fragment float4 fish_fs(FishOut in [[stage_in]], bool front [[front_facing]],
+                        constant FrameUniforms& frame [[buffer(1)]],
+                        device const SkyFrame& skyf [[buffer(3)]]) {
+    float3 sky = sky_ambient_term(skyf, float3(0, 1, 0));
+    float3 sun = sky_sun_term(skyf) * saturate(-frame.light_dir.y);
+    float3 c;
+    if (in.kind > 0.5) {
+        c = float3(0.9, 0.93, 0.95) * (sky + sun * 0.5) * in.fade;
+    } else {
+        // Аю: оливковая спина, серебристые бока с бликом.
+        float3 n = normalize(front ? in.normal : -in.normal);
+        float3 body = float3(0.35, 0.38, 0.3);
+        c = body * (sky + sun * saturate(dot(n, -frame.light_dir.xyz)) ) + float3(0.6) * sky * 0.3;
+    }
+    return float4(c * frame.pre_exposure, 1.0);
 }

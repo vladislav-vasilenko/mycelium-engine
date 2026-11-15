@@ -29,6 +29,9 @@ mod targets;
 mod terrain;
 mod terrain_clusters;
 mod timers;
+
+/// Наибольшее число рыб у камеры (03.2).
+pub const FISH_MAX: usize = 32;
 mod ui;
 mod upscale;
 mod water;
@@ -91,6 +94,9 @@ pub struct Renderer {
     targets: Option<Targets>,
     /// Масштаб рендера сцены (04.6): < 1 — апскейл MetalFX.
     render_scale: f32,
+    /// Рыба (03.2): точки прыжков (x, уровень воды, z, угол течения) и их число.
+    fish: Obj<dyn MTLBuffer>,
+    fish_count: usize,
     /// Временной апскейлер MetalFX под текущие цели (только при масштабе < 1).
     upscaler: Option<Obj<dyn objc2_metal_fx::MTL4FXTemporalScaler>>,
     pattern_tex: Obj<dyn MTLTexture>,
@@ -239,6 +245,8 @@ impl Renderer {
             [build(true, false)?, build(true, true)?],
         ];
 
+        let fish = resources::shared_buffer(&device, FISH_MAX * 16, "river fish");
+        residency.addAllocation(as_allocation(&*fish));
         let timers = timers::GpuTimers::new(&device);
         Ok(Renderer {
             info,
@@ -255,6 +263,8 @@ impl Renderer {
             pipelines,
             targets: None,
             render_scale: 1.0,
+            fish,
+            fish_count: 0,
             upscaler: None,
             pattern_tex,
             vertex_buf,
@@ -286,6 +296,13 @@ impl Renderer {
 
     pub fn size(&self) -> Option<(u32, u32)> {
         self.targets.as_ref().map(|t| (t.width, t.height))
+    }
+
+    /// Рыба (03.2): до `FISH_MAX` точек прыжков (x, уровень воды, z, угол течения).
+    pub fn set_fish(&mut self, fish: &[[f32; 4]]) {
+        let n = fish.len().min(FISH_MAX);
+        resources::upload_bytes(&self.fish, 0, bytemuck::cast_slice(&fish[..n]));
+        self.fish_count = n;
     }
 
     /// Реки (03.2): на каждый отрезок объектов карты — разлив и глубина, м

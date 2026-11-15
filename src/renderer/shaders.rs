@@ -75,6 +75,8 @@ pub struct Pipelines {
     pub rain_splash: Obj<dyn MTLRenderPipelineState>,
     /// Поверхность рек (03.2, сессия 3).
     pub river: Obj<dyn MTLRenderPipelineState>,
+    /// Рыба над рекой (03.2).
+    pub fish: Obj<dyn MTLRenderPipelineState>,
     /// Bloom (04.5): цепочки вниз и вверх.
     pub bloom_down: Obj<dyn MTLComputePipelineState>,
     pub bloom_up: Obj<dyn MTLComputePipelineState>,
@@ -524,6 +526,16 @@ pub fn build_pipelines(
             ("river_vs", "river_fs"),
             HDR_FORMAT,
             Blend::Alpha,
+            Motion::Masked,
+        )?,
+        fish: render_pipeline(
+            compiler,
+            &river_lib,
+            "river.metal",
+            "fish",
+            ("fish_vs", "fish_fs"),
+            HDR_FORMAT,
+            Blend::Opaque,
             Motion::Masked,
         )?,
         rain_splash: render_pipeline(

@@ -1,6 +1,7 @@
 //! Кадр приложения: тики симуляции, камера, параметры кадра, вода, отправка
 //! в рендерер и разбор readback.
 
+use crate::world::Ground;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -79,6 +80,17 @@ impl App {
             self.game.view(camera, &self.world)
         } else {
             camera
+        };
+        // Демо-сплав (03.2): камера плывёт по реке; симуляция — там же
+        // (подгрузка зоны и лес следуют за ней).
+        let camera = match self.raft.as_mut() {
+            Some(r) if !selftest => {
+                let c = r.step(&self.world, self.frame_dt);
+                self.sim.prev = c;
+                self.sim.curr = c;
+                c
+            }
+            _ => camera,
         };
         let water_frame = self.water_frame(camera.position);
         // Глаза под водой: та же функция волн, что рисует море (03.1).
@@ -231,7 +243,40 @@ impl App {
         if self.river_push_s <= 0.0 {
             self.river_push_s = 0.5;
             if let Some(f) = self.world.features.as_ref() {
-                r.set_river_spread(&self.hydrology.spread(f.segments.len()));
+                let spread = self.hydrology.spread(f.segments.len());
+                r.set_river_spread(&spread);
+                // Рыба (03.2): точки прыжков на реках в 60 м от камеры —
+                // равномерно по найденным отрезкам.
+                let cam = self.sim.curr.position;
+                let near: Vec<usize> = f
+                    .segments
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, s)| {
+                        s.kind == crate::world::features::KIND_RIVER
+                            && spread[*i][1] > 0.0
+                            && glam::Vec2::from(s.a).distance(glam::Vec2::new(cam.x, cam.z)) < 60.0
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                let stride = (near.len() / crate::renderer::FISH_MAX).max(3);
+                let fish: Vec<[f32; 4]> = near
+                    .iter()
+                    .step_by(stride)
+                    .filter_map(|&i| {
+                        let s = &f.segments[i];
+                        let (a, b) = (glam::Vec2::from(s.a), glam::Vec2::from(s.b));
+                        let m = (a + b) * 0.5;
+                        let ha = self.world.sample_ground(a.x, a.y)?.height;
+                        let hb = self.world.sample_ground(b.x, b.y)?.height;
+                        let flow = if hb > ha { a - b } else { b - a };
+                        let y = self.world.sample_ground(m.x, m.y)?.height
+                            + (spread[i][1] * super::raft::LEVEL_SCALE).max(0.3)
+                            + 0.12;
+                        Some([m.x, y, m.y, flow.y.atan2(flow.x)])
+                    })
+                    .collect();
+                r.set_fish(&fish);
                 // С `--gpu-times` — ближайшая река в журнал (проверка паводка).
                 if self.args.gpu_times && r.frame_index() % 600 < 30 {
                     let p = self.sim.curr.position;

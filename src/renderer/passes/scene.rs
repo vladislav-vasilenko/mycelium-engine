@@ -126,6 +126,23 @@ fn draw_river(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(c.zone_info.gpuAddress(), 8);
         table.setTexture_atIndex(t.detail.gpuResourceID(), 0);
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 1);
+        table.setAddress_atIndex(ctx.r.fish.gpuAddress(), 4);
+    }
+    // Рыба (03.2) — непрозрачная, до полупрозрачной воды.
+    if ctx.r.fish_count > 0 {
+        enc.pushDebugGroup(&label("fish"));
+        enc.setRenderPipelineState(&ctx.r.pipelines.fish);
+        enc.setCullMode(MTLCullMode::None);
+        enc.setArgumentTable_atStages(table, BOTH_STAGES);
+        unsafe {
+            enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                MTLPrimitiveType::Triangle,
+                0,
+                30,
+                ctx.r.fish_count,
+            );
+        }
+        enc.popDebugGroup();
     }
     enc.pushDebugGroup(&label("rivers"));
     enc.setRenderPipelineState(&ctx.r.pipelines.river);

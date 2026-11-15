@@ -12,6 +12,7 @@ mod frame;
 mod handler;
 mod hands;
 mod input;
+mod raft;
 mod selftest;
 mod setup;
 mod shadows;
@@ -69,6 +70,8 @@ pub struct App {
     hydrology: crate::hydrology::Hydrology,
     /// Время до следующей передачи разлива рек в рендер, с.
     river_push_s: f32,
+    /// Демо-сплав по реке (`--raft`).
+    raft: Option<raft::Raft>,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
     grade: bool,
     taa_frame: u32,
@@ -197,6 +200,16 @@ impl App {
         if !args.selftest && !args.overview && args.camera.is_none() {
             sim.set_mode(MoveMode::Walk, &world);
         }
+        // Демо-сплав (03.2): от ближайшей реки вниз по течению.
+        let raft = if args.raft {
+            let r = raft::Raft::new(&world, &hydrology, sim.curr.position);
+            if r.is_none() {
+                eprintln!("сплав: реки рядом нет");
+            }
+            r
+        } else {
+            None
+        };
         let tiles_only = args.tiles;
         let site = sky::site_of(&world);
         let time = sky::initial_time(&args, site);
@@ -209,6 +222,7 @@ impl App {
             weather,
             hydrology,
             river_push_s: 0.0,
+            raft,
             grade: true,
             taa_frame: 0,
             scene,

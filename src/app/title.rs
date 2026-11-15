@@ -49,12 +49,15 @@ impl App {
         };
         let place = match (self.scene, self.world.sample_ground(p.x, p.z)) {
             (SceneMode::Terrain, Some(g)) => format!(
-                " · {} · тайл ({}, {}) · {:?}{}{} · {:.1} м",
+                " · {} · x {:.0} z {:.0} · тайл ({}, {}) · {:?}{}{} · {:.1} м",
                 if self.sim.mode == MoveMode::Walk {
                     "ходьба"
                 } else {
                     "полёт"
                 },
+                // Координаты для воспроизведения снимков (`--camera x,y,z,…`).
+                p.x,
+                p.z,
                 g.tile.x,
                 g.tile.z,
                 g.substrate,

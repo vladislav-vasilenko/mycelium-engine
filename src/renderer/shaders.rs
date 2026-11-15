@@ -266,6 +266,7 @@ fn depth_only_pipeline(
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_pipeline(
     compiler: &ProtocolObject<dyn MTL4Compiler>,
     lib: &ProtocolObject<dyn MTLLibrary>,

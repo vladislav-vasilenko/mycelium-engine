@@ -55,7 +55,10 @@ enum SceneMode {
 
 pub struct App {
     args: Args,
-    world: World,
+    /// Мир общий с потоком сборки кластеров (02.10).
+    world: std::sync::Arc<World>,
+    /// Сборка кластеров в фоне: пока идёт — рельеф тайлами, в интерфейсе ход загрузки.
+    cluster_job: Option<ClusterJob>,
     scene: SceneMode,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -103,6 +106,12 @@ pub struct App {
     pub exit_code: i32,
 }
 
+/// Фоновая сборка кластеров рельефа (02.10): результат и время начала.
+pub(super) struct ClusterJob {
+    pub rx: std::sync::mpsc::Receiver<(crate::terrain_clusters::ClusterSet, bool)>,
+    pub started: Instant,
+}
+
 impl App {
     pub fn new(args: Args) -> App {
         let start_view = args.view.unwrap_or(TerrainView::Lit);
@@ -147,7 +156,8 @@ impl App {
         let time = sky::initial_time(&args, site);
         App {
             args,
-            world,
+            world: std::sync::Arc::new(world),
+            cluster_job: None,
             scene,
             window: None,
             renderer: None,
@@ -220,7 +230,7 @@ impl App {
             self.sim = Sim::new(trail_start_camera(&self.world));
             self.sim.head_bob = head_bob;
         }
-        self.sim.set_mode(MoveMode::Walk, &self.world);
+        self.sim.set_mode(MoveMode::Walk, &*self.world);
     }
 
     fn is_minimized(&self) -> bool {

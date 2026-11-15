@@ -33,6 +33,7 @@ impl App {
     }
 
     pub(super) fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_clusters();
         if self.is_minimized() {
             // Свёрнутое окно не видно: кадр не кодируем, ресурсы освобождаем.
             if let Some(r) = self.renderer.as_mut() {
@@ -62,7 +63,7 @@ impl App {
             );
         }
         for _ in 0..ticks {
-            self.sim.step(&input, Some(&self.world));
+            self.sim.step(&input, Some(&*self.world));
         }
         self.advance_time(ticks);
 
@@ -125,6 +126,17 @@ impl App {
                 let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
                 let mut b = crate::ui::UiBuilder::new(font, scale);
                 self.game.ui(&mut b, w as f32 / scale, h as f32 / scale);
+                if let Some(job) = &self.cluster_job {
+                    // Ход загрузки (02.10): кластеры собираются в фоне.
+                    let text = format!(
+                        "Сборка детального рельефа… {:.0} с — пока видна упрощённая сетка",
+                        job.started.elapsed().as_secs_f32()
+                    );
+                    let tw = b.font.width(&text, 18.0);
+                    let x = (w as f32 / scale - tw) * 0.5;
+                    b.rect(x - 14.0, 12.0, tw + 28.0, 32.0, [10, 14, 10, 170]);
+                    b.text(x, 16.0, 18.0, [230, 235, 215, 255], &text);
+                }
                 b.verts
             }
             _ => Vec::new(),

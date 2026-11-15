@@ -221,7 +221,11 @@ fn draw_patch(ctx: &PassCtx, enc: &RenderEncoder) {
     enc.pushDebugGroup(&label("terrain: detail patch"));
     enc.setRenderPipelineState(&ctx.r.pipelines.terrain_patch);
     unsafe {
-        enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, PATCH_VERTEX_COUNT);
+        enc.drawPrimitives_vertexStart_vertexCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            PATCH_VERTEX_COUNT,
+        );
     }
     enc.popDebugGroup();
 }

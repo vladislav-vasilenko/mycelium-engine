@@ -45,7 +45,7 @@ impl App {
             KeyCode::F12 => self.capture_requested = true,
             KeyCode::KeyG => {
                 match self.sim.mode {
-                    MoveMode::Walk => self.sim.set_mode(MoveMode::Fly, &self.world),
+                    MoveMode::Walk => self.sim.set_mode(MoveMode::Fly, &*self.world),
                     MoveMode::Fly => self.land(false),
                 }
                 self.update_title(true);

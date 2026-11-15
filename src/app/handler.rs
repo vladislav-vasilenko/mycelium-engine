@@ -32,10 +32,9 @@ impl ApplicationHandler for App {
         };
         let result = self.create_renderer(&window);
         match result {
-            Ok((mut r, shore, hands, clusters)) => {
+            Ok((mut r, shore, hands)) => {
                 self.shore = Some(shore);
                 self.hands = hands;
-                self.clusters = Some(clusters);
                 self.forest_loaded = r.has_forest();
                 self.font = crate::ui::Font::load(&crate::ui::assets_dir()).ok();
                 let size = window.inner_size();
@@ -47,6 +46,7 @@ impl ApplicationHandler for App {
                     r.shader_dir().display()
                 );
                 self.renderer = Some(r);
+                self.start_clusters();
             }
             Err(e) => {
                 eprintln!("ОШИБКА: {e}");

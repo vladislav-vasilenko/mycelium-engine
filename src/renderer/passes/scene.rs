@@ -45,6 +45,9 @@ impl FramePass for ScenePass {
         }
         draw_cubes(ctx, &enc);
         draw_sky(ctx, &enc);
+        if ctx.input.draw_terrain {
+            draw_rain(ctx, &enc);
+        }
         enc.endEncoding();
         // Вода — своим кодировщиком без вложения ветра (04.6, сессия 2):
         // смешивание с двумя источниками несовместимо с несколькими целями.
@@ -103,6 +106,45 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
         .expect("render encoder");
     enc.setLabel(Some(&label("scene raster")));
     enc
+}
+
+/// Капель дождя (экземпляров); при слабом дожде лишние схлопываются в шейдере.
+const RAIN_DROPS: usize = 80_000;
+
+/// Капли дождя (04.3, сессия 3): после неба, полупрозрачно, без записи глубины.
+fn draw_rain(ctx: &PassCtx, enc: &RenderEncoder) {
+    let table = ctx.slot.table(Table::Rain);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(ctx.upload_addr + SHADOW_OFFSET as u64, 2);
+        table.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 3);
+        table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 0);
+    }
+    enc.pushDebugGroup(&label("rain drops"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.rain);
+    enc.setDepthStencilState(Some(&ctx.r.water_depth_state));
+    enc.setCullMode(MTLCullMode::None);
+    enc.setArgumentTable_atStages(table, BOTH_STAGES);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            6,
+            RAIN_DROPS,
+        );
+    }
+    // Брызги: по 4 штриха на каплю, живут доли секунды после удара.
+    enc.setRenderPipelineState(&ctx.r.pipelines.rain_splash);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            24,
+            RAIN_DROPS,
+        );
+    }
+    enc.setDepthStencilState(Some(&ctx.r.depth_state));
+    enc.popDebugGroup();
 }
 
 /// Кодировщик воды: цвет и глубина сцены загружаются; ждёт фрагменты

@@ -151,9 +151,11 @@ pub(super) enum Table {
     Bloom,
     Rt,
     Volumetric,
+    /// Капли дождя в проходе `scene` (04.3, сессия 3).
+    Rain,
 }
 
-const TABLE_NAMES: [&str; 23] = [
+const TABLE_NAMES: [&str; 24] = [
     "pattern",
     "scene",
     "readback",
@@ -177,6 +179,7 @@ const TABLE_NAMES: [&str; 23] = [
     "bloom",
     "rt",
     "volumetric",
+    "rain",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -184,7 +187,7 @@ const TABLE_NAMES: [&str; 23] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 23],
+    tables: [Obj<dyn MTL4ArgumentTable>; 24],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -226,7 +229,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("23 таблиц")),
+                .unwrap_or_else(|_| unreachable!("24 таблицы")),
             upload,
             visible,
             signal_value: 0,

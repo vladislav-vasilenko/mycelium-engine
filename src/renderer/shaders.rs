@@ -67,6 +67,10 @@ pub struct Pipelines {
     pub taa_resolve: Obj<dyn MTLComputePipelineState>,
     /// Подготовка апскейла MetalFX (04.6): объёмный свет и векторы движения.
     pub upscale_prep: Obj<dyn MTLComputePipelineState>,
+    /// Капли дождя (04.3, сессия 3).
+    pub rain: Obj<dyn MTLRenderPipelineState>,
+    /// Брызги от ударов капель (04.3, сессия 3).
+    pub rain_splash: Obj<dyn MTLRenderPipelineState>,
     /// Bloom (04.5): цепочки вниз и вверх.
     pub bloom_down: Obj<dyn MTLComputePipelineState>,
     pub bloom_up: Obj<dyn MTLComputePipelineState>,
@@ -395,6 +399,7 @@ pub fn build_pipelines(
     let cull_lib = compile_library(device, dir, "cull.metal", over)?;
     let forest_lib = compile_library(device, dir, "forest.metal", over)?;
     let taa_lib = compile_library(device, dir, "taa.metal", over)?;
+    let rain_lib = compile_library(device, dir, "rain.metal", over)?;
     let bloom_lib = compile_library(device, dir, "bloom.metal", over)?;
     let rt_lib = compile_library(device, dir, "rt.metal", over)?;
     let vol_lib = compile_library(device, dir, "volumetric.metal", over)?;
@@ -494,6 +499,26 @@ pub fn build_pipelines(
         cull_finish: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_finish")?,
         taa_resolve: compute_pipeline(compiler, &taa_lib, "taa.metal", "taa_resolve")?,
         upscale_prep: compute_pipeline(compiler, &taa_lib, "taa.metal", "upscale_prep")?,
+        rain: render_pipeline(
+            compiler,
+            &rain_lib,
+            "rain.metal",
+            "rain",
+            ("rain_vs", "rain_fs"),
+            HDR_FORMAT,
+            Blend::Alpha,
+            Motion::Masked,
+        )?,
+        rain_splash: render_pipeline(
+            compiler,
+            &rain_lib,
+            "rain.metal",
+            "rain splash",
+            ("rain_splash_vs", "rain_fs"),
+            HDR_FORMAT,
+            Blend::Alpha,
+            Motion::Masked,
+        )?,
         bloom_down: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_down")?,
         bloom_up: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_up")?,
         rt_terrain_grid: compute_pipeline(compiler, &rt_lib, "rt.metal", "rt_terrain_grid")?,

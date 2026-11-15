@@ -111,9 +111,48 @@ impl FramePass for ShadowsPass {
                 .cmd
                 .renderCommandEncoderWithDescriptor(&rp)
                 .expect("render encoder");
-            enc.setLabel(Some(&label("rain occlusion: canopy from above")));
+            enc.setLabel(Some(&label("rain occlusion: canopy and ground from above")));
             enc.setDepthStencilState(Some(&sh.depth_state));
             enc.setCullMode(MTLCullMode::None);
+            // Рельеф — список каскада 1 (150 м): капли бьются о верхнюю
+            // поверхность — крону или землю — и дают брызги там же.
+            let (start, count) = sf.ranges[1];
+            if gpu || count > 0 {
+                let table = ctx.slot.table(Table::Shadow);
+                unsafe {
+                    table.setAddress_atIndex(c.heights.gpuAddress(), 0);
+                    table.setAddress_atIndex(ctx.upload_addr, 1);
+                    table.setAddress_atIndex(c.clusters.gpuAddress(), 5);
+                    table.setAddress_atIndex(c.vertices.gpuAddress(), 6);
+                    table.setAddress_atIndex(c.triangles.gpuAddress(), 7);
+                    let first = if gpu {
+                        region_base(2) as u64
+                    } else {
+                        base + start as u64
+                    };
+                    table.setAddress_atIndex(ctx.slot.visible.gpuAddress() + first * 4, 8);
+                    table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
+                    table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);
+                    table.setAddress_atIndex(ctx.upload_addr + (SHADOW_OFFSET + 304) as u64, 12);
+                }
+                enc.setRenderPipelineState(&ctx.r.pipelines.terrain_shadow);
+                enc.setArgumentTable_atStages(table, MTLRenderStages::Vertex);
+                if gpu {
+                    enc.drawPrimitives_indirectBuffer(
+                        MTLPrimitiveType::Triangle,
+                        counters + (ARGS_OFFSET + 2 * 16) as u64,
+                    );
+                } else {
+                    unsafe {
+                        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                            MTLPrimitiveType::Triangle,
+                            0,
+                            CLUSTER_VERTEX_COUNT,
+                            count as usize,
+                        );
+                    }
+                }
+            }
             super::forest::draw_rain_occluders(ctx, &enc);
             enc.endEncoding();
         }

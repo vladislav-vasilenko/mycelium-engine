@@ -120,3 +120,34 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
     result = result / max(1.0 - dot(result, float3(0.2126, 0.7152, 0.0722)), 1e-4);
     out.write(float4(result, 1.0), gid);
 }
+
+// Подготовка апскейла MetalFX (04.6, сессия 1): объёмный свет — в HDR сцены
+// (как в `taa_resolve`, до апскейла), векторы движения к прошлому кадру в uv
+// по глубине пикселя и матрице прошлого кадра (движение камеры; ветер и руки
+// — сессия 2). Небо (глубина 0) — направление, w = 0.
+kernel void upscale_prep(texture2d<float, access::read_write> scene [[texture(0)]],
+                         depth2d<float> depth [[texture(1)]],
+                         texture2d<float, access::write> motion [[texture(3)]],
+                         texture2d<float> vol [[texture(4)]],
+                         constant TaaUniforms& t [[buffer(0)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    uint2 size = uint2(scene.get_width(), scene.get_height());
+    if (any(gid >= size)) {
+        return;
+    }
+    constexpr sampler vs(filter::linear, address::clamp_to_edge);
+    float2 uv = (float2(gid) + 0.5) / float2(size);
+    float4 c = scene.read(gid);
+    scene.write(float4(c.rgb + vol.sample(vs, uv, level(0)).rgb, c.a), gid);
+    float d = depth.read(gid);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0) - t.jitter.xy;
+    float4 rel = t.inv_view_proj_rel * float4(ndc, d, 1.0);
+    float4 prev = t.prev_view_proj_rel * float4(rel.xyz + t.cam_delta.xyz * rel.w, rel.w);
+    float2 mv = 0.0;
+    if (prev.w > 0.0) {
+        float2 pndc = prev.xy / prev.w;
+        float2 puv = float2(pndc.x * 0.5 + 0.5, 0.5 - pndc.y * 0.5);
+        mv = puv - (uv - float2(t.jitter.x, -t.jitter.y) * 0.5);
+    }
+    motion.write(float4(mv, 0.0, 0.0), gid);
+}

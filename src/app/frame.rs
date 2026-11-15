@@ -160,11 +160,25 @@ impl App {
             && self.scene == SceneMode::Terrain
             && self.view_mode == TerrainView::Lit
             && !self.args.no_taa;
+        // Апскейл MetalFX (04.6) — только с TAA (дрожание, история); в
+        // отладочных видах и самопроверке — полное разрешение.
+        if let Some(r) = self.renderer.as_mut() {
+            r.set_render_scale(if taa_on {
+                self.args.render_scale.unwrap_or(0.67)
+            } else {
+                1.0
+            });
+        }
+        let (rw, rh) = self
+            .renderer
+            .as_ref()
+            .and_then(|r| r.render_size())
+            .unwrap_or((w, h));
         let (proj, taa) = if taa_on {
             self.taa_frame = self.taa_frame.wrapping_add(1);
             let k = self.taa_frame % 8 + 1;
             let j = glam::Vec2::new(halton(k, 2) - 0.5, halton(k, 3) - 0.5)
-                * glam::Vec2::new(2.0 / w as f32, 2.0 / h as f32);
+                * glam::Vec2::new(2.0 / rw as f32, 2.0 / rh as f32);
             let mut p = proj0;
             // ndc.x = clip.x / (−z): прибавка к z_axis сдвигает ndc на −Δ.
             p.z_axis.x -= j.x;
@@ -180,7 +194,7 @@ impl App {
                     .map_or(glam::Vec3::ZERO, |(_, c, _)| camera.position - c)
                     .extend(if prev.is_some() { 1.0 } else { 0.0 })
                     .to_array(),
-                jitter: [j.x, j.y, w as f32, h as f32],
+                jitter: [j.x, j.y, rw as f32, rh as f32],
             };
             self.taa_prev = Some((vp0, camera.position, (w, h)));
             (p, Some(u))

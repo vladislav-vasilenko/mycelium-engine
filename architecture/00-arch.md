@@ -1418,6 +1418,14 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Вершины растений считаются дважды; у пихты-скана LOD 0–1 это заметно (остаток +10 мс).
 - **Пересмотреть.** С импосторами деревьев или визуальным буфером.
 
+### AD-78. Апскейл MetalFX вместо TAA при уменьшенном разрешении рендера
+
+- **Решение.** Сцена (проход `scene`, `rt_ao`, `volumetric`) — в `Targets.scene`/`scene_depth` размером `rw × rh` (`--render-scale`, по умолчанию 0,67); проход `taa` при масштабе < 1 записывает `upscale_prep` (объёмный свет в HDR сцены, векторы движения uv по глубине и матрице прошлого кадра) и `MTL4FXTemporalScaler` в выходной `hdr`; руки, bloom, экспозиция и тонмаппинг — в выходном разрешении. Порядок с кодировщиками MetalFX — барьеры очереди (`barrierAfterStages_beforeQueueStages` до, пустой кодировщик с `barrierAfterQueueStages_beforeStages` после). Без TAA (отладочные виды, самопроверка) — масштаб 1.
+- **Почему.** Кадр упирается в затенение пикселей (AD-76); MetalFX — встроенный в ОС временной апскейлер с векторным движением, без своего обучения и истории. Сцена 18,2 → 11,0 мс, кадр 23,8 → 17,7 мс в одной серии.
+- **Отброшено.** Свой апскейл в TAA (качество ниже MetalFX при той же цене); пространственный апскейл MetalFX (без истории — мерцание листвы).
+- **Цена.** Векторы движения только от камеры — смазывание анимированной листвы (сессия 2); MetalFX 1,9 мс против 0,7 у TAA; руки поверх апскейла — без сглаживания временем.
+- **Пересмотреть.** С векторами движения ветра и с динамическим разрешением.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1509,3 +1517,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 02.13 (сессия 1б) | после `4b5a08c` | `plants::TEXTURE_LAYERS` 3 → 5: слои 3 (`grass_strips.png`) и 4 (`grass_tufts.png`); `tools/plants/grass_photo.py`; `ground.grass_blades` из фото-карточек (`_photo_quad`, `_photo_strip`, `grass_rects`); `plant_fs`: травинки — фото слоя 3/4 по `uv.x ≥ 1`, доля высоты `blade_t` из канала затенения; `GRASS_SUB` 24 |
 | 2026-11-15 | 02.13 (сессия 4, часть 1) | после `b86c5bb` | `scans::SCAN_SPECIES` — 4 поля (вид, вариант, поворот, масштаб), 30 записей: виды 0–1 — `fir_tree_01_c` (только с `ECHO_SCAN_TREES`), 22–23 — `island_tree_02`, `tree_small_02`; `load_variant(…, scale, …)`; скан берётся, только если `.glb` есть на диске; `forest_place`: `inst._pad = 20` у деревьев, `plant_world` не гнёт их как низкие; `SPECIES_H` 0, 1, 22, 23; `TRUNK_R` 0–1; `tonemap_fs`: AgX (`agx`, `agx_curve`) × 1,35 и насыщенность 0,9; `scan_lods.tree_lod` |
 | 2026-11-15 | 02.13 (сессия 4, часть 2) | после `72e309f` | AD-77: `plant_shade` (общее затенение), `plant_fs_prepassed`, `plant_depth_fs`, `PlantOut.position` инвариантна; `Pipelines.plant_depth`, `plant_prepassed` (вместо `plant`), `color_masked_pipeline`; `Renderer.depth_equal_state`; `preserveInvariance` для `forest.metal`; тени пихты — LOD 2 (`forest_finish`); LOD 2 пихты — процедурная криптомерия (`plants::load`); бюджеты деревьев 40/6/1,5 тыс., `tree_lod(area)` |
+\n| 2026-11-15 | 04.6 (сессия 1) | после `ebe1132` | AD-78: модуль `renderer/upscale.rs` (`new_scaler`, `encode`); `Targets`: `rw`, `rh`, `scene`, `scene_depth`, `motion`, `scaled()`, `new(…, scale)`; `Renderer`: `render_scale`, `upscaler`, `render_size()`, `set_render_scale()`; `Pipelines.upscale_prep`, ядро `upscale_prep` (`taa.metal`); `passes/taa.rs::encode_upscale`; `--render-scale`; зависимость `objc2-metal-fx` |\n

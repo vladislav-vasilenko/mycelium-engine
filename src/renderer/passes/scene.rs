@@ -34,8 +34,8 @@ impl FramePass for ScenePass {
         enc.setViewport(MTLViewport {
             originX: 0.0,
             originY: 0.0,
-            width: ctx.targets.width as f64,
-            height: ctx.targets.height as f64,
+            width: ctx.targets.rw as f64,
+            height: ctx.targets.rh as f64,
             znear: 0.0,
             zfar: 1.0,
         });
@@ -55,7 +55,7 @@ impl FramePass for ScenePass {
 fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
     let rp = MTL4RenderPassDescriptor::new();
     let color = unsafe { rp.colorAttachments().objectAtIndexedSubscript(0) };
-    color.setTexture(Some(&ctx.targets.hdr));
+    color.setTexture(Some(&ctx.targets.scene));
     color.setLoadAction(MTLLoadAction::Clear);
     color.setStoreAction(MTLStoreAction::Store);
     let c = ctx.input.clear_color;
@@ -66,7 +66,7 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
         alpha: 1.0,
     });
     let depth = rp.depthAttachment();
-    depth.setTexture(Some(&ctx.targets.depth));
+    depth.setTexture(Some(&ctx.targets.scene_depth));
     depth.setLoadAction(MTLLoadAction::Clear);
     depth.setClearDepth(0.0);
     // Глубину читают readback и TAA (04.5).

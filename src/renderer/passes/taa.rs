@@ -16,10 +16,14 @@ impl FramePass for TaaPass {
     }
 
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier) {
-        if ctx.input.taa.is_none() {
+        let Some(taa) = ctx.input.taa.as_ref() else {
+            return;
+        };
+        let t = ctx.targets;
+        if let (true, Some(scaler)) = (t.scaled(), ctx.r.upscaler.as_ref()) {
+            encode_upscale(ctx, barrier, scaler, taa);
             return;
         }
-        let t = ctx.targets;
         let cur = (ctx.frame_index % 2) as usize;
         let (write, read) = (&t.history[cur], &t.history[1 - cur]);
         let enc = ctx
@@ -55,6 +59,62 @@ impl FramePass for TaaPass {
     }
 }
 
+/// Апскейл MetalFX (04.6): подготовка (объёмный свет, векторы движения),
+/// затем апскейлер пишет выходной HDR. Кодировщики MetalFX — свои: порядок
+/// с соседями — барьерами очереди пустых кодировщиков до и после.
+fn encode_upscale(
+    ctx: &PassCtx,
+    barrier: &PassBarrier,
+    scaler: &objc2::runtime::ProtocolObject<dyn objc2_metal_fx::MTL4FXTemporalScaler>,
+    taa: &crate::layout::TaaUniforms,
+) {
+    let t = ctx.targets;
+    let enc = ctx
+        .slot
+        .cmd
+        .computeCommandEncoder()
+        .expect("compute encoder");
+    enc.setLabel(Some(&label("upscale: prep (volumetric, motion)")));
+    barrier.apply(&*enc);
+    let table = ctx.slot.table(Table::Taa);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr + TAA_OFFSET as u64, 0);
+        table.setTexture_atIndex(t.scene.gpuResourceID(), 0);
+        table.setTexture_atIndex(t.scene_depth.gpuResourceID(), 1);
+        table.setTexture_atIndex(t.motion.gpuResourceID(), 3);
+        table.setTexture_atIndex(t.vol.gpuResourceID(), 4);
+    }
+    enc.setComputePipelineState(&ctx.r.pipelines.upscale_prep);
+    enc.setArgumentTable(Some(table));
+    enc.dispatchThreads_threadsPerThreadgroup(size2(t.rw as usize, t.rh as usize), size2(16, 16));
+    // Работа MetalFX ждёт подготовку.
+    enc.barrierAfterStages_beforeQueueStages_visibilityOptions(
+        MTLStages::Dispatch,
+        MTLStages::All,
+        MTL4VisibilityOptions::Device,
+    );
+    enc.endEncoding();
+    crate::renderer::upscale::encode(scaler, &ctx.slot.cmd, t, taa);
+    // Следующие проходы ждут MetalFX.
+    let fence = ctx
+        .slot
+        .cmd
+        .computeCommandEncoder()
+        .expect("compute encoder");
+    fence.setLabel(Some(&label("upscale: barrier")));
+    fence.barrierAfterQueueStages_beforeStages_visibilityOptions(
+        MTLStages::All,
+        MTLStages::All,
+        MTL4VisibilityOptions::Device,
+    );
+    fence.barrierAfterStages_beforeQueueStages_visibilityOptions(
+        MTLStages::All,
+        MTLStages::All,
+        MTL4VisibilityOptions::Device,
+    );
+    fence.endEncoding();
+}
+
 /// Проход `volumetric` (11, сессия 2): лучи солнца в дымке — четверть
 /// разрешения по глубине и карте теней; при каждом TAA (без теней — нули).
 pub(in crate::renderer) struct VolumetricPass;
@@ -78,7 +138,7 @@ impl FramePass for VolumetricPass {
         barrier.apply(&*enc);
         let table = ctx.slot.table(Table::Volumetric);
         unsafe {
-            table.setTexture_atIndex(t.depth.gpuResourceID(), 0);
+            table.setTexture_atIndex(t.scene_depth.gpuResourceID(), 0);
             table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 1);
             table.setTexture_atIndex(t.vol.gpuResourceID(), 2);
             table.setAddress_atIndex(ctx.upload_addr, 1);

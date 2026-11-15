@@ -65,6 +65,8 @@ pub struct Pipelines {
     pub cull_finish: Obj<dyn MTLComputePipelineState>,
     /// Временное сглаживание (04.5).
     pub taa_resolve: Obj<dyn MTLComputePipelineState>,
+    /// Подготовка апскейла MetalFX (04.6): объёмный свет и векторы движения.
+    pub upscale_prep: Obj<dyn MTLComputePipelineState>,
     /// Bloom (04.5): цепочки вниз и вверх.
     pub bloom_down: Obj<dyn MTLComputePipelineState>,
     pub bloom_up: Obj<dyn MTLComputePipelineState>,
@@ -456,6 +458,7 @@ pub fn build_pipelines(
         cull_clusters: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_clusters")?,
         cull_finish: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_finish")?,
         taa_resolve: compute_pipeline(compiler, &taa_lib, "taa.metal", "taa_resolve")?,
+        upscale_prep: compute_pipeline(compiler, &taa_lib, "taa.metal", "upscale_prep")?,
         bloom_down: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_down")?,
         bloom_up: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_up")?,
         rt_terrain_grid: compute_pipeline(compiler, &rt_lib, "rt.metal", "rt_terrain_grid")?,

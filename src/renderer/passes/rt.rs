@@ -127,7 +127,7 @@ impl FramePass for RtAoPass {
         barrier.apply(&*enc);
         let table = ctx.slot.table(Table::Rt);
         unsafe {
-            table.setTexture_atIndex(t.depth.gpuResourceID(), 0);
+            table.setTexture_atIndex(t.scene_depth.gpuResourceID(), 0);
             table.setTexture_atIndex(t.rt_ao.gpuResourceID(), 1);
             table.setAddress_atIndex(ctx.upload_addr, 1);
             table.setAddress_atIndex(ctx.upload_addr + TAA_OFFSET as u64, 2);

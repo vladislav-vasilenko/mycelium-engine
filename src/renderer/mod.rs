@@ -30,6 +30,7 @@ mod terrain;
 mod terrain_clusters;
 mod timers;
 mod ui;
+mod upscale;
 mod water;
 
 use std::any::Any;
@@ -88,6 +89,10 @@ pub struct Renderer {
     slots: Vec<FrameSlot>,
     pipelines: Pipelines,
     targets: Option<Targets>,
+    /// Масштаб рендера сцены (04.6): < 1 — апскейл MetalFX.
+    render_scale: f32,
+    /// Временной апскейлер MetalFX под текущие цели (только при масштабе < 1).
+    upscaler: Option<Obj<dyn objc2_metal_fx::MTL4FXTemporalScaler>>,
     pattern_tex: Obj<dyn MTLTexture>,
     vertex_buf: Obj<dyn MTLBuffer>,
     index_buf: Obj<dyn MTLBuffer>,
@@ -249,6 +254,8 @@ impl Renderer {
             slots,
             pipelines,
             targets: None,
+            render_scale: 1.0,
+            upscaler: None,
             pattern_tex,
             vertex_buf,
             index_buf,
@@ -279,6 +286,24 @@ impl Renderer {
 
     pub fn size(&self) -> Option<(u32, u32)> {
         self.targets.as_ref().map(|t| (t.width, t.height))
+    }
+
+    /// Размер рендера сцены (04.6): по нему — дрожание камеры TAA/MetalFX.
+    pub fn render_size(&self) -> Option<(u32, u32)> {
+        self.targets.as_ref().map(|t| (t.rw, t.rh))
+    }
+
+    /// Масштаб рендера сцены (04.6); цели пересоздаются сразу, если есть.
+    pub fn set_render_scale(&mut self, scale: f32) {
+        let scale = scale.clamp(0.5, 1.0);
+        if (scale - self.render_scale).abs() < 1e-3 {
+            return;
+        }
+        self.render_scale = scale;
+        if let Some((w, h)) = self.size() {
+            let cs = self.layer.contentsScale();
+            self.resize(w, h, cs);
+        }
     }
 
     pub fn pipeline_generation(&self) -> u32 {
@@ -321,12 +346,29 @@ impl Renderer {
             }
             return;
         }
-        if self.size() == Some((width, height)) {
+        if self.size() == Some((width, height))
+            && self
+                .targets
+                .as_ref()
+                .is_some_and(|t| t.scaled() == (self.render_scale < 0.999))
+        {
             return;
         }
         self.layer
             .setDrawableSize(objc2_foundation::NSSize::new(width as f64, height as f64));
-        let fresh = Targets::new(&self.device, width, height);
+        let mut fresh = Targets::new(&self.device, width, height, self.render_scale);
+        let old_scaler = self.upscaler.take();
+        if fresh.scaled() {
+            self.upscaler = upscale::new_scaler(&self.device, &self.compiler, &fresh);
+            if self.upscaler.is_none() {
+                eprintln!("[renderer] MetalFX недоступен — рендер в полном разрешении");
+                self.render_scale = 1.0;
+                fresh = Targets::new(&self.device, width, height, 1.0);
+            }
+        }
+        if let Some(s) = old_scaler {
+            self.retire(Vec::new(), Some(Box::new(s)));
+        }
         for t in fresh.textures() {
             self.residency.addAllocation(as_allocation(&*t));
         }

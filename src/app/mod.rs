@@ -72,6 +72,8 @@ pub struct App {
     river_push_s: f32,
     /// Демо-сплав по реке (`--raft`).
     raft: Option<raft::Raft>,
+    /// Ночной побег от дрона (05.6, `--escape`).
+    escape: Option<crate::game::escape::NightEscape>,
     /// Уровень воды рек на концах отрезков (03.2), обновляется с разливом.
     river_levels: Vec<[f32; 4]>,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
@@ -250,6 +252,44 @@ impl App {
             });
             sim.set_mode(MoveMode::Walk, &world);
         }
+        // Ночной побег (05.6): тропа маяков вдоль реки от начала тропы вниз
+        // по течению к водопаду; игрок — у начала тропы.
+        let escape = if args.escape {
+            let levels = world.features.as_ref().map_or_else(Vec::new, |f| {
+                hydrology.levels(f.segments.len(), raft::LEVEL_SCALE)
+            });
+            let e = raft::Raft::new(&world, &hydrology, sim.curr.position).and_then(|r| {
+                crate::game::escape::NightEscape::new(&world, &r.sampled(&levels, 1200.0))
+            });
+            match &e {
+                Some(e) => eprintln!(
+                    "побег: {} маяков, водопад в {:.0} м",
+                    e.guide.len(),
+                    glam::Vec2::new(
+                        e.goal.x - sim.curr.position.x,
+                        e.goal.z - sim.curr.position.z
+                    )
+                    .length()
+                ),
+                None => eprintln!("побег: нет реки рядом"),
+            }
+            // Старт — у первого маяка, лицом ко второму (вниз по течению).
+            if let Some(e) = &e
+                && e.guide.len() > 1
+            {
+                let (a, b) = (e.guide[0], e.guide[1]);
+                let d = (b - a).normalize_or(Vec3::NEG_Z);
+                sim = Sim::new(crate::sim::CameraState {
+                    position: a - d * 3.0 + Vec3::Y * crate::sim::EYE_HEIGHT_M,
+                    yaw: (-d.x).atan2(-d.z),
+                    pitch: -0.15,
+                });
+                sim.set_mode(MoveMode::Walk, &world);
+            }
+            e
+        } else {
+            None
+        };
         let tiles_only = args.tiles;
         let site = sky::site_of(&world);
         let time = sky::initial_time(&args, site);
@@ -263,6 +303,7 @@ impl App {
             hydrology,
             river_push_s: 0.0,
             raft,
+            escape,
             river_levels: Vec::new(),
             grade: true,
             taa_frame: 0,

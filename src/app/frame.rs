@@ -158,6 +158,22 @@ impl App {
         // Срез Сиратани (05.1–05.2): гриб под взглядом, чувство мицелия,
         // сообщения, интерфейс.
         self.game.tick(self.frame_dt);
+        // Ночной побег (05.6): дрон ищет, поимка возвращает к маяку.
+        if let Some(e) = self.escape.as_mut()
+            && self.sim.mode == sim::MoveMode::Walk
+        {
+            let p = self.sim.curr.position;
+            let cover = self.world.cover.as_ref().map_or(0.0, |c| {
+                let w = c.at(p.x, p.z, self.world.size_m().x);
+                w[0] + w[1]
+            });
+            if let Some(back) = e.update(&self.world, self.frame_dt, p, cover, underwater_m > 0.0) {
+                let pos = back + glam::Vec3::Y * sim::EYE_HEIGHT_M;
+                self.sim.curr.position = pos;
+                self.sim.prev.position = pos;
+                self.sim.velocity = glam::Vec3::ZERO;
+            }
+        }
         if game_on {
             let sensing = (self.args.sense
                 || (self.keys.contains(&winit::keyboard::KeyCode::KeyC)
@@ -170,6 +186,22 @@ impl App {
         let props = if game_on {
             let mut p = self.game.instances(camera.position);
             p.extend(self.game.sense_beads(camera.position, &self.world));
+            if let Some(e) = &self.escape {
+                let inst = e.instances(camera.position);
+                if std::env::var_os("ECHO_ESCAPE_LOG").is_some()
+                    && self.sim.tick.is_multiple_of(120)
+                {
+                    let first = inst
+                        .first()
+                        .map(|i| glam::Vec3::from(i.position) - camera.position);
+                    eprintln!(
+                        "маяки: {} экз., первый {first:?}, всего props {}",
+                        inst.len(),
+                        p.len() + inst.len()
+                    );
+                }
+                p.extend(inst);
+            }
             p
         } else {
             Vec::new()
@@ -179,6 +211,9 @@ impl App {
                 let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
                 let mut b = crate::ui::UiBuilder::new(font, scale);
                 self.game.ui(&mut b, w as f32 / scale, h as f32 / scale);
+                if let Some(e) = &self.escape {
+                    b.text(20.0, 20.0, 18.0, [235, 240, 215, 230], &e.status());
+                }
                 if let Some(job) = &self.cluster_job {
                     // Ход загрузки (02.10): кластеры собираются в фоне.
                     let text = format!(
@@ -402,6 +437,8 @@ impl App {
             cam_hi: cam_hi.extend(rw as f32 / w as f32).to_array(),
             cam_lo: (camera.position - cam_hi).extend(world_dt).to_array(),
             weather: self.weather.uniforms(),
+            spot_pos: self.escape.as_ref().map_or([0.0; 4], |e| e.spot(cam_hi).0),
+            spot_dir: self.escape.as_ref().map_or([0.0; 4], |e| e.spot(cam_hi).1),
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3): на GPU
         // (02.5) или на CPU (`--cpu-cull`). Самопроверка считает и CPU-срез —

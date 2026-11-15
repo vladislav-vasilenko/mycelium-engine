@@ -23,7 +23,25 @@ struct FrameUniforms {
     float4 cam_hi;         // камера = cam_hi + cam_lo; cam_hi кратна 256 м; w — масштаб рендера (04.6, смещение мипов)
     float4 cam_lo;         // w — шаг времени мира с прошлого кадра, с (04.6: ветер в векторах движения)
     float4 weather;        // 04.3: x — облачность, y — дождь, z — влажность земли + уровень луж (0…2), w — ветер
+    float4 spot_pos;       // 05.6: прожектор дрона — xyz относительно cam_hi, w — cos половины угла (0 — выкл.)
+    float4 spot_dir;       // xyz — направление луча, w — сила света
 };
+
+// Прожектор дрона (05.6): освещённость точки (`rel` — относительно камеры) с нормалью `n` (уже × на
+// альбедо снаружи). Мягкий край конуса, спад 1/d², без теней (сессия 2 — тени
+// крон в луче).
+inline float3 spot_light(constant FrameUniforms& f, float3 rel, float3 n) {
+    if (f.spot_pos.w <= 0.0) {
+        return float3(0.0);
+    }
+    float3 to = rel + f.cam_lo.xyz - f.spot_pos.xyz;
+    float d = length(to);
+    float3 l = to / max(d, 1e-3);
+    float c = dot(l, f.spot_dir.xyz);
+    float cone = smoothstep(f.spot_pos.w, mix(f.spot_pos.w, 1.0, 0.35), c);
+    float nl = saturate(dot(n, -l));
+    return float3(1.0, 0.97, 0.9) * f.spot_dir.w * cone * nl / max(d * d, 1.0);
+}
 
 // Позиция относительно камеры (AD-49): мир − cam_hi точна (cam_hi кратна 256 м,
 // узлы сетки — кратны шагу), минус малая cam_lo. Без огромного сдвига в матрице

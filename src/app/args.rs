@@ -46,6 +46,8 @@ pub struct Args {
     pub dive: bool,
     /// Пешком в реке у начала тропы (проверка плавания, 03.6).
     pub swim: bool,
+    /// Ночной побег от дрона (05.6): ночь, дрон, маяки к водопаду.
+    pub escape: bool,
     /// Предмет в руке с начала (0 — корзина, 1 — совок, 2 — фонарь, 3 — рация).
     pub prop: Option<usize>,
     /// Действие предметом с начала (проверка): `talk`, `dig`, `aim`.
@@ -104,6 +106,13 @@ impl Args {
                 "--raft" => args.raft = true,
                 "--dive" => args.dive = true,
                 "--swim" => args.swim = true,
+                "--escape" => {
+                    // Ночь без ускорения времени, лёгкая морось — дымка в луче.
+                    args.escape = true;
+                    args.time_h.get_or_insert(23.5);
+                    args.timescale.get_or_insert(1.0);
+                    args.weather.get_or_insert_with(|| "drizzle".to_string());
+                }
                 "--act" => args.act = it.next(),
                 "--prop" => args.prop = it.next().and_then(|v| v.parse::<usize>().ok()),
                 "--date" => {

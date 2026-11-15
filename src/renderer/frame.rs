@@ -12,11 +12,11 @@ use crate::water::WATER_LEVELS;
 
 pub(super) const FRAME_SLOTS: usize = 2;
 pub(super) const SLOT_WAIT_TIMEOUT_MS: u64 = 100;
-// Раскладка буфера upload слота: FrameUniforms @0, InstanceData[] @256..4096,
+// Раскладка буфера upload слота: FrameUniforms @0 (288 байт), InstanceData[] @384..4096,
 // SeaParams @4096, WaterLevel[] @4608, HandsUniforms @8192,
 // палитра костей float4x4[MAX_JOINTS] @8448..12544, SkyInputs @12544..12704.
 pub(super) const UPLOAD_BYTES: usize = 14336;
-pub(super) const INSTANCE_OFFSET: usize = 256;
+pub(super) const INSTANCE_OFFSET: usize = 384;
 pub(super) const INSTANCE_END: usize = 4096;
 pub(super) const MAX_INSTANCES: usize =
     (INSTANCE_END - INSTANCE_OFFSET) / size_of::<InstanceData>();

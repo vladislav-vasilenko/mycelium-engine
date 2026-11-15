@@ -929,7 +929,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Под сплошными облаками у солнца нет блика: иначе гладкая вода в лужах
     // с рябью от капель светилась молочно-белым (04.3).
     float spec_k = 1.0 - smoothstep(0.6, 1.0, frame.weather.x);
-    float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks * spec_k;
+    float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce + spot_light(frame, in.rel, N)) + SKY_PI * sun * spec * sun_flecks * spec_k;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:

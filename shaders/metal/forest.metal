@@ -782,7 +782,15 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
             albedo = float3(0.04);
             glow = beads[b] * in.tint * 0.8 / max(frame.pre_exposure, 1e-12);
         } else if (k == 0) {
-            glow = float3(0.35, 1.0, 0.45) * 3e-6 * (in.uv.y > 0.5 ? 1.0 : 0.4);
+            // Светящийся мицен: яркость × оттенок экземпляра (0,5 — обычный;
+            // маяки ночного побега 05.6 пульсируют до ×6).
+            glow = float3(0.35, 1.0, 0.45) * 6e-6 * in.tint * (in.uv.y > 0.5 ? 1.0 : 0.4);
+            if (in.tint > 0.55) {
+                // Маяк ночного побега (05.6): флуоресценция видна при любой
+                // экспозиции, как бусины чувства мицелия.
+                glow = float3(0.35, 1.0, 0.45) * in.tint * 0.12 / max(frame.pre_exposure, 1e-12)
+                     * (in.uv.y > 0.5 ? 1.0 : 0.5);
+            }
         }
     } else if (mat > 3.5 && mat < 4.5) {
         // Валун: камень сбоку, мшистый камень сверху (слои рельефа 0 и 9).
@@ -868,7 +876,9 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
         // Солнце в толще травы тоже гаснет к земле (без отдельной тени).
         sun *= mix(0.7, 1.0, blade_t);
     }
-    float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
+    // Прожектор дрона (05.6): листва светится и на просвет (двусторонне).
+    float3 spot = spot_light(frame, in.rel, n) + (leaf ? spot_light(frame, in.rel, -n) * 0.5 : float3(0.0));
+    float3 color = albedo * (sun * nl + sky + bounce * ao + spot) + glow;
     if (leaf) {
         // Свет сквозь лист (11, сессия 2): тонкий лист пропускает ~40 %
         // света с обратной стороны (диффузно, по нормали — `sun` уже с тенью

@@ -92,6 +92,17 @@ impl Raft {
         })
     }
 
+    /// Ось реки от старта вниз по течению с уровнем воды, шаг ~4 м (05.6).
+    pub fn sampled(&self, levels: &[[f32; 4]], len_m: f32) -> Vec<(Vec2, f32)> {
+        let mut out = Vec::new();
+        let mut s = self.s;
+        while s < self.s + len_m {
+            out.push(self.at(s, levels));
+            s += 4.0;
+        }
+        out
+    }
+
     /// Точка старта на оси реки и направление вниз по течению (для `--swim`).
     pub fn start(&self) -> (Vec2, Vec2) {
         let lv: Vec<[f32; 4]> = Vec::new();

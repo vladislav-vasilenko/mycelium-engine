@@ -9,6 +9,7 @@
 //! интерфейс — [`ui`].
 
 pub mod closeup;
+pub mod escape;
 pub mod sense;
 mod ui;
 

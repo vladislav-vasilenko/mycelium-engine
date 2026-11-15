@@ -21,6 +21,7 @@ mod hands;
 mod passes;
 mod readback;
 mod resources;
+mod rt;
 pub mod shaders;
 mod shadows;
 mod sky;
@@ -111,6 +112,8 @@ pub struct Renderer {
     cull_stats: Option<CullStats>,
     /// Лес (02.4) и его числа последнего завершённого кадра.
     forest: Option<forest::ForestGpu>,
+    /// Ускоряющие структуры для лучей (11); создаются с лесом.
+    rt: Option<rt::RtGpu>,
     forest_stats: Option<ForestStats>,
     /// Интерфейс (05.1): шрифт и буферы вершин.
     ui: Option<ui::UiGpu>,
@@ -209,7 +212,7 @@ impl Renderer {
         // Барьеры зависят и от состава предыдущего кадра: после кадра с readback
         // запись pattern и depth должна дождаться его копий в стадии blit.
         let build = |prev: bool, cur: bool| {
-            frame_graph::plan_after(&frame_passes(prev), frame_passes(cur), &[])
+            frame_graph::plan_after(&frame_passes(prev), frame_passes(cur), &[frame::RES_AO])
                 .map_err(|e| e.to_string())
         };
         let plans = [
@@ -250,6 +253,7 @@ impl Renderer {
             shadows,
             cull_stats: None,
             forest: None,
+            rt: None,
             forest_stats: None,
             ui: None,
             stats: Stats::default(),
@@ -481,10 +485,20 @@ impl Renderer {
             upload_bytes(&slot.upload, SKY_OFFSET, bytemuck::bytes_of(s));
         }
         // Без теней шейдеры видят params.x = 0 и тень не берут.
-        let shadow_u = input
+        let mut shadow_u: crate::layout::ShadowUniforms = input
             .shadows
             .as_ref()
             .map_or_else(bytemuck::Zeroable::zeroed, |s| s.uniforms);
+        // Лучи затенения (11): params.z = 1, если сцена для лучей строится в кадре.
+        let rt_on = input.rt
+            && self.rt.is_some()
+            && input.forest
+            && input.cull.is_some()
+            && self.forest.is_some()
+            && self.clusters.is_some()
+            && input.taa.is_some()
+            && input.shadows.is_some();
+        shadow_u.params[2] = if rt_on { 1.0 } else { 0.0 };
         upload_bytes(&slot.upload, SHADOW_OFFSET, bytemuck::bytes_of(&shadow_u));
         if let Some(c) = &input.cull {
             upload_bytes(&slot.upload, CULL_OFFSET, bytemuck::cast_slice(&c.views));

@@ -334,7 +334,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            constant ShadowUniforms& shadows [[buffer(12)]],
                            depth2d_array<float> shadow_map [[texture(7)]],
                            texture3d<float> aerial [[texture(8)]],
-                           texture2d<float> macro_tex [[texture(9)]]) {
+                           texture2d<float> macro_tex [[texture(9)]],
+                           texture2d<float> rt_ao_tex [[texture(10)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
     float2 xz = in.world.xz;
@@ -786,6 +787,13 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Отражённый свет (02.10, до GI этапа 11): освещённые склоны и кроны
     // подсвечивают тень — сильнее там, где неба видно мало.
     float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.30 * (1.0 - 0.5 * sky_vis) * mix(float3(1.0), float3(0.6, 0.75, 0.45), canopy_shade);
+    // Затенение лучами (11): небо и отражённый свет у корней, камней, стволов.
+    if (shadows.params.z > 0.5) {
+        constexpr sampler aos(filter::linear, address::clamp_to_edge);
+        float ao = rt_ao_tex.sample(aos, in.position.xy / (2.0 * float2(rt_ao_tex.get_width(), rt_ao_tex.get_height()))).x;
+        sky_c *= ao;
+        bounce *= ao;
+    }
     float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {

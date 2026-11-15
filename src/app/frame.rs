@@ -356,6 +356,7 @@ impl App {
             props: &props,
             ui: &ui_verts,
             taa,
+            rt: !self.args.no_rt,
             bloom: !selftest
                 && self.scene == SceneMode::Terrain
                 && self.view_mode == TerrainView::Lit,

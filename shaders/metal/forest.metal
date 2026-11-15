@@ -519,7 +519,8 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                          depth2d_array<float> shadow_map [[texture(1)]],
                          texture3d<float> aerial [[texture(2)]],
                          texture2d_array<float> mat_albedo [[texture(3)]],
-                         texture2d_array<float> bark_normal [[texture(4)]]) {
+                         texture2d_array<float> bark_normal [[texture(4)]],
+                         texture2d<float> rt_ao_tex [[texture(5)]]) {
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
     constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
@@ -610,6 +611,14 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float3 sky = sky_ambient_term(skyf, n) * ao;
     // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
     float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.24 * float3(0.75, 0.85, 0.6);
+    // Затенение лучами (11) — кора, камни, валежник (листва — карточки, её
+    // свет уже приглушён затенением внутри кроны).
+    if (shadows.params.z > 0.5 && !leaf) {
+        constexpr sampler aos(filter::linear, address::clamp_to_edge);
+        float rao = rt_ao_tex.sample(aos, in.position.xy / (2.0 * float2(rt_ao_tex.get_width(), rt_ao_tex.get_height()))).x;
+        sky *= rao;
+        bounce *= rao;
+    }
     float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {
         // Просвет листвы против солнца.

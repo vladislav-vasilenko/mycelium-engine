@@ -221,6 +221,18 @@ impl super::Renderer {
                 ))),
             );
         }
+        // Сцена для лучей (11) — нижние структуры из сеток растений.
+        if self.device.supportsRaytracing() {
+            let forest = self.forest.as_ref().expect("лес только что задан");
+            match super::rt::RtGpu::new(&self.device, &self.queue, &self.residency, forest, a) {
+                Ok(rt) => {
+                    if let Some(old) = self.rt.replace(rt) {
+                        self.retire(Vec::new(), Some(Box::new(old)));
+                    }
+                }
+                Err(e) => eprintln!("лучи затенения выключены: {e}"),
+            }
+        }
         Ok(())
     }
 

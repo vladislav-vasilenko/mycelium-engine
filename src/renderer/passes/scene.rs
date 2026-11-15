@@ -186,6 +186,8 @@ fn draw_clusters(
         table.setTexture_atIndex(c.material.gpuResourceID(), 5);
         table.setTexture_atIndex(c.cover.gpuResourceID(), 6);
         table.setTexture_atIndex(c.macro_detail.gpuResourceID(), 9);
+        // Затенение лучами прошлого кадра (11): шейдер читает его при params.z = 1.
+        table.setTexture_atIndex(ctx.targets.rt_ao.gpuResourceID(), 10);
     }
     enc.pushDebugGroup(&label(&match count {
         Some(n) => format!("terrain: {n} clusters (CPU cut)"),

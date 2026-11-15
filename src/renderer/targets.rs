@@ -17,6 +17,8 @@ pub(super) struct Targets {
     /// и цепочка вверх (на уровень меньше); итог — `bloom_up[0]`.
     pub bloom_down: Vec<Obj<dyn MTLTexture>>,
     pub bloom_up: Vec<Obj<dyn MTLTexture>>,
+    /// Затенение лучами (11): половина кадра, R32Float, копится во времени.
+    pub rt_ao: Obj<dyn MTLTexture>,
 }
 
 /// Уровней цепочки bloom: от 1/2 до 1/64 кадра.
@@ -62,6 +64,14 @@ impl Targets {
         };
         let bloom_down = (0..BLOOM_LEVELS).map(|k| level(k, "down")).collect();
         let bloom_up = (0..BLOOM_LEVELS - 1).map(|k| level(k, "up")).collect();
+        let rt_ao = private_texture(
+            device,
+            MTLPixelFormat::R32Float,
+            (width / 2).max(1),
+            (height / 2).max(1),
+            MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+            "rt ambient occlusion",
+        );
         Targets {
             width,
             height,
@@ -70,6 +80,7 @@ impl Targets {
             history,
             bloom_down,
             bloom_up,
+            rt_ao,
         }
     }
 
@@ -79,6 +90,7 @@ impl Targets {
         v.extend(self.history.iter().cloned());
         v.extend(self.bloom_down.iter().cloned());
         v.extend(self.bloom_up.iter().cloned());
+        v.push(self.rt_ao.clone());
         v
     }
 }

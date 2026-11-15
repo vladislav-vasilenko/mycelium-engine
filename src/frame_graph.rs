@@ -25,6 +25,8 @@ impl Stages {
     pub const FRAGMENT: Stages = Stages(1 << 1);
     pub const DISPATCH: Stages = Stages(1 << 2);
     pub const BLIT: Stages = Stages(1 << 3);
+    /// Построение ускоряющих структур для лучей (11).
+    pub const ACCEL: Stages = Stages(1 << 4);
 
     pub fn is_empty(self) -> bool {
         self.0 == 0
@@ -55,7 +57,8 @@ pub enum PassKind {
 impl PassKind {
     fn allowed(self) -> Stages {
         match self {
-            PassKind::Compute => Stages::DISPATCH | Stages::BLIT,
+            // Compute-кодировщик Metal 4 также копирует и строит ускоряющие структуры.
+            PassKind::Compute => Stages::DISPATCH | Stages::BLIT | Stages::ACCEL,
             PassKind::Render => Stages::VERTEX | Stages::FRAGMENT,
         }
     }

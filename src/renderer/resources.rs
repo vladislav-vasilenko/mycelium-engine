@@ -30,6 +30,9 @@ pub(super) fn to_mtl_stages(s: Stages) -> MTLStages {
     if s.contains(Stages::BLIT) {
         out |= MTLStages::Blit;
     }
+    if s.contains(Stages::ACCEL) {
+        out |= MTLStages::AccelerationStructure;
+    }
     out
 }
 

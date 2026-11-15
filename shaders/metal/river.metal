@@ -197,16 +197,21 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float dz = max(in.world.y - bed, 0.0);
     float3 Tr = refract(-V, n, 1.0 / 1.33);
     float path_w = dz / max(-Tr.y, 0.2);
-    // Поглощение: красный гаснет быстрее всего — голубизна растёт с глубиной.
-    float3 T = exp(-float3(1.1, 0.42, 0.3) * path_w);
-    // Рассеяние неба, преломлённого в толщу: голубое свечение взвеси,
-    // ярче под рябью, повернутой к небу.
+    // Та же модель воды, что у моря (`water.metal`): поглощение и рассеяние
+    // одной воды — у устья цвета совпадают. Реки Якусимы прозрачные, с
+    // бирюзой на глубине; толща ×1,5 — немного взвеси от течения.
+    const float3 absorb = float3(0.42, 0.085, 0.055) * 1.5;
+    float3 T = exp(-absorb * path_w);
+    // Рассеяние неба, преломлённого в толщу, ярче под рябью, повёрнутой к небу.
     float sky_in = 0.7 + 0.5 * saturate(n.y);
-    float3 scatter = float3(0.015, 0.05, 0.065) * (sky_up * sky_in + sun * max(-frame.light_dir.y, 0.0) * 0.2);
+    float3 scatter = float3(0.010, 0.085, 0.095) * (sun * 0.6 + sky_up * sky_in) * 2.6;
     float3 water = refl * fres + scatter * (1.0 - T) * (1.0 - fres);
     float opacity = saturate(1.0 - dot(T, float3(0.33)) * (1.0 - fres));
     // Край ленты растворяется — без резкой границы на берегу.
     float soft = 1.0 - smoothstep(0.75, 1.0, abs(in.across));
+    // Устье: где дно ниже моря, лента растворяется в морской поверхности
+    // (море рисуется своим проходом, с волнами и прибоем).
+    soft *= smoothstep(-1.5, 0.0, bed);
     float3 col = mix(water, foam_c, foam);
     float a = mix(opacity, 0.85, foam) * soft;
     col = apply_aerial(aerial, frame, in.world - frame.camera_pos.xyz, col);

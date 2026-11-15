@@ -301,6 +301,10 @@ impl Hydrology {
                 }
                 fill(&mut w, d * 0.5);
             }
+            // Устье: не ниже моря — река переходит в его поверхность.
+            for x in &mut w {
+                *x = x.max(crate::world::generator::SEA_LEVEL + 0.05);
+            }
             for (j, &i) in segs.iter().enumerate() {
                 out[i] = [w[j], w[j + 1]];
             }

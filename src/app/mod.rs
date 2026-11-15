@@ -158,6 +158,27 @@ impl App {
             )
         });
         eprintln!("гидрология: {} участков рек", hydrology.reaches.len());
+        if std::env::var_os("ECHO_MOUTHS").is_some() {
+            // Устья в море (03.2): крупнейшие по водосбору — для камер.
+            let mut m: Vec<_> = hydrology
+                .reaches
+                .iter()
+                .filter(|r| r.into.is_none())
+                .collect();
+            m.sort_by(|a, b| b.area_m2.total_cmp(&a.area_m2));
+            for r in m.iter().take(8) {
+                let h = world
+                    .sample_ground(r.mouth.x, r.mouth.y)
+                    .map(|g| (g.height, g.wet));
+                eprintln!(
+                    "устье: ({:.0}, {:.0}) площадь {:.1} км² ширина {:.0} м грунт {h:?}",
+                    r.mouth.x,
+                    r.mouth.y,
+                    r.area_m2 / 1e6,
+                    r.width_m
+                );
+            }
+        }
         eprintln!(
             "мир: {}, seed {:#x}, {}×{} тайлов, генератор v{}, собран за {:.0} мс, контрольная сумма {:016x}",
             args.world

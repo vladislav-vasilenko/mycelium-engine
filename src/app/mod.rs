@@ -162,6 +162,12 @@ impl App {
         } else if args.overview {
             island_overview_camera(&world)
         } else if let Some(c) = args.at.and_then(|k| marker_camera(&world, k)) {
+            // Та же камера флагом `--camera` — для повторяемых снимков.
+            let f = c.position + c.forward() * 10.0;
+            eprintln!(
+                "камера --at: --camera {:.1},{:.1},{:.1},{:.1},{:.1},{:.1}",
+                c.position.x, c.position.y, c.position.z, f.x, f.y, f.z
+            );
             c
         } else {
             trail_start_camera(&world)

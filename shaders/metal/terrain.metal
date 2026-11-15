@@ -755,8 +755,10 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float4 wv = ground_water.sample(wsm, (xz / 0.5 - 0.5 + 0.5) / 256.0);
         float wd = wv.r;
         float near_w = 1.0 - smoothstep(48.0, 60.0, max(abs(in.rel.x), abs(in.rel.z)));
-        float sim_puddle = smoothstep(0.003, 0.012, wd);
-        film = smoothstep(0.0004, 0.003, wd) * (1.0 - sim_puddle);
+        // Край — не по клеткам 0,5 м: порог сдвигает мелкий шум (~5 см).
+        float edge_n = detail.sample(s, pattern_uv(frame, lxz, 0.9)).b - 0.5;
+        float sim_puddle = smoothstep(0.003, 0.01, wd + edge_n * 0.008);
+        film = smoothstep(0.0004, 0.003, wd + edge_n * 0.0012) * (1.0 - sim_puddle);
         water_flow = wv.ba;
         puddle = mix(puddle, sim_puddle, near_w);
         film *= near_w;
@@ -960,8 +962,10 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float3 R = reflect(-V, Nw);
         float3 sky_rad = sky_ambient_term(skyf, float3(0, 1, 0));
         float3 env = sky_rad * 0.1 * float3(0.75, 0.9, 0.75);
-        float3 refl = mix(env, sky_rad * 0.6, smoothstep(0.12, 0.45, R.y)) * occ;
-        color = mix(color, color * 0.6 + refl, fres * puddle);
+        // Небо в луже видно сквозь кроны и между склонами — по видимости неба
+        // в квадрате; дождевая вода мутная (бурая), не зеркально-чистая.
+        float3 refl = mix(env, sky_rad * 0.35, smoothstep(0.12, 0.45, R.y)) * occ * occ;
+        color = mix(color, color * float3(0.75, 0.65, 0.55) + refl, fres * puddle);
     }
     if (frame.underwater_m > 0.0) {
         // Под водой: свет у точки ниже моря ослаблен толщей над ней, путь от

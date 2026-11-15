@@ -87,7 +87,7 @@ impl Args {
                 "--no-rt" => args.no_rt = true,
                 "--gpu-times" => args.gpu_times = true,
                 "--render-scale" => args.render_scale = it.next().and_then(|v| v.parse().ok()),
-                "--weather" => args.weather = it.next().map(Into::into),
+                "--weather" => args.weather = it.next(),
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

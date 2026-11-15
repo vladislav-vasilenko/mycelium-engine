@@ -67,10 +67,12 @@ impl GpuTimers {
         };
         let bytes = data.to_vec();
         let ts: Vec<u64> = bytes
-            .chunks_exact(8)
-            .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| u64::from_le_bytes(*c))
             .collect();
-        if ts.len() < n + 1 || ts.iter().any(|&t| t == 0) {
+        if ts.len() < n + 1 || ts.contains(&0) {
             return;
         }
         let names = self.names[slot].clone();

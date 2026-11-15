@@ -107,6 +107,8 @@ pub struct Reach {
 /// Наименьшая глубина воды демо, м (`LEVEL_MIN_M` в `river.metal`): ручьи по
 /// гидрологии — сантиметры, уровень ×3 от прежних 0,3 м.
 pub const LEVEL_MIN_M: f32 = 0.9;
+/// Наибольший подпор плёса над обычной глубиной, м.
+pub const POOL_MAX_M: f32 = 1.0;
 
 #[derive(Clone, Debug, Default)]
 pub struct Hydrology {
@@ -285,10 +287,19 @@ impl Hydrology {
             let fill = |w: &mut Vec<f32>, min_d: f32| {
                 // От устья вверх: не ниже уровня ниже по течению.
                 let last = down[n - 1];
-                w[last] = w[last].max(bed[last] + min_d);
+                w[last] = w[last]
+                    .min(bed[last] + d + POOL_MAX_M)
+                    .max(bed[last] + min_d);
                 for k in (0..n - 1).rev() {
                     let (here, below) = (down[k], down[k + 1]);
-                    w[here] = w[here].max(bed[here] + min_d).max(w[below]);
+                    // Подпор плёса — не выше `POOL_MAX_M` над глубиной: горб дна
+                    // выше (линия реки режет склон, рельеф GPU отличается) не
+                    // поднимает всю воду выше по течению до своей вершины —
+                    // иначе лента висит над склоном.
+                    let own = bed[here] + min_d;
+                    // Сглаживание тоже не поднимает воду выше подпора.
+                    let cap = bed[here] + d + POOL_MAX_M;
+                    w[here] = w[here].min(cap).max(own).max(w[below].min(cap));
                 }
             };
             fill(&mut w, d);
@@ -380,30 +391,34 @@ mod tests {
 
     #[test]
     fn water_level_is_flat_in_pools_and_never_uphill() {
-        // Река из 6 отрезков, дно падает к x = 0, посередине яма 20 м.
+        // Река из 6 отрезков, дно падает к x = 0.
         let json = r#"{"rivers": [{"kind": "river", "width_m": 8.0,
             "line": [[600, 500], [500, 500], [400, 500], [300, 500], [200, 500], [100, 500], [0, 500]]}],
             "trails": [], "roads": []}"#;
         let set = FeatureSet::from_json(json, 2048.0).unwrap();
         let mut h = Hydrology::build(&set, |p| Some(p.x * 0.05), None);
-        // Яма в точке x = 300 (конец отрезка 2 и начало отрезка 3).
-        h.bed[2][1] -= 20.0;
-        h.bed[3][0] -= 20.0;
+        // Мелкая яма 0,6 м в точке x = 300 (конец отрезка 2, начало 3) —
+        // заполняется; горб 20 м на x = 100 не поднимает воду выше по течению
+        // больше чем на `POOL_MAX_M`.
+        h.bed[2][1] -= 0.6;
+        h.bed[3][0] -= 0.6;
+        h.bed[4][1] += 20.0;
+        h.bed[5][0] += 20.0;
         let lv = h.levels(set.segments.len(), 1.0);
         for i in 0..6 {
             assert!(
                 lv[i][0] >= h.bed[i][0] - 1e-3 && lv[i][1] >= h.bed[i][1] - 1e-3,
                 "не ниже дна"
             );
-            // Не в гору: вниз по течению (к x = 0) уровень не растёт.
-            assert!(lv[i][1] <= lv[i][0] + 1e-3, "в гору на отрезке {i}");
         }
         // Над ямой уровень не проваливается вслед за дном.
+        assert!(lv[2][1] >= lv[3][1] - 1e-3, "яма: {lv:?}");
+        // Выше горба вода — не выше дна + глубина + подпор.
+        let d = h.reaches[0].depth.max(LEVEL_MIN_M) + 0.12;
         assert!(
-            lv[2][1] > h.bed[2][1] + 10.0,
-            "яма заполнена: {} над {}",
-            lv[2][1],
-            h.bed[2][1]
+            lv[3][1] <= h.bed[3][1] + d + POOL_MAX_M + 1e-3,
+            "висит над горбом: {lv:?}, дно {:?}",
+            h.bed
         );
     }
 }

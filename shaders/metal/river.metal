@@ -91,7 +91,17 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float y = h_end + depth + 0.12;
     o.world = float3(xz.x, y, xz.y);
     o.position = frame.view_proj_rel * float4(camera_relative(frame, o.world), 1.0);
-    o.flow = flow;
+    // Течение у вершины — среднее с соседом на стыке: плавно вдоль ленты
+    // (иначе узор ряби поворачивался скачком на каждом стыке).
+    float2 vflow = flow;
+    if (v < 0.5 && has_prev) {
+        float2 pd = normalize(a - segs[iid - 1].a + 1e-6);
+        vflow = normalize(flow + (dot(pd, dir) > 0.0 ? pd : -pd) * sign(dot(flow, dir)));
+    } else if (v > 0.5 && has_next) {
+        float2 nd = normalize(segs[iid + 1].b - b + 1e-6);
+        vflow = normalize(flow + (dot(nd, dir) > 0.0 ? nd : -nd) * sign(dot(flow, dir)));
+    }
+    o.flow = vflow;
     o.along = v * len;
     o.across = u;
     // Уклон — по 10 м до и после отрезка: высоты по 4-метровым отрезкам
@@ -116,20 +126,20 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float speed = clamp(0.4 + sqrt(slope) * 6.0, 0.4, 5.0);
     float2 fd = normalize(in.flow);
     float2 fn = float2(-fd.y, fd.x);
-    // Координаты в системе течения (м): вдоль — со сдвигом по времени.
-    float2 q = float2(dot(in.world.xz, fn), dot(in.world.xz, fd));
-    // Две фазы сдвига: текстура не растягивается бесконечно.
+    // Мировые координаты со сдвигом по (плавному) течению, две фазы — узор
+    // непрерывен на стыках отрезков и не растягивается со временем.
+    float2 xz = in.world.xz;
     float ph0 = fract(t * 0.25), ph1 = fract(t * 0.25 + 0.5);
     float w0 = 1.0 - abs(ph0 * 2.0 - 1.0);
-    auto rip = [&](float ph, float2 sc) {
-        float2 uv = (q - float2(0.0, ph * speed * 4.0)) / sc;
-        return detail.sample(s, uv).rg - 0.5;
+    auto adv = [&](float ph, float k) { return fd * ph * speed * 4.0 * k; };
+    auto rip = [&](float ph, float sc) {
+        return detail.sample(s, (xz - adv(ph, 1.0)) / sc).rg - 0.5;
     };
-    float2 r = (rip(ph0, float2(1.6, 2.4)) * w0 + rip(ph1, float2(1.6, 2.4)) * (1.0 - w0))
-             + 0.5 * (rip(ph0, float2(0.5, 0.9)) * w0 + rip(ph1, float2(0.5, 0.9)) * (1.0 - w0));
+    float2 r = (rip(ph0, 2.0) * w0 + rip(ph1, 2.0) * (1.0 - w0))
+             + 0.5 * (rip(ph0, 0.7) * w0 + rip(ph1, 0.7) * (1.0 - w0));
     float turb = smoothstep(0.02, 0.12, slope);
     // Бурление: на скатах волны выше и круче.
-    float3 n = normalize(float3(fn * r.x + fd * r.y, 0.0).xzy * (0.3 + 1.6 * turb) + float3(0.0, 1.0, 0.0));
+    float3 n = normalize(float3(r.x, 0.0, r.y) * (0.3 + 1.6 * turb) + float3(0.0, 1.0, 0.0));
     float3 V = normalize(frame.camera_pos.xyz - in.world);
     // Френель — по нормали с рябью (пятна неба на волнах), не меньше, чем
     // у ровной воды.
@@ -143,8 +153,11 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float3 refl = mix(sky_up * 0.08 * float3(0.7, 0.85, 0.7), sky_up * 0.75, smoothstep(0.05, 0.35, R.y));
     // Пена: на скатах сплошная полосами вдоль течения, на перекатах и у
     // берегов — клочьями; бежит с водой.
-    float fnoise = detail.sample(s, (q - float2(0.0, t * speed)) / float2(0.35, 1.4)).b;
-    float fnoise2 = detail.sample(s, (q - float2(0.0, t * speed * 1.3)) / float2(0.9, 0.6)).r;
+    auto foam_n = [&](float ph, float sc, float k) {
+        return detail.sample(s, (xz - adv(ph, k)) / sc);
+    };
+    float fnoise = foam_n(ph0, 0.8, 1.0).b * w0 + foam_n(ph1, 0.8, 1.0).b * (1.0 - w0);
+    float fnoise2 = foam_n(ph0, 2.2, 1.3).r * w0 + foam_n(ph1, 2.2, 1.3).r * (1.0 - w0);
     float edge = smoothstep(0.6, 1.0, abs(in.across));
     // Мягкая пена: широкий порог, крупные пятна (fnoise2) несут мелкие
     // полосы (fnoise) — без резких белых штрихов.

@@ -63,6 +63,8 @@ pub struct App {
     taa_prev: Option<(glam::Mat4, glam::Vec3, (u32, u32))>,
     /// Время мира прошлого кадра (04.6): шаг ветра для векторов движения.
     prev_world_time: f32,
+    /// Погода (04.3).
+    weather: crate::weather::Weather,
     taa_frame: u32,
     scene: SceneMode,
     window: Option<Arc<Window>>,
@@ -119,6 +121,12 @@ pub(super) struct ClusterJob {
 
 impl App {
     pub fn new(args: Args) -> App {
+        let weather = crate::weather::Weather::new(
+            args.weather
+                .as_deref()
+                .and_then(crate::weather::Preset::from_id)
+                .unwrap_or(crate::weather::Preset::Clear),
+        );
         let start_view = args.view.unwrap_or(TerrainView::Lit);
         let selftest = args.selftest.then(SelfTest::new);
         let started = Instant::now();
@@ -170,6 +178,7 @@ impl App {
             cluster_job: None,
             taa_prev: None,
             prev_world_time: 0.0,
+            weather,
             taa_frame: 0,
             scene,
             window: None,

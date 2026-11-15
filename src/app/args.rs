@@ -36,6 +36,8 @@ pub struct Args {
     pub gpu_times: bool,
     /// Масштаб рендера сцены (04.6): по умолчанию 0,67 с апскейлом MetalFX; 1 — без апскейла.
     pub render_scale: Option<f32>,
+    /// Погода при старте (04.3): clear, cloudy, drizzle, rain, storm.
+    pub weather: Option<String>,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -85,6 +87,7 @@ impl Args {
                 "--no-rt" => args.no_rt = true,
                 "--gpu-times" => args.gpu_times = true,
                 "--render-scale" => args.render_scale = it.next().and_then(|v| v.parse().ok()),
+                "--weather" => args.weather = it.next().map(Into::into),
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

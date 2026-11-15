@@ -71,6 +71,12 @@ impl App {
                 self.game.inspect(&cam);
             }
             KeyCode::KeyJ => self.game.journal_open = !self.game.journal_open,
+            // Погода (04.3): следующий пресет, переход плавный.
+            KeyCode::KeyP => {
+                let next = self.weather.preset.next();
+                self.weather.set(next);
+                self.update_title(true);
+            }
             KeyCode::KeyH => {
                 self.hands_visible = !self.hands_visible;
             }

@@ -64,10 +64,11 @@ impl App {
                 ],
                 inv_view_proj_rel: view_proj_rel.inverse().to_cols_array_2d(),
                 // Телесный угол пикселя у центра кадра: (2·tg(FOV/2) / высота)².
+                // z — облачность (04.3): свет солнца, небо и звёзды.
                 view: [
                     (2.0 / view_proj_rel.y_axis.y / height_px as f32).powi(2),
                     0.0,
-                    0.0,
+                    self.weather.cloud,
                     0.0,
                 ],
             },

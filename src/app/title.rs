@@ -115,7 +115,7 @@ impl App {
             String::new()
         };
         let clock = if self.scene == SceneMode::Terrain {
-            format!(" · {}", self.time_label())
+            format!(" · {} · {}", self.time_label(), self.weather.preset.label())
         } else {
             String::new()
         };

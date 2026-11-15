@@ -263,6 +263,19 @@ kernel void sky_ambient(texture2d<float> skyview [[texture(0)]],
     float above = smoothstep(-0.02, 0.01, ldir.y);
     // Луна: освещённость полной луны ≈ 2,5·10⁻⁶ солнечной, пропорционально фазе.
     float3 light = (is_sun ? E * SUN_TINT : E * moon_k * float3(0.9, 0.95, 1.0)) * t_light * above;
+    // Пасмурно (04.3): облака гасят прямой свет и рассеивают его в ровный
+    // серый свод — ~40 % освещённости ясного дня, без направленности.
+    float cloud = saturate(sky.view.z);
+    float3 e_clear = light * max(ldir.y, 0.0) + total[9];
+    float3 overcast_l = dot(e_clear, float3(0.2126, 0.7152, 0.0722)) * float3(0.92, 0.95, 1.0) * 0.4 / SKY_PI;
+    light *= 1.0 - 0.95 * cloud;
+    for (int k = 0; k < 9; ++k) {
+        total[k] *= 1.0 - cloud;
+    }
+    // Равномерная верхняя полусфера в SH (как земля снизу, с обратным знаком).
+    total[0] += overcast_l * 0.282095 * 2.0 * SKY_PI * cloud;
+    total[1] += overcast_l * 0.488603 * SKY_PI * cloud;
+    total[9] = mix(total[9], overcast_l * SKY_PI, cloud);
     float3 e_sky = total[9];
     // Земля под горизонтом: альбедо 0,1 от неба и светила.
     float3 ground_l = 0.1 / SKY_PI * (e_sky + light * max(ldir.y, 0.0));
@@ -280,7 +293,8 @@ kernel void sky_ambient(texture2d<float> skyview [[texture(0)]],
     // Освещённость горизонтали — для отладки; экспозицию меряет кадр (exposure_meter).
     float3 e_h = light * max(ldir.y, 0.0) + e_sky + night_floor * SKY_PI;
     float lum = dot(e_h, float3(0.2126, 0.7152, 0.0722));
-    outf.exposure = float4(0.0, 0.0, lum, 0.0);
+    // w — яркость пасмурного свода (04.3) для прохода неба.
+    outf.exposure = float4(0.0, 0.0, lum, dot(overcast_l, float3(0.2126, 0.7152, 0.0722)));
 }
 
 // --- Проход неба: полноэкранный треугольник на глубине 0 (reversed-Z). ------
@@ -349,6 +363,11 @@ fragment float4 sky_fs(SkyOut in [[stage_in]],
         moon_l += E * 2e-8;
         col += moon_l * t_view * hits_ground * smoothstep(1.0, 0.97, moon_r);
     }
+    // Пасмурный свод (04.3): ровная серая яркость, зенит светлее горизонта
+    // (как облачное небо CIE), солнце и луна скрыты; к земле — как было.
+    float cloud = saturate(sky.view.z);
+    float3 overcast = skyf.exposure.w * float3(0.92, 0.95, 1.0) * (0.55 + 0.9 * saturate(view.y));
+    col = mix(col, overcast * hits_ground + col * (1.0 - hits_ground), smoothstep(0.0, 1.0, cloud));
     return float4(col * frame.pre_exposure, 1.0);
 }
 
@@ -463,7 +482,8 @@ vertex StarOut stars_vs(uint vid [[vertex_id]],
     float3 t = sample_transmittance(transmittance, cam, w) * smoothstep(-0.01, 0.02, w.y);
     // Художественное усиление ×6: глаз ночью адаптируется к темноте (палочки),
     // а экран нет — без него видны только звёзды ярче 3m.
-    float flux = 6.0 * 2.5e-11 * pow(10.0, -0.4 * s.vmag) * sky.params.w;
+    float flux = 6.0 * 2.5e-11 * pow(10.0, -0.4 * s.vmag) * sky.params.w
+               * (1.0 - saturate(sky.view.z)) * (1.0 - saturate(sky.view.z));  // за облаками не видно (04.3)
     // Лёгкое мерцание у горизонта сильнее.
     float tw = 1.0 + 0.25 * (1.0 - saturate(w.y * 4.0)) * sin(sky.params.z * 13.0 + float(vid) * 7.31);
     float size = s.vmag < 2.0 ? 2.0 : 1.0;

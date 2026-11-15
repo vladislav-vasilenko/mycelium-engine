@@ -214,6 +214,10 @@ impl App {
         // Шаг времени мира между кадрами (04.6): ветер прошлого кадра для
         // векторов движения растений — в `cam_lo.w`.
         let world_dt = (time - self.prev_world_time).clamp(0.0, 0.1);
+        // Погода идёт по игровым часам (ускорение хода суток).
+        if !self.time.paused {
+            self.weather.update(self.frame_dt * self.time.scale as f32);
+        }
         self.prev_world_time = time;
         // Лес (02.4): кластерный рельеф, выбор на GPU, не в самопроверке.
         let forest = self.forest_loaded
@@ -272,6 +276,7 @@ impl App {
             // для выбора мипов — текстуры чёткие, как в выходном разрешении.
             cam_hi: cam_hi.extend(rw as f32 / w as f32).to_array(),
             cam_lo: (camera.position - cam_hi).extend(world_dt).to_array(),
+            weather: self.weather.uniforms(),
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3): на GPU
         // (02.5) или на CPU (`--cpu-cull`). Самопроверка считает и CPU-срез —

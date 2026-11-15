@@ -694,9 +694,15 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     }
 
     // Мокрый песок: темнее, глаже, с бликом.
-    float wet = saturate(wet_mask * porosity);
-    albedo *= mix(1.0, 0.4, wet);
-    rough = mix(rough, 0.08, 0.9 * wet);
+    // Дождь (04.3): общая влажность земли `weather.z`; круче — стекает, в
+    // ложбинах — мокрее, под пологом чуть суше. Мокрый камень темнеет меньше
+    // пористой почвы, но блестит так же.
+    float rain_wet = frame.weather.z * (1.0 - 0.6 * smoothstep(30.0, 55.0, slope_deg))
+                   * saturate(0.8 + max(-curv, 0.0) * 3.0) * (1.0 - 0.3 * forest_w);
+    float wet = saturate(max(wet_mask * porosity, rain_wet * mix(porosity, 1.0, 0.7)));
+    // Мокрая почва вдвое темнее и насыщеннее (вода заполняет поры).
+    albedo = pow(albedo, float3(1.0 + 0.35 * wet)) * mix(1.0, 0.45, wet);
+    rough = mix(rough, 0.08, 0.9 * max(wet, 0.8 * rain_wet));
 
 
     // Нормаль из карты: касательная +X, бикасательная −Z (v растёт с z, а «вверх» на картинке — к меньшим v).

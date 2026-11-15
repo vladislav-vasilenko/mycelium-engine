@@ -34,6 +34,7 @@ mod terrain_materials;
 mod terrain_mesh;
 mod ui;
 mod water;
+mod weather;
 mod world;
 
 use winit::event_loop::{ControlFlow, EventLoop};

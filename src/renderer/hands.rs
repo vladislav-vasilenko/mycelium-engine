@@ -18,10 +18,20 @@ pub(super) struct HandsGpu {
     pub albedo: Obj<dyn MTLTexture>,
 }
 
+/// Предмет в руке на GPU: сетка с одной костью (`hands::props`) и текстура.
+pub(super) struct HandPropGpu {
+    pub vertices: Obj<dyn MTLBuffer>,
+    pub indices: Obj<dyn MTLBuffer>,
+    pub index_count: usize,
+    pub albedo: Obj<dyn MTLTexture>,
+}
+
 /// Руки в кадре: параметры прохода и палитра (по столбцам, как `float4x4`).
 pub struct HandsFrame {
     pub uniforms: HandsUniforms,
     pub palette: Vec<[[f32; 4]; 4]>,
+    /// Предмет в руке — индекс в порядке `add_hand_prop`.
+    pub prop: Option<usize>,
 }
 
 impl Renderer {
@@ -67,6 +77,51 @@ impl Renderer {
                 Some(Box::new((old.vertices, old.indices))),
             );
         }
+        Ok(())
+    }
+
+    /// Добавляет предмет в руке (этап 10): вершины уже в пространстве
+    /// привязки кости, индексы u32, текстура RGBA8 sRGB `albedo_size`².
+    pub fn add_hand_prop(
+        &mut self,
+        vertices: &[SkinnedVertex],
+        indices: &[u32],
+        albedo: &[u8],
+        albedo_size: u32,
+    ) -> Result<(), String> {
+        let vbuf = buffer_with(
+            &self.device,
+            bytemuck::cast_slice(vertices),
+            "hand prop vertices",
+        );
+        let ibuf = buffer_with(
+            &self.device,
+            bytemuck::cast_slice(indices),
+            "hand prop indices",
+        );
+        for a in [as_allocation(&*vbuf), as_allocation(&*ibuf)] {
+            self.residency.addAllocation(a);
+        }
+        let tex = sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm_sRGB,
+            albedo_size,
+            1,
+            true,
+            "hand prop albedo",
+        )?;
+        self.upload_textures(&[TextureUpload {
+            texture: &tex,
+            data: albedo,
+            pixel_bytes: 4,
+            mips: true,
+        }])?;
+        self.hand_props.push(HandPropGpu {
+            vertices: vbuf,
+            indices: ibuf,
+            index_count: indices.len(),
+            albedo: tex,
+        });
         Ok(())
     }
 }

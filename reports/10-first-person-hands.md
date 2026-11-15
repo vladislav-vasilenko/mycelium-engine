@@ -28,6 +28,19 @@
 | Сгиб каждого пальца по параметрам | Шаг 4 | Не сделан: только целые позы | `not-run` | followup |
 | Кожа, волоски, рукав, грязь | Шаг 5 | Временный свет: «обёрнутый» Ламберт и красноватый край | `not-run` | следующая итерация |
 
+## Предметы в руках (2026-11-15, по просьбе пользователя)
+
+«Руки скучные; добавь предметы» — корзина, совок, фонарь, рация (Poly Haven, CC0).
+
+| Пункт | Фактически | Статус | Доказательство |
+| --- | --- | --- | --- |
+| Исходники | `tools/plants/fetch_polyhaven.py`: `wicker_basket_01`, `trowel_01`, `vintage_flashlight`, `vintage_radio_transceiver` (1K) | passed | `assets/source/polyhaven/LICENSE.md` |
+| Конвертация | `tools/props/build_props.py`: нужные узлы и материал, начало — в точке хвата, один примитив + встроенный JPEG → `assets/models/props/*.glb` (3–15 тыс. вершин) | passed | — |
+| Привязка | `hands::load_props`: жёстко к кости ладони (`palm_middle.*`), вершины — в пространстве привязки (`inverse(IBM) · local`), `local` — из `props.json` в пространстве глаза у кисти в позе grip | passed | — |
+| Отрисовка | Тот же `hands_vs/fs` и палитра, своя сетка и текстура: `Renderer::add_hand_prop`, `HandsFrame.prop`, `Table::HandProp` (28 таблиц) | passed | [корзина](../logs/screens/10-prop-basket.png), [рация](../logs/screens/10-prop-radio.png), [фонарь](../logs/screens/10-prop-flashlight.png), [совок](../logs/screens/10-prop-trowel.png) |
+| Управление | 1–4 — взять/убрать предмет (руки в позе grip), Shift+1…4 — отладка поз; `--prop N`; подсказка в интерфейсе | passed | — |
+| Ограничения | Фонарь и совок видны краем (низко у кулака); «рация» — настольный микрофон на стойке (у Poly Haven нет ручной тангенты); фонарь не светит; анимации взятия нет — предмет появляется мгновенно | partial | — |
+
 ## implementation
 
 Итерация 2 (шаги 2–4):

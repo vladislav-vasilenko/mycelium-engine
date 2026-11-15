@@ -109,9 +109,27 @@ impl App {
         }
         let t_hands = Instant::now();
         let hands = match Hands::load() {
-            Ok(h) => {
+            Ok(mut h) => {
                 let a = &h.asset;
                 r.set_hands(&a.vertices, &a.indices, &a.albedo, a.albedo_size)?;
+                // Предметы в руках (этап 10): привязка к кисти в позе grip.
+                match crate::hands::load_props(a, "grip") {
+                    Ok(props) => {
+                        for p in &props {
+                            r.add_hand_prop(&p.vertices, &p.indices, &p.albedo, p.albedo_size)?;
+                        }
+                        eprintln!(
+                            "предметы в руках: {}",
+                            props
+                                .iter()
+                                .map(|p| p.spec.label.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
+                        h.props = props.into_iter().map(|p| p.spec).collect();
+                    }
+                    Err(e) => eprintln!("предметы в руках не загружены: {e}"),
+                }
                 eprintln!(
                     "руки: {} вершин, {} костей, поз {}, загружены за {:.0} мс",
                     a.vertices.len(),

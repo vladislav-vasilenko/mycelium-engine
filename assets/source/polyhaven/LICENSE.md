@@ -32,3 +32,7 @@ https://creativecommons.org/publicdomain/zero/1.0/). Указание автор
 | tree_small_02 | молодое широколиственное | Rico Cilliers | https://polyhaven.com/a/tree_small_02 |
 | tree_stump_01 | пень | Rob Tuytel | https://polyhaven.com/a/tree_stump_01 |
 | tree_stump_02 | пень | Rob Tuytel | https://polyhaven.com/a/tree_stump_02 |
+| trowel_01 | совок (в руке) | Satyaki Mandal | https://polyhaven.com/a/trowel_01 |
+| vintage_flashlight | фонарь (в руке) | Omar M. El-Safy | https://polyhaven.com/a/vintage_flashlight |
+| vintage_radio_transceiver | полевая рация (в руке) | Mateusz Sadek | https://polyhaven.com/a/vintage_radio_transceiver |
+| wicker_basket_01 | корзина для грибов (в руке) | Kuutti Siitonen | https://polyhaven.com/a/wicker_basket_01 |

@@ -17,9 +17,13 @@ impl App {
         }
         let selftest = self.selftest.is_some();
         let start_pose = self.args.pose.take();
+        let start_prop = self.args.prop.take();
         let h = self.hands.as_mut()?;
         if let Some(i) = start_pose {
             h.rig.set_pose(i);
+        }
+        if let Some(i) = start_prop.filter(|&i| i < h.props.len()) {
+            h.prop = Some(i);
         }
         let palette = if selftest {
             h.control_palette()
@@ -35,11 +39,14 @@ impl App {
                     h.rig.set_pose(p);
                     self.game.hands_override = true;
                 }
-                None if self.game.hands_override => {
-                    h.rig.set_pose(0);
+                None => {
+                    // С предметом — хват (grip), без — расслабленно.
+                    let want = if h.prop.is_some() { 1 } else { 0 };
+                    if self.game.hands_override || h.rig.target() != want {
+                        h.rig.set_pose(want);
+                    }
                     self.game.hands_override = false;
                 }
-                None => {}
             }
             let (bob_phase, bob_weight) = self.sim.bob();
             let inp = RigInput {
@@ -66,6 +73,7 @@ impl App {
                 _pad: [0; 2],
             },
             palette: palette.iter().map(Mat4::to_cols_array_2d).collect(),
+            prop: if selftest { None } else { h.prop },
         })
     }
 }

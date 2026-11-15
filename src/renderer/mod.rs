@@ -63,7 +63,7 @@ use frame::{
     MAX_INSTANCES, PALETTE_OFFSET, SEA_OFFSET, SHADOW_OFFSET, SKY_OFFSET, SLOT_WAIT_TIMEOUT_MS,
     frame_passes,
 };
-use hands::HandsGpu;
+use hands::{HandPropGpu, HandsGpu};
 use passes::{PassBarrier, PassCtx};
 use readback::{PendingReadback, RB_BYTES};
 use resources::{
@@ -119,6 +119,8 @@ pub struct Renderer {
     terrain: Option<TerrainGpu>,
     water: Option<WaterGpu>,
     hands: Option<HandsGpu>,
+    /// Предметы в руках (этап 10).
+    hand_props: Vec<HandPropGpu>,
     clusters: Option<ClustersGpu>,
     /// Небо (04.1): LUT, свет неба, экспозиция.
     sky: sky::SkyGpu,
@@ -284,6 +286,7 @@ impl Renderer {
             terrain: None,
             water: None,
             hands: None,
+            hand_props: Vec::new(),
             clusters: None,
             sky,
             shadows,

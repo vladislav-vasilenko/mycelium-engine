@@ -1,0 +1,30 @@
+[
+  {
+    "name": "wicker_basket_01",
+    "label": "корзина",
+    "joint": "palm_middle.L",
+    "offset": [0.06, 0.0, 0.0],
+    "rotation_deg": [10, 0, 0]
+  },
+  {
+    "name": "trowel_01",
+    "label": "совок",
+    "joint": "palm_middle.R",
+    "offset": [-0.01, 0.0, 0.0],
+    "rotation_deg": [-15, 0, 0]
+  },
+  {
+    "name": "vintage_flashlight",
+    "label": "фонарь",
+    "joint": "palm_middle.R",
+    "offset": [-0.01, 0.01, 0.0],
+    "rotation_deg": [0, 180, 0]
+  },
+  {
+    "name": "vintage_radio_transceiver",
+    "label": "рация",
+    "joint": "palm_middle.R",
+    "offset": [-0.01, 0.05, 0.0],
+    "rotation_deg": [0, 200, 0]
+  }
+]

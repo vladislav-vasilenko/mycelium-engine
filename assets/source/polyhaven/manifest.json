@@ -292,5 +292,49 @@
       "Rico Cilliers"
     ],
     "license": "CC0 1.0"
+  },
+  "wicker_basket_01": {
+    "role": "корзина для грибов (в руке)",
+    "triangles": 22276,
+    "bytes": 2730151,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/wicker_basket_01",
+    "authors": [
+      "Kuutti Siitonen"
+    ],
+    "license": "CC0 1.0"
+  },
+  "trowel_01": {
+    "role": "совок (в руке)",
+    "triangles": 5242,
+    "bytes": 1973386,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/trowel_01",
+    "authors": [
+      "Satyaki Mandal"
+    ],
+    "license": "CC0 1.0"
+  },
+  "vintage_flashlight": {
+    "role": "фонарь (в руке)",
+    "triangles": 10562,
+    "bytes": 1865258,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/vintage_flashlight",
+    "authors": [
+      "Omar M. El-Safy"
+    ],
+    "license": "CC0 1.0"
+  },
+  "vintage_radio_transceiver": {
+    "role": "полевая рация (в руке)",
+    "triangles": 42350,
+    "bytes": 6301480,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/vintage_radio_transceiver",
+    "authors": [
+      "Mateusz Sadek"
+    ],
+    "license": "CC0 1.0"
   }
 }

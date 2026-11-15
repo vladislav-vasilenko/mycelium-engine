@@ -3,11 +3,13 @@
 //!
 //! - `asset` — загрузчик glTF: сетка `SkinnedVertex`, скелет, позы, текстура;
 //! - `skeleton` — `Trs`, `Joint`, `Skeleton`, `Pose`, палитра и CPU-эталон скиннинга;
-//! - `rig` — `HandRig`: смена поз, покачивание, отставание, проседание.
+//! - `rig` — `HandRig`: смена поз, покачивание, отставание, проседание;
+//! - `props` — предметы в руках (сканы Poly Haven), привязанные к кисти.
 //!
 //! Пространство рук — пространство глаза: начало в глазу, взгляд −Z, вверх +Y.
 
 mod asset;
+mod props;
 mod rig;
 mod skeleton;
 #[cfg(test)]
@@ -18,6 +20,7 @@ use std::path::PathBuf;
 use glam::Mat4;
 
 pub use asset::{HandsAsset, load};
+pub use props::{PropSpec, load_props};
 pub use rig::{HandRig, POSE_NAMES, RigInput};
 pub use skeleton::skin_position;
 
@@ -43,6 +46,9 @@ pub const CONTROL_POSE: &str = "point";
 pub struct Hands {
     pub asset: HandsAsset,
     pub rig: HandRig,
+    /// Предметы в руках (корзина, совок, фонарь, рация) и выбранный.
+    pub props: Vec<PropSpec>,
+    pub prop: Option<usize>,
 }
 
 impl Hands {
@@ -62,6 +68,8 @@ impl Hands {
         Ok(Hands {
             rig: HandRig::new(poses),
             asset,
+            props: Vec::new(),
+            prop: None,
         })
     }
 

@@ -34,7 +34,7 @@ impl FramePass for ViewmodelPass {
             .cmd
             .renderCommandEncoderWithDescriptor(&rp)
             .expect("render encoder");
-        enc.setLabel(Some(&label("viewmodel: hands")));
+        enc.setLabel(Some(&label("viewmodel: hands and held prop")));
         barrier.apply(&*enc);
         let table = ctx.slot.table(Table::Hands);
         unsafe {
@@ -61,6 +61,34 @@ impl FramePass for ViewmodelPass {
                 h.indices.gpuAddress(),
                 h.indices.length(),
             );
+        }
+        // Предмет в руке — тот же шейдер и палитра, своя сетка и текстура.
+        if let Some(p) = ctx
+            .input
+            .hands
+            .as_ref()
+            .and_then(|f| f.prop)
+            .and_then(|i| ctx.r.hand_props.get(i))
+        {
+            let t = ctx.slot.table(Table::HandProp);
+            unsafe {
+                t.setAddress_atIndex(p.vertices.gpuAddress(), 0);
+                t.setAddress_atIndex(ctx.upload_addr + HANDS_OFFSET as u64, 1);
+                t.setAddress_atIndex(ctx.upload_addr + PALETTE_OFFSET as u64, 2);
+                t.setAddress_atIndex(ctx.upload_addr, 3);
+                t.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 4);
+                t.setTexture_atIndex(p.albedo.gpuResourceID(), 0);
+            }
+            enc.setArgumentTable_atStages(t, MTLRenderStages::Vertex | MTLRenderStages::Fragment);
+            unsafe {
+                enc.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferLength(
+                    MTLPrimitiveType::Triangle,
+                    p.index_count,
+                    MTLIndexType::UInt32,
+                    p.indices.gpuAddress(),
+                    p.indices.length(),
+                );
+            }
         }
         enc.endEncoding();
     }

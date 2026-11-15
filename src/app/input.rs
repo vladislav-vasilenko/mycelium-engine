@@ -99,7 +99,13 @@ impl App {
                     _ => 3,
                 };
                 if let Some(h) = self.hands.as_mut() {
-                    h.rig.set_pose(i);
+                    if self.modifiers.shift_key() {
+                        // Shift+1…4 — отладка поз рук.
+                        h.rig.set_pose(i);
+                    } else if i < h.props.len() {
+                        // 1…4 — взять предмет / убрать (тот же номер).
+                        h.prop = if h.prop == Some(i) { None } else { Some(i) };
+                    }
                 }
             }
             KeyCode::KeyT => {

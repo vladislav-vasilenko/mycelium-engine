@@ -552,14 +552,7 @@ pub fn import(dir: &Path) -> Result<World, String> {
                 .or_else(|| far.sample(p.x, p.y))
                 .map(|(h, _)| h)
         });
-        // Ложе: профиль не растёт вниз по течению, горбы срезаются.
-        let mut cut = super::rivers::carve_beds(&mut world.heightfield, glam::Vec2::ZERO, &f);
-        if let Some(z) = &mut world.zone {
-            let o = z.origin(&world.heightfield);
-            cut += super::rivers::carve_beds(&mut z.grid, o, &f);
-            z.sync_far(&mut world.heightfield);
-        }
-        eprintln!("реки: сдвиг к тальвегу в среднем {shift:.1} м, ложе — {cut} узлов");
+        eprintln!("реки: сдвиг к тальвегу в среднем {shift:.1} м");
         world.features = Some(f);
     }
     // Тропы и дороги — полкой в рельефе (поле острова и зона 1 м).
@@ -570,6 +563,17 @@ pub fn import(dir: &Path) -> Result<World, String> {
             super::carve::carve_paths(&mut z.grid, o, f);
             z.sync_far(&mut world.heightfield);
         }
+    }
+    // Ложе рек — после троп и дорог: на пересечениях река прорезает полотно
+    // бродом (до мостов 02.12), а не обрывается о бровки дороги.
+    if let Some(f) = &world.features {
+        let mut cut = super::rivers::carve_beds(&mut world.heightfield, glam::Vec2::ZERO, f);
+        if let Some(z) = &mut world.zone {
+            let o = z.origin(&world.heightfield);
+            cut += super::rivers::carve_beds(&mut z.grid, o, f);
+            z.sync_far(&mut world.heightfield);
+        }
+        eprintln!("реки: ложе — {cut} узлов");
     }
     Ok(world)
 }

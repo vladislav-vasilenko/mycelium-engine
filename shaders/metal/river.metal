@@ -71,7 +71,20 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float depth = max(s._pad.y, 0.1);
     // Поверхность — над дном оси: запас 12 см, рельеф на GPU (сглаживание,
     // шум участка детализации, упрощение вдали) выше поля высот на сантиметры.
-    float y = mix(ha, hb, v) + depth + 0.12;
+    // Рельеф между концами может выпирать над прямой (ложе врезано
+    // ступенями): уровень — не ниже середины отрезка.
+    // В общей вершине уровень у обоих соседей один: максимум из высоты
+    // вершины и середин обоих примыкающих отрезков (иначе — ступени и щели).
+    float hm = ground_height(0.5 * (a + b), heights, zone_heights, zone, frame);
+    float h_end;
+    if (v < 0.5) {
+        float hp = has_prev ? ground_height(0.5 * (segs[iid - 1].a + a), heights, zone_heights, zone, frame) : hm;
+        h_end = max(ha, max(hm, hp));
+    } else {
+        float hn = has_next ? ground_height(0.5 * (b + segs[iid + 1].b), heights, zone_heights, zone, frame) : hm;
+        h_end = max(hb, max(hm, hn));
+    }
+    float y = h_end + depth + 0.12;
     o.world = float3(xz.x, y, xz.y);
     o.position = frame.view_proj_rel * float4(camera_relative(frame, o.world), 1.0);
     o.flow = flow;

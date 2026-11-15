@@ -112,8 +112,13 @@ impl RtGpu {
         forest: &ForestGpu,
         a: &PlantAssets,
     ) -> Result<RtGpu, String> {
-        // Индексы без листвы: материалы 0, 1 (кора), 4 (камень), 8 (почва).
-        let solid = |v: u32| matches!(a.vertices[v as usize].attr[0], 0 | 1 | 4 | 8);
+        // Индексы без листвы: материалы 0, 1 (кора), 4 (камень), 8 (почва), сканы без ветра.
+        // Сканы (02.11, материал ≥ 16) — непрозрачная геометрия, кроме листвы
+        // (у неё есть сила ветра).
+        let solid = |v: u32| {
+            let at = a.vertices[v as usize].attr;
+            matches!(at[0], 0 | 1 | 4 | 8) || (at[0] >= 16 && at[1] < 5)
+        };
         let mut indices: Vec<u32> = Vec::new();
         let mut spans = Vec::new();
         for &(species, lod, _) in &MESHES {

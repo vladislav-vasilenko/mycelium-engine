@@ -452,7 +452,8 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     // Дрожание вдоль нормали — только листве: у трубок ветвей нормали
     // радиальные, и ветви «дышали» бы (02.10).
     float mat = float(v.attr.x);
-    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
+    // Листва сканов (02.11): материал ≥ 16 с силой ветра.
+    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 15.5 && w > 0.02);
     float fph = dot(q, float3(1.3, 0.7, 1.1)) + inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
     float flutter = leafy ? sin(t * (5.0 + 3.0 * fract(inst.phase)) + fph) * 0.035 * w * gust * gust : 0.0;
     // Раскачка растёт с высотой точки: верх кроны качается, папоротник — едва.
@@ -522,15 +523,32 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                          texture2d_array<float> mat_albedo [[texture(3)]],
                          texture2d_array<float> bark_normal [[texture(4)]],
                          texture2d<float> rt_ao_tex [[texture(5)]],
+                         texture2d_array<float> scan_albedo [[texture(6)]],
+                         texture2d_array<float> scan_normal [[texture(7)]],
                          device const float4* probes [[buffer(9)]]) {
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
     constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     float3 albedo;
     // 2 хвоя, 3 листья, 5 папоротник, 6 якудзаса — листва; 4 — камень.
-    bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
+    bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 15.5 && in.attr.y > 0.02);
     float3 glow = 0.0;
-    if (mat > 7.5) {
+    if (mat > 15.5) {
+        // Фотоскан (02.11): свой цвет и нормаль (слой = материал − 16), базис
+        // нормали — по производным, как у коры (AD-66).
+        uint layer = uint(mat - 16.0);
+        albedo = scan_albedo.sample(ms, in.uv, layer).rgb;
+        float3 dp1 = dfdx(in.rel), dp2 = dfdy(in.rel);
+        float2 du1 = dfdx(in.uv), du2 = dfdy(in.uv);
+        float3 p2 = cross(dp2, n), p1 = cross(n, dp1);
+        float3 T = p2 * du1.x + p1 * du2.x;
+        float3 B = p2 * du1.y + p1 * du2.y;
+        float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
+        float3 tn = scan_normal.sample(ms, in.uv, layer).xyz * 2.0 - 1.0;
+        n = normalize(T * inv * tn.x + B * inv * tn.y + n * tn.z);
+        // Немного разницы между экземплярами — как у процедурной листвы.
+        albedo *= 0.85 + 0.3 * in.tint;
+    } else if (mat > 7.5) {
         // Почва бугра у корней и корневой тарелки (02.4): подстилка леса и мох
         // в мировых координатах, как на рельефе, — бугор сливается с землёй.
         float3 lp = in.rel + frame.cam_lo.xyz;

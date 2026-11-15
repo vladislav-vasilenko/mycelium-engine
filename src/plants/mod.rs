@@ -11,6 +11,8 @@ use zune_jpeg::zune_core::options::DecoderOptions;
 
 use crate::layout::PlantVertex;
 
+pub mod scans;
+
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
 /// 0–5 деревья (три криптомерии, три лиственных), 6 валун, 7 папоротник,
 /// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
@@ -57,13 +59,15 @@ pub struct PlantAssets {
     pub albedo: Vec<u8>,
     /// Нормали коры (OpenGL, RGBA8 линейные): 0 якусуги, 1 лиственные.
     pub bark_normal: Vec<u8>,
+    /// Текстуры фотосканов подменённых видов (02.11).
+    pub scans: scans::ScanTextures,
 }
 
 pub fn models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/models/plants")
 }
 
-fn load_glb(path: &Path, out: &mut PlantAssets) -> Result<[LodRange; LODS], String> {
+pub(crate) fn load_glb(path: &Path, out: &mut PlantAssets) -> Result<[LodRange; LODS], String> {
     let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
     let bytes = std::fs::read(path).map_err(|e| err(&e))?;
     let gltf = gltf::Gltf::from_slice(&bytes).map_err(|e| err(&e))?;
@@ -130,7 +134,7 @@ fn load_glb(path: &Path, out: &mut PlantAssets) -> Result<[LodRange; LODS], Stri
     Ok(lods)
 }
 
-fn jpeg_rgba(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn jpeg_rgba(path: &Path) -> Result<Vec<u8>, String> {
     let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut dec = JpegDecoder::new_with_options(
         ZCursor::new(data),
@@ -170,10 +174,30 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         lods: [[LodRange::default(); LODS]; SPECIES.len()],
         albedo: Vec::with_capacity(TEXTURE_LAYERS * TEXTURE_SIZE * TEXTURE_SIZE * 4),
         bark_normal: Vec::with_capacity(2 * TEXTURE_SIZE * TEXTURE_SIZE * 4),
+        scans: scans::ScanTextures::default(),
     };
+    // Фотосканы (02.11) — вместо процедурных сеток части видов; без каталога
+    // сканов — процедурные.
+    let scan_dir = scans::scans_dir();
+    let catalog: Option<serde_json::Value> = std::fs::read_to_string(scan_dir.join("scans.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let mut tex = scans::ScanTextures::default();
     for (s, name) in SPECIES.iter().enumerate() {
-        a.lods[s] = load_glb(&models.join(format!("{name}.glb")), &mut a)?;
+        let scan = catalog.as_ref().and_then(|c| {
+            scans::SCAN_SPECIES
+                .iter()
+                .find(|x| x.0 == s)
+                .map(|x| (c, x))
+        });
+        a.lods[s] = match scan {
+            Some((c, &(_, variant, yaw))) => {
+                scans::load_variant(&scan_dir, c, variant, yaw, &mut tex, &mut a)?
+            }
+            None => load_glb(&models.join(format!("{name}.glb")), &mut a)?,
+        };
     }
+    a.scans = tex;
     a.albedo
         .extend(jpeg_rgba(&ambientcg.join("Bark012/Color.jpg"))?);
     a.albedo
@@ -208,6 +232,8 @@ mod tests {
         }
         let max = a.vertices.len() as u32;
         assert!(a.indices.iter().all(|&i| i < max));
-        assert!(a.vertices.iter().all(|v| v.attr[0] <= 8));
+        // Процедурные материалы 0–8, сканы — 16 + слой (02.11).
+        assert!(a.vertices.iter().all(|v| v.attr[0] <= 8 || v.attr[0] >= 16));
+        assert!(a.scans.layers() > 0, "сканы не загружены");
     }
 }

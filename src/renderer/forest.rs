@@ -46,6 +46,9 @@ pub(super) struct ForestGpu {
     pub albedo: Obj<dyn MTLTexture>,
     /// Нормали коры: 2 слоя RGBA8 линейные.
     pub bark_normal: Obj<dyn MTLTexture>,
+    /// Фотосканы (02.11): цвет (sRGB) и нормаль по слою на материал.
+    pub scan_albedo: Obj<dyn MTLTexture>,
+    pub scan_normal: Obj<dyn MTLTexture>,
     /// Сообщества (R8, номер) и параметры леса (256 × 2 float4); без карты — 1 × 1 нуль.
     pub vegetation: Obj<dyn MTLTexture>,
     pub vegetation_table: Obj<dyn MTLBuffer>,
@@ -150,6 +153,45 @@ impl super::Renderer {
             pixel_bytes: 4,
             mips: true,
         }])?;
+        // Массивы сканов; без сканов — один пустой слой (шейдер их не читает).
+        let layers = a.scans.layers().max(1);
+        let size = crate::plants::TEXTURE_SIZE;
+        let blank = vec![0u8; size * size * 4];
+        let (sa, sn) = if a.scans.layers() > 0 {
+            (&a.scans.albedo[..], &a.scans.normal[..])
+        } else {
+            (&blank[..], &blank[..])
+        };
+        let scan_albedo = super::resources::sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm_sRGB,
+            size as u32,
+            layers,
+            true,
+            "plants: scan albedo",
+        )?;
+        let scan_normal = super::resources::sampled_texture(
+            &self.device,
+            MTLPixelFormat::RGBA8Unorm,
+            size as u32,
+            layers,
+            true,
+            "plants: scan normals",
+        )?;
+        self.upload_textures(&[
+            super::resources::TextureUpload {
+                texture: &scan_albedo,
+                data: sa,
+                pixel_bytes: 4,
+                mips: true,
+            },
+            super::resources::TextureUpload {
+                texture: &scan_normal,
+                data: sn,
+                pixel_bytes: 4,
+                mips: true,
+            },
+        ])?;
         let zero = [0u8];
         let (ids, size) = vegetation.map_or((&zero[..], 1), |v| (&v.ids[..], v.size));
         let veg_tex = super::resources::sampled_texture(
@@ -174,6 +216,8 @@ impl super::Renderer {
             lods: buf(bytemuck::cast_slice(&lods), "plants: LOD ranges"),
             albedo,
             bark_normal,
+            scan_albedo,
+            scan_normal,
             vegetation: veg_tex,
             vegetation_table: buf(bytemuck::cast_slice(&table), "forest: community table"),
             instances: (0..FRAME_SLOTS)
@@ -207,10 +251,18 @@ impl super::Renderer {
         }
         self.residency.addAllocation(as_allocation(&*g.albedo));
         self.residency.addAllocation(as_allocation(&*g.bark_normal));
+        self.residency.addAllocation(as_allocation(&*g.scan_albedo));
+        self.residency.addAllocation(as_allocation(&*g.scan_normal));
         self.residency.commit();
         if let Some(old) = self.forest.replace(g) {
             self.retire(
-                vec![old.albedo, old.bark_normal, old.vegetation],
+                vec![
+                    old.albedo,
+                    old.bark_normal,
+                    old.scan_albedo,
+                    old.scan_normal,
+                    old.vegetation,
+                ],
                 Some(Box::new((
                     old.vertices,
                     old.indices,

@@ -260,10 +260,11 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         return;
     }
     constexpr sampler ls2(filter::linear, address::clamp_to_edge);
-    for (uint sub = 0; sub < 9; ++sub) {
-        int2 sc = int2(sub % 3, sub / 3);
-        uint h = hash3(cell.x * 3 + sc.x, cell.y * 3 + sc.y, 0x0DE2u);
-        float2 p = (float2(cell) + (float2(sc) + 0.1 + 0.8 * float2(rnd(h, 1), rnd(h, 2))) / 3.0) * FOREST_CELL_M;
+    // 02.13, сессия 1: подклетки 1,5 м — подлесок сомкнутым ярусом.
+    for (uint sub = 0; sub < 16; ++sub) {
+        int2 sc = int2(sub % 4, sub / 4);
+        uint h = hash3(cell.x * 4 + sc.x, cell.y * 4 + sc.y, 0x0DE2u);
+        float2 p = (float2(cell) + (float2(sc) + 0.1 + 0.8 * float2(rnd(h, 1), rnd(h, 2))) / 4.0) * FOREST_CELL_M;
         float dxz = distance(p, frame.camera_pos.xz);
         if (dxz > SHRUB_DIST || any(p < 0.0) || any(p > frame.map_size_m)) {
             continue;
@@ -279,7 +280,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         float edge = smoothstep(1.5, 3.0, fd.trail) * (1.0 - smoothstep(4.0, 12.0, fd.trail));
         float fern_patch = smoothstep(0.35, 0.75, patch_noise(p, 14.0, 0xFE11u));
         float shrub_patch = smoothstep(0.45, 0.8, patch_noise(p, 22.0, 0x5B11u));
-        float fern_p = forest * (0.25 + 0.5 * mc.b + 0.35 * hollow + 0.5 * brook) * (0.35 + 1.3 * fern_patch);
+        float fern_p = forest * (0.4 + 0.5 * mc.b + 0.35 * hollow + 0.5 * brook) * (0.45 + 1.2 * fern_patch);
         float shrub_p = forest * (0.08 + 0.3 * edge) * (0.4 + 1.5 * shrub_patch);
         float sasa_p = cv.z * 0.6 + forest * 0.03;
         float r = rnd(h, 3);
@@ -349,7 +350,11 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             float4 cv = cover.sample(ls2, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
             float forest = cv.x + cv.y;
             // Гранит и скалы (cv.w) — трава лишь в трещинах.
-            float dens = (cv.z * 1.0 + max(1.0 - forest - cv.w, 0.0) * 0.95 + forest * 0.12) * (1.0 - 0.9 * cv.w);
+            // Под пологом (02.13, сессия 1) — низкий ковёр пятнами: в пятнах
+            // сомкнутый, между ними — опад и мох.
+            float floor_patch = smoothstep(0.3, 0.6, patch_noise(p, 7.0, 0x6B3Au));
+            float dens = (cv.z * 1.0 + max(1.0 - forest - cv.w, 0.0) * 0.95 + forest * (0.15 + 0.75 * floor_patch))
+                       * (1.0 - 0.9 * cv.w);
             dens *= 0.65 + 0.7 * patch_noise(p, 8.0, 0x6B1Eu);
             float brook_g = 0.0;
             if (near_trail) {
@@ -402,7 +407,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             // у воды гуще и выше, на гребнях — ниже.
             float tall_patch = patch_noise(p, 5.0, 0x6B2Fu);
             float rv = rnd(h, 13);
-            uint tier = rv < 0.6 - 0.2 * brook_g ? 0u
+            // Под пологом — почти только низкая трава (света мало).
+            uint tier = rv < 0.6 + 0.3 * saturate(forest) - 0.2 * brook_g ? 0u
                       : (rv < 0.93 - 0.1 * tall_patch ? 1u : (tall_patch > 0.55 ? 2u : 1u));
             uint lod = dxz < 10.0 ? 0 : (dxz < 24.0 ? 1 : 2);
             uint list = (SPECIES_BLADES + tier) * 3 + lod;
@@ -441,9 +447,9 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         // пологом, пятнами; сор потеснился.
         // Под пологом — широколистные травы (как лесной покров), на открытом
         // их мало: там густая трава из травинок (цикл выше).
-        float grass_p = (forest * 0.75 + cv.z * 0.15 + max(1.0 - forest - cv.w, 0.0) * 0.15)
+        float grass_p = (forest * 1.0 + cv.z * 0.15 + max(1.0 - forest - cv.w, 0.0) * 0.15)
                       * (0.45 + 0.8 * patch_noise(p, 9.0, 0x6A55u));
-        float dp = debris_p * 0.6;
+        float dp = debris_p * 0.45;
         // Тропа (02.11): корни поперёк; за краем — полоса трав.
         grass_p += 0.6 * (1.0 - smoothstep(0.0, 2.5, fd.trail)) * step(0.0, fd.trail);
         // На полотне тропы — только корни; травы — у кромки (цикл травы).

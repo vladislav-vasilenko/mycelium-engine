@@ -2,7 +2,7 @@
   "fern_02": {
     "role": "папоротник подлеска",
     "triangles": 6232,
-    "bytes": 1146361,
+    "bytes": 1260950,
     "heavy": false,
     "source": "https://polyhaven.com/a/fern_02",
     "authors": [
@@ -14,7 +14,7 @@
   "moss_01": {
     "role": "подушка мха",
     "triangles": 246170,
-    "bytes": 921103,
+    "bytes": 1006277,
     "heavy": false,
     "source": "https://polyhaven.com/a/moss_01",
     "authors": [
@@ -194,7 +194,7 @@
   "shrub_02": {
     "role": "кустарник",
     "triangles": 52317,
-    "bytes": 1966425,
+    "bytes": 2058166,
     "heavy": false,
     "source": "https://polyhaven.com/a/shrub_02",
     "authors": [
@@ -205,7 +205,7 @@
   "shrub_03": {
     "role": "кустарник",
     "triangles": 16955,
-    "bytes": 1628793,
+    "bytes": 1707862,
     "heavy": false,
     "source": "https://polyhaven.com/a/shrub_03",
     "authors": [
@@ -216,7 +216,7 @@
   "shrub_04": {
     "role": "кустарник",
     "triangles": 47813,
-    "bytes": 1907514,
+    "bytes": 1950420,
     "heavy": false,
     "source": "https://polyhaven.com/a/shrub_04",
     "authors": [
@@ -227,7 +227,7 @@
   "fir_sapling": {
     "role": "подрост хвойного",
     "triangles": 433021,
-    "bytes": 25423602,
+    "bytes": 25531284,
     "heavy": false,
     "source": "https://polyhaven.com/a/fir_sapling",
     "authors": [
@@ -267,6 +267,28 @@
     "source": "https://polyhaven.com/a/fir_tree_01",
     "authors": [
       "Rob Tuytel",
+      "Rico Cilliers"
+    ],
+    "license": "CC0 1.0"
+  },
+  "grass_medium_02": {
+    "role": "низкая трава",
+    "triangles": 1043926,
+    "bytes": 912091,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/grass_medium_02",
+    "authors": [
+      "Rico Cilliers"
+    ],
+    "license": "CC0 1.0"
+  },
+  "grass_bermuda_01": {
+    "role": "низкая трава (луг)",
+    "triangles": 223596,
+    "bytes": 1510094,
+    "heavy": false,
+    "source": "https://polyhaven.com/a/grass_bermuda_01",
+    "authors": [
       "Rico Cilliers"
     ],
     "license": "CC0 1.0"

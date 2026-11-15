@@ -171,6 +171,7 @@ pub(in crate::renderer) fn draw_shadow(ctx: &PassCtx, enc: &RenderEncoder, k: us
         table.setAddress_atIndex(ctx.upload_addr, 1);
         table.setAddress_atIndex(ctx.upload_addr + (SHADOW_OFFSET + k * 64) as u64, 5);
         table.setTexture_atIndex(f.albedo.gpuResourceID(), 0);
+        table.setTexture_atIndex(f.scan_albedo.gpuResourceID(), 2);
     }
     bind_ground(ctx, table);
     enc.setRenderPipelineState(&ctx.r.pipelines.plant_shadow);

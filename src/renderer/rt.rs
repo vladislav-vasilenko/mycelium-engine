@@ -29,7 +29,7 @@ const INSTANCE_STRIDE: usize = 72;
 /// Сетки растений для лучей: (вид, LOD, список леса с экземплярами).
 /// Деревья — LOD 1 и списки теней (все в 160 м); валун и валежник — LOD 1
 /// сетки и LOD 0 списка (у камеры).
-const MESHES: [(usize, usize, usize); 10] = [
+const MESHES: [(usize, usize, usize); 15] = [
     (0, 1, CAMERA_LISTS),
     (1, 1, CAMERA_LISTS + 1),
     (2, 1, CAMERA_LISTS + 2),
@@ -37,8 +37,13 @@ const MESHES: [(usize, usize, usize); 10] = [
     (4, 1, CAMERA_LISTS + 4),
     (5, 1, CAMERA_LISTS + 5),
     (6, 1, 6 * 3),
+    (16, 1, 16 * 3),
+    (17, 1, 17 * 3),
+    (18, 1, 18 * 3),
     (10, 1, 10 * 3),
+    (24, 1, 24 * 3),
     (11, 1, 11 * 3),
+    (25, 1, 25 * 3),
     (12, 1, 12 * 3),
 ];
 

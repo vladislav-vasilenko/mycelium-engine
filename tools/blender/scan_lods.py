@@ -42,7 +42,7 @@ BUDGET = {
 def role_of(name):
     if name in ("island_tree_02", "tree_small_02", "fir_tree_01", "fir_sapling"):
         return "tree"
-    if name.startswith(("fern", "shrub")):
+    if name.startswith(("fern", "shrub", "grass")):
         return "foliage"
     if name.startswith("moss"):
         return "moss"
@@ -63,10 +63,14 @@ def material_textures(gltf_path):
     out = []
     for m in g.get("materials", []):
         pbr = m.get("pbrMetallicRoughness", {})
+        albedo = img(pbr.get("baseColorTexture"))
+        # Альфа-маска рядом с цветом: X_diff_1k.jpg → X_alpha_1k.png (fetch_polyhaven.py).
+        mask = albedo.replace("_diff_", "_alpha_").rsplit(".", 1)[0] + ".png" if albedo else None
         out.append({
             "name": m.get("name"),
             "alpha": m.get("alphaMode", "OPAQUE"),
-            "albedo": img(pbr.get("baseColorTexture")),
+            "mask": mask if mask and (gltf_path.parent / mask).exists() else None,
+            "albedo": albedo,
             "normal": img(m.get("normalTexture")),
             "rough": img(pbr.get("metallicRoughnessTexture")),
         })
@@ -233,7 +237,7 @@ def process(name, catalog):
     (OUT / name).mkdir(parents=True, exist_ok=True)
     mat_names = [m["name"] for m in mats]
     for m in mats:
-        for key in ("albedo", "normal", "rough"):
+        for key in ("albedo", "normal", "rough", "mask"):
             if m[key]:
                 src = gltf.parent / m[key]
                 shutil.copyfile(src, OUT / name / Path(m[key]).name)
@@ -285,7 +289,9 @@ def main():
     manifest = json.loads((SRC / "manifest.json").read_text())
     if not names:
         # moss_01 — экземпляры веточки мха (2–3 см), не подушка: свой мох лучше.
-        names = [n for n, m in manifest.items() if (heavy or not m["heavy"]) and n != "moss_01"]
+        # grass_bermuda_01 — одиночные карточки по 12–19 треугольников.
+        names = [n for n, m in manifest.items()
+                 if (heavy or not m["heavy"]) and n not in ("moss_01", "grass_bermuda_01")]
     OUT.mkdir(parents=True, exist_ok=True)
     cat_path = OUT / "scans.json"
     catalog = json.loads(cat_path.read_text()) if cat_path.exists() else {}

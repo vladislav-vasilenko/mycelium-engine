@@ -26,13 +26,15 @@ pub struct MaterialLayer {
 
 /// Порядок слоёв = индекс в массиве текстур = `MAT_*` в MSL. Размер повтора
 /// каждого слоя на земле — `MAT_TILE_M` в `terrain.metal`.
+/// С 02.11 (сессия 4а) семь слоёв — сканы Poly Haven (`PH_*`, CC0,
+/// `tools/terrain/fetch_polyhaven_textures.py`); слой щебня — каменистая тропа.
 pub const LAYERS: [MaterialLayer; 10] = [
     MaterialLayer {
-        id: "Rock062",
+        id: "PH_rock_face_03",
         role: "камень",
     },
     MaterialLayer {
-        id: "Ground093A",
+        id: "PH_coast_sand_01",
         role: "песок",
     },
     MaterialLayer {
@@ -44,16 +46,16 @@ pub const LAYERS: [MaterialLayer; 10] = [
         role: "мох",
     },
     MaterialLayer {
-        id: "Ground037",
+        id: "PH_forrest_ground_01",
         role: "лесная подстилка",
     },
     MaterialLayer {
-        id: "Grass004",
+        id: "PH_sparse_grass",
         role: "трава",
     },
     // Переходные слои (02.2, итерация 3): между мхом, почвой и камнем.
     MaterialLayer {
-        id: "Ground023",
+        id: "PH_forest_leaves_02",
         role: "тёмный опад с веточками",
     },
     MaterialLayer {
@@ -61,11 +63,11 @@ pub const LAYERS: [MaterialLayer; 10] = [
         role: "листовой опад",
     },
     MaterialLayer {
-        id: "Ground081",
+        id: "PH_rocky_trail",
         role: "щебень",
     },
     MaterialLayer {
-        id: "Rock064",
+        id: "PH_mossy_rock",
         role: "мшистый камень",
     },
 ];

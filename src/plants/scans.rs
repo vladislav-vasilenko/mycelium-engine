@@ -14,14 +14,38 @@ use super::{LODS, LodRange, PlantAssets, TEXTURE_SIZE, jpeg_rgba, load_glb};
 pub const SCAN_MATERIAL_BASE: u8 = 16;
 
 /// Вид на GPU → вариант скана и поворот сетки вокруг Y, рад (длинная ось
-/// корней — поперёк тропы, как у процедурных).
-pub const SCAN_SPECIES: [(usize, &str, f32); 6] = [
+/// корней — поперёк тропы, как у процедурных). Корни — только тонкие
+/// (`root_cluster_02`): у `single_root`, `pine_roots` и `root_cluster_02_a` —
+/// куски тёмной почвы, на тропе они лежали «одеялом».
+pub const SCAN_SPECIES: [(usize, &str, f32); 28] = [
     (6, "rock_moss_set_01_rock04", 0.0),
     (7, "fern_02_b", 0.0),
     (9, "shrub_02_a", 0.0),
     (10, "dead_tree_trunk", 0.0),
     (11, "tree_stump_01", 0.0),
-    (15, "single_root", std::f32::consts::FRAC_PI_2),
+    (15, "root_cluster_02_d", std::f32::consts::FRAC_PI_2),
+    (16, "rock_moss_set_01_rock06", 0.0),
+    (17, "rock_moss_set_02_rock10", 0.0),
+    (18, "rock_moss_set_02_rock13", 0.0),
+    (19, "fern_02_a", 0.0),
+    (20, "fern_02_c", 0.0),
+    (21, "fern_02_d", 0.0),
+    (22, "shrub_02_c", 0.0),
+    (23, "shrub_04", 0.0),
+    (24, "dead_tree_trunk_02", 0.0),
+    (25, "tree_stump_02", 0.0),
+    (26, "root_cluster_02_f", std::f32::consts::FRAC_PI_2),
+    (27, "root_cluster_02_b", std::f32::consts::FRAC_PI_2),
+    (28, "root_cluster_02_g", std::f32::consts::FRAC_PI_2),
+    (29, "dry_branches_medium_01_a", 0.0),
+    (30, "dry_branches_medium_01_b", 0.0),
+    (31, "bark_debris_01_a", 0.0),
+    (32, "stone_01", 0.0),
+    (33, "grass_medium_02_a", 0.0),
+    (34, "grass_medium_02_b", 0.0),
+    (35, "grass_medium_02_c", 0.0),
+    (36, "grass_medium_02_d", 0.0),
+    (37, "grass_medium_02_e", 0.0),
 ];
 
 pub fn scans_dir() -> PathBuf {
@@ -44,11 +68,25 @@ impl ScanTextures {
         self.names.len()
     }
 
-    fn layer(&mut self, dir: &Path, albedo: &str, normal: Option<&str>) -> Result<usize, String> {
+    fn layer(
+        &mut self,
+        dir: &Path,
+        albedo: &str,
+        normal: Option<&str>,
+        mask: Option<&str>,
+    ) -> Result<usize, String> {
         if let Some(i) = self.names.iter().position(|n| n == albedo) {
             return Ok(i);
         }
-        self.albedo.extend(jpeg_rgba(&dir.join(albedo))?);
+        let mut rgba = jpeg_rgba(&dir.join(albedo))?;
+        // Альфа-маска листвы и травы — в альфа-канал цвета (отсечение в шейдере).
+        if let Some(m) = mask {
+            let a = gray_png(&dir.join(m))?;
+            for (px, v) in rgba.chunks_exact_mut(4).zip(a) {
+                px[3] = v;
+            }
+        }
+        self.albedo.extend(rgba);
         match normal {
             Some(n) => self.normal.extend(jpeg_rgba(&dir.join(n))?),
             // Без нормали — плоская (0,5; 0,5; 1).
@@ -81,7 +119,7 @@ pub fn load_variant(
         let albedo = m["albedo"]
             .as_str()
             .ok_or_else(|| format!("{variant}: материал без цвета"))?;
-        layer_of_slot.push(tex.layer(dir, albedo, m["normal"].as_str())?);
+        layer_of_slot.push(tex.layer(dir, albedo, m["normal"].as_str(), m["mask"].as_str())?);
     }
     let first = out.vertices.len();
     let lods = load_glb(&dir.join(format!("{variant}.glb")), out)?;
@@ -96,4 +134,26 @@ pub fn load_variant(
         v.normal = [c * nx - s * nz, ny, s * nx + c * nz];
     }
     Ok(lods)
+}
+
+/// Маска PNG 1024² (серая или RGBA) → яркость по пикселям.
+fn gray_png(path: &Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut dec = png::Decoder::new(std::io::BufReader::new(file));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec
+        .read_info()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut buf = vec![0; reader.output_buffer_size().unwrap_or(0)];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if (info.width as usize, info.height as usize) != (TEXTURE_SIZE, TEXTURE_SIZE) {
+        return Err(format!("{}: нужна маска {TEXTURE_SIZE}²", path.display()));
+    }
+    let ch = info.color_type.samples();
+    Ok(buf[..info.buffer_size()]
+        .chunks_exact(ch)
+        .map(|p| p[0])
+        .collect())
 }

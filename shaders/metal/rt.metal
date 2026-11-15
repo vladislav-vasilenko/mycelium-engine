@@ -12,8 +12,8 @@
 constant uint RT_GRID = 161;              // узлов по стороне сетки рельефа
 constant float RT_STEP_M = 0.6;           // 96 м вокруг камеры
 constant uint RT_MAX_INSTANCES = 8192;
-constant uint FOREST_CAP_RT = 16384;      // FOREST_CAP в forest.metal
-constant uint RT_SOURCES = 10;           // MESHES в src/renderer/rt.rs
+constant uint FOREST_CAP_RT = 8192;       // FOREST_CAP в forest.metal
+constant uint RT_SOURCES = 15;           // MESHES в src/renderer/rt.rs
 
 // Экземпляр косвенной верхней структуры: MTLIndirectAccelerationStructureInstanceDescriptor, 72 Б.
 struct RtInstance {

@@ -14,6 +14,8 @@ https://creativecommons.org/publicdomain/zero/1.0/). Указание автор
 | fern_02 | папоротник подлеска | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/fern_02 |
 | fir_sapling | подрост хвойного | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/fir_sapling |
 | fir_tree_01 | хвойное (замена криптомерии до своего скана) | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/fir_tree_01 |
+| grass_bermuda_01 | низкая трава (луг) | Rico Cilliers | https://polyhaven.com/a/grass_bermuda_01 |
+| grass_medium_02 | низкая трава | Rico Cilliers | https://polyhaven.com/a/grass_medium_02 |
 | island_tree_02 | широколиственное дерево | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/island_tree_02 |
 | moss_01 | подушка мха | Rob Tuytel | https://polyhaven.com/a/moss_01 |
 | pine_roots | корни хвойного у основания | Rob Tuytel | https://polyhaven.com/a/pine_roots |

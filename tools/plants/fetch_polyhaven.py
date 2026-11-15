@@ -42,6 +42,8 @@ ASSETS = {
     "shrub_03": "кустарник",
     "shrub_04": "кустарник",
     "fir_sapling": "подрост хвойного",
+    "grass_medium_02": "низкая трава",
+    "grass_bermuda_01": "низкая трава (луг)",
 }
 HEAVY = {
     "island_tree_02": "широколиственное дерево",
@@ -81,6 +83,11 @@ def main():
         total = download(gl["url"], ROOT / name / Path(gl["url"]).name)
         for rel, inc in gl.get("include", {}).items():
             total += download(inc["url"], ROOT / name / rel)
+        # Альфа-маски листвы — отдельными PNG (в glTF 1K цвет — JPEG без альфы).
+        for key, val in files.items():
+            if "lpha" in key and "1k" in val and "png" in val["1k"]:
+                url = val["1k"]["png"]["url"]
+                total += download(url, ROOT / name / "textures" / Path(url).name)
         meta = info.get(name, {})
         manifest[name] = {
             "role": role,

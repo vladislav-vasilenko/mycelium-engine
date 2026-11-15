@@ -16,9 +16,9 @@ pub mod scans;
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
 /// 0–5 деревья (три криптомерии, три лиственных), 6 валун, 7 папоротник,
 /// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
-/// дерево, 13 лесной сор, 14 подушка мха, 15 корни и камни на тропе; 16 гриб —
-/// только с CPU.
-pub const SPECIES: [&str; 17] = [
+/// дерево, 13 лесной сор, 14 подушка мха, 15 корни и камни на тропе; 16–37 —
+/// варианты сканов и трава; 38 гриб — только с CPU.
+pub const SPECIES: [&str; 39] = [
     "sugi_a",
     "sugi_b",
     "sugi_old",
@@ -35,6 +35,29 @@ pub const SPECIES: [&str; 17] = [
     "debris",
     "moss_cushion",
     "trail_roots",
+    // 16–37 — варианты фотосканов (02.11, сессия 4), см. `scans::SCAN_SPECIES`.
+    "boulder_v1",
+    "boulder_v2",
+    "boulder_v3",
+    "fern_v1",
+    "fern_v2",
+    "fern_v3",
+    "shrub_v1",
+    "shrub_v2",
+    "log_v1",
+    "stump_v1",
+    "roots_v1",
+    "roots_v2",
+    "roots_v3",
+    "debris_v1",
+    "debris_v2",
+    "debris_v3",
+    "debris_v4",
+    "grass_a",
+    "grass_b",
+    "grass_c",
+    "grass_d",
+    "grass_e",
     "mushroom",
 ];
 pub const LODS: usize = 3;
@@ -198,11 +221,13 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         };
     }
     a.scans = tex;
-    a.albedo
-        .extend(jpeg_rgba(&ambientcg.join("Bark012/Color.jpg"))?);
+    // Кора якусуги — скан японской криптомерии (Poly Haven, 02.11).
+    a.albedo.extend(jpeg_rgba(
+        &ambientcg.join("PH_japanese_cedar_bark/Color.jpg"),
+    )?);
     a.albedo
         .extend(jpeg_rgba(&ambientcg.join("Bark007/Color.jpg"))?);
-    for bark in ["Bark012", "Bark007"] {
+    for bark in ["PH_japanese_cedar_bark", "Bark007"] {
         a.bark_normal
             .extend(jpeg_rgba(&ambientcg.join(bark).join("NormalGL.jpg"))?);
     }

@@ -17,6 +17,7 @@
    {
     "name": "fern_02",
     "alpha": "MASK",
+    "mask": "fern_02/fern_02_alpha_1k.png",
     "albedo": "fern_02/fern_02_diff_1k.jpg",
     "normal": "fern_02/fern_02_nor_gl_1k.jpg",
     "rough": "fern_02/fern_02_arm_1k.jpg"
@@ -41,6 +42,7 @@
    {
     "name": "fern_02",
     "alpha": "MASK",
+    "mask": "fern_02/fern_02_alpha_1k.png",
     "albedo": "fern_02/fern_02_diff_1k.jpg",
     "normal": "fern_02/fern_02_nor_gl_1k.jpg",
     "rough": "fern_02/fern_02_arm_1k.jpg"
@@ -65,6 +67,7 @@
    {
     "name": "fern_02",
     "alpha": "MASK",
+    "mask": "fern_02/fern_02_alpha_1k.png",
     "albedo": "fern_02/fern_02_diff_1k.jpg",
     "normal": "fern_02/fern_02_nor_gl_1k.jpg",
     "rough": "fern_02/fern_02_arm_1k.jpg"
@@ -89,6 +92,7 @@
    {
     "name": "fern_02",
     "alpha": "MASK",
+    "mask": "fern_02/fern_02_alpha_1k.png",
     "albedo": "fern_02/fern_02_diff_1k.jpg",
     "normal": "fern_02/fern_02_nor_gl_1k.jpg",
     "rough": "fern_02/fern_02_arm_1k.jpg"
@@ -113,6 +117,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -137,6 +142,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -161,6 +167,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -185,6 +192,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -209,6 +217,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -233,6 +242,7 @@
    {
     "name": "rock_moss_set_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
     "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
     "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
@@ -257,6 +267,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -281,6 +292,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -305,6 +317,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -329,6 +342,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -353,6 +367,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -377,6 +392,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -401,6 +417,7 @@
    {
     "name": "rock_moss_set_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
     "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
     "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
@@ -425,6 +442,7 @@
    {
     "name": "boulder_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "boulder_01/boulder_01_diff_1k.jpg",
     "normal": "boulder_01/boulder_01_nor_gl_1k.jpg",
     "rough": "boulder_01/boulder_01_arm_1k.jpg"
@@ -449,6 +467,7 @@
    {
     "name": "stone_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "stone_01/stone_01_diff_1k.jpg",
     "normal": "stone_01/stone_01_nor_gl_1k.jpg",
     "rough": "stone_01/stone_01_arm_1k.jpg"
@@ -473,6 +492,7 @@
    {
     "name": "rock_07",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "rock_07/rock_07_diff_1k.jpg",
     "normal": "rock_07/rock_07_nor_gl_1k.jpg",
     "rough": "rock_07/rock_07_arm_1k.jpg"
@@ -497,6 +517,7 @@
    {
     "name": "root_cluster_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_01/root_cluster_01_diff_1k.jpg",
     "normal": "root_cluster_01/root_cluster_01_nor_gl_1k.jpg",
     "rough": "root_cluster_01/root_cluster_01_arm_1k.jpg"
@@ -521,6 +542,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -545,6 +567,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -569,6 +592,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -593,6 +617,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -617,6 +642,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -641,6 +667,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -665,6 +692,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -689,6 +717,7 @@
    {
     "name": "root_cluster_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
     "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
     "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
@@ -713,6 +742,7 @@
    {
     "name": "single_root",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "single_root/single_root_diff_1k.jpg",
     "normal": "single_root/single_root_nor_gl_1k.jpg",
     "rough": "single_root/single_root_arm_1k.jpg"
@@ -737,6 +767,7 @@
    {
     "name": "pine_roots_a",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "pine_roots/pine_roots_a_diff_1k.jpg",
     "normal": "pine_roots/pine_roots_a_nor_gl_1k.jpg",
     "rough": "pine_roots/pine_roots_a_arm_1k.jpg"
@@ -744,6 +775,7 @@
    {
     "name": "pine_roots_b",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "pine_roots/pine_roots_b_diff_1k.jpg",
     "normal": "pine_roots/pine_roots_b_nor_gl_1k.jpg",
     "rough": "pine_roots/pine_roots_b_arm_1k.jpg"
@@ -768,6 +800,7 @@
    {
     "name": "pine_roots_a",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "pine_roots/pine_roots_a_diff_1k.jpg",
     "normal": "pine_roots/pine_roots_a_nor_gl_1k.jpg",
     "rough": "pine_roots/pine_roots_a_arm_1k.jpg"
@@ -775,6 +808,7 @@
    {
     "name": "pine_roots_b",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "pine_roots/pine_roots_b_diff_1k.jpg",
     "normal": "pine_roots/pine_roots_b_nor_gl_1k.jpg",
     "rough": "pine_roots/pine_roots_b_arm_1k.jpg"
@@ -799,6 +833,7 @@
    {
     "name": "tree_stump_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "tree_stump_01/tree_stump_01_diff_1k.jpg",
     "normal": "tree_stump_01/tree_stump_01_nor_gl_1k.jpg",
     "rough": "tree_stump_01/tree_stump_01_arm_1k.jpg"
@@ -823,6 +858,7 @@
    {
     "name": "tree_stump_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "tree_stump_02/tree_stump_02_diff_1k.jpg",
     "normal": "tree_stump_02/tree_stump_02_nor_gl_1k.jpg",
     "rough": "tree_stump_02/tree_stump_02_arm_1k.jpg"
@@ -847,6 +883,7 @@
    {
     "name": "dead_tree_trunk",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "dead_tree_trunk/dead_tree_trunk_diff_1k.jpg",
     "normal": "dead_tree_trunk/dead_tree_trunk_nor_gl_1k.jpg",
     "rough": "dead_tree_trunk/dead_tree_trunk_arm_1k.jpg"
@@ -871,6 +908,7 @@
    {
     "name": "dead_tree_trunk_02",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "dead_tree_trunk_02/dead_tree_trunk_02_diff_1k.jpg",
     "normal": "dead_tree_trunk_02/dead_tree_trunk_02_nor_gl_1k.jpg",
     "rough": "dead_tree_trunk_02/dead_tree_trunk_02_arm_1k.jpg"
@@ -895,6 +933,7 @@
    {
     "name": "dry_branches_medium_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
     "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
     "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
@@ -919,6 +958,7 @@
    {
     "name": "dry_branches_medium_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
     "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
     "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
@@ -943,6 +983,7 @@
    {
     "name": "dry_branches_medium_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
     "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
     "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
@@ -967,6 +1008,7 @@
    {
     "name": "bark_debris_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
     "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
     "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
@@ -991,6 +1033,7 @@
    {
     "name": "bark_debris_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
     "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
     "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
@@ -1015,6 +1058,7 @@
    {
     "name": "bark_debris_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
     "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
     "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
@@ -1039,6 +1083,7 @@
    {
     "name": "bark_debris_01",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
     "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
     "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
@@ -1063,6 +1108,7 @@
    {
     "name": "shrub_02",
     "alpha": "MASK",
+    "mask": "shrub_02/shrub_02_alpha_1k.png",
     "albedo": "shrub_02/shrub_02_diff_1k.jpg",
     "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
     "rough": "shrub_02/shrub_02_arm_1k.jpg"
@@ -1087,6 +1133,7 @@
    {
     "name": "shrub_02",
     "alpha": "MASK",
+    "mask": "shrub_02/shrub_02_alpha_1k.png",
     "albedo": "shrub_02/shrub_02_diff_1k.jpg",
     "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
     "rough": "shrub_02/shrub_02_arm_1k.jpg"
@@ -1111,6 +1158,7 @@
    {
     "name": "shrub_02",
     "alpha": "MASK",
+    "mask": "shrub_02/shrub_02_alpha_1k.png",
     "albedo": "shrub_02/shrub_02_diff_1k.jpg",
     "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
     "rough": "shrub_02/shrub_02_arm_1k.jpg"
@@ -1135,6 +1183,7 @@
    {
     "name": "shrub_02",
     "alpha": "MASK",
+    "mask": "shrub_02/shrub_02_alpha_1k.png",
     "albedo": "shrub_02/shrub_02_diff_1k.jpg",
     "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
     "rough": "shrub_02/shrub_02_arm_1k.jpg"
@@ -1159,6 +1208,7 @@
    {
     "name": "shrub_03",
     "alpha": "MASK",
+    "mask": "shrub_03/shrub_03_alpha_1k.png",
     "albedo": "shrub_03/shrub_03_diff_1k.jpg",
     "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
     "rough": "shrub_03/shrub_03_arm_1k.jpg"
@@ -1183,6 +1233,7 @@
    {
     "name": "shrub_03",
     "alpha": "MASK",
+    "mask": "shrub_03/shrub_03_alpha_1k.png",
     "albedo": "shrub_03/shrub_03_diff_1k.jpg",
     "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
     "rough": "shrub_03/shrub_03_arm_1k.jpg"
@@ -1207,6 +1258,7 @@
    {
     "name": "shrub_03",
     "alpha": "MASK",
+    "mask": "shrub_03/shrub_03_alpha_1k.png",
     "albedo": "shrub_03/shrub_03_diff_1k.jpg",
     "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
     "rough": "shrub_03/shrub_03_arm_1k.jpg"
@@ -1231,6 +1283,7 @@
    {
     "name": "shrub_03",
     "alpha": "MASK",
+    "mask": "shrub_03/shrub_03_alpha_1k.png",
     "albedo": "shrub_03/shrub_03_diff_1k.jpg",
     "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
     "rough": "shrub_03/shrub_03_arm_1k.jpg"
@@ -1255,6 +1308,7 @@
    {
     "name": "shrub_04",
     "alpha": "MASK",
+    "mask": "shrub_04/shrub_04_alpha_1k.png",
     "albedo": "shrub_04/shrub_04_diff_1k.jpg",
     "normal": "shrub_04/shrub_04_nor_gl_1k.jpg",
     "rough": "shrub_04/shrub_04_arm_1k.jpg"
@@ -1279,6 +1333,7 @@
    {
     "name": "fir_sapling_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
@@ -1286,6 +1341,7 @@
    {
     "name": "fir_sapling_twigs",
     "alpha": "OPAQUE",
+    "mask": "fir_sapling/fir_sapling_twigs_alpha_1k.png",
     "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
@@ -1445,6 +1501,7 @@
    {
     "name": "fir_sapling_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
@@ -1452,6 +1509,7 @@
    {
     "name": "fir_sapling_twigs",
     "alpha": "OPAQUE",
+    "mask": "fir_sapling/fir_sapling_twigs_alpha_1k.png",
     "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
@@ -1476,6 +1534,7 @@
    {
     "name": "fir_sapling_branches",
     "alpha": "OPAQUE",
+    "mask": null,
     "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
@@ -1483,6 +1542,7 @@
    {
     "name": "fir_sapling_twigs",
     "alpha": "OPAQUE",
+    "mask": "fir_sapling/fir_sapling_twigs_alpha_1k.png",
     "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
     "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
     "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
@@ -1604,6 +1664,131 @@
     "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
     "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
     "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   }
+  ]
+ },
+ "grass_medium_02_a": {
+  "scan": "grass_medium_02",
+  "role": "foliage",
+  "source_triangles": 714,
+  "lod_triangles": [
+   714,
+   320,
+   112
+  ],
+  "size_m": [
+   0.119,
+   0.157,
+   0.12
+  ],
+  "materials": [
+   {
+    "name": "grass_medium_02",
+    "alpha": "BLEND",
+    "mask": "grass_medium_02/grass_medium_02_alpha_1k.png",
+    "albedo": "grass_medium_02/grass_medium_02_diff_1k.jpg",
+    "normal": "grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+    "rough": "grass_medium_02/grass_medium_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "grass_medium_02_b": {
+  "scan": "grass_medium_02",
+  "role": "foliage",
+  "source_triangles": 1760,
+  "lod_triangles": [
+   1760,
+   792,
+   277
+  ],
+  "size_m": [
+   0.179,
+   0.18,
+   0.199
+  ],
+  "materials": [
+   {
+    "name": "grass_medium_02",
+    "alpha": "BLEND",
+    "mask": "grass_medium_02/grass_medium_02_alpha_1k.png",
+    "albedo": "grass_medium_02/grass_medium_02_diff_1k.jpg",
+    "normal": "grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+    "rough": "grass_medium_02/grass_medium_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "grass_medium_02_c": {
+  "scan": "grass_medium_02",
+  "role": "foliage",
+  "source_triangles": 1215,
+  "lod_triangles": [
+   1215,
+   545,
+   190
+  ],
+  "size_m": [
+   0.262,
+   0.232,
+   0.25
+  ],
+  "materials": [
+   {
+    "name": "grass_medium_02",
+    "alpha": "BLEND",
+    "mask": "grass_medium_02/grass_medium_02_alpha_1k.png",
+    "albedo": "grass_medium_02/grass_medium_02_diff_1k.jpg",
+    "normal": "grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+    "rough": "grass_medium_02/grass_medium_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "grass_medium_02_d": {
+  "scan": "grass_medium_02",
+  "role": "foliage",
+  "source_triangles": 2489,
+  "lod_triangles": [
+   2489,
+   1120,
+   391
+  ],
+  "size_m": [
+   0.317,
+   0.26,
+   0.362
+  ],
+  "materials": [
+   {
+    "name": "grass_medium_02",
+    "alpha": "BLEND",
+    "mask": "grass_medium_02/grass_medium_02_alpha_1k.png",
+    "albedo": "grass_medium_02/grass_medium_02_diff_1k.jpg",
+    "normal": "grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+    "rough": "grass_medium_02/grass_medium_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "grass_medium_02_e": {
+  "scan": "grass_medium_02",
+  "role": "foliage",
+  "source_triangles": 1664,
+  "lod_triangles": [
+   1664,
+   748,
+   261
+  ],
+  "size_m": [
+   0.356,
+   0.403,
+   0.433
+  ],
+  "materials": [
+   {
+    "name": "grass_medium_02",
+    "alpha": "BLEND",
+    "mask": "grass_medium_02/grass_medium_02_alpha_1k.png",
+    "albedo": "grass_medium_02/grass_medium_02_diff_1k.jpg",
+    "normal": "grass_medium_02/grass_medium_02_nor_gl_1k.jpg",
+    "rough": "grass_medium_02/grass_medium_02_arm_1k.jpg"
    }
   ]
  }

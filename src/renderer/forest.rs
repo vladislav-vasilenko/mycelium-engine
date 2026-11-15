@@ -1,6 +1,6 @@
 //! Лес на GPU (02.4): сетки и текстуры растений, списки экземпляров и
-//! indirect-аргументы слотов. Списки: вид × LOD (0–47), тени шести деревьев
-//! (48–53) и предметы с CPU (54: грибы, бусины чувства мицелия), по
+//! indirect-аргументы слотов. Списки: вид × LOD (0–113), тени шести деревьев
+//! (114–119) и предметы с CPU (120: грибы, бусины чувства мицелия), по
 //! `FOREST_CAP` экземпляров; раскладка совпадает с `forest.metal`.
 
 use objc2_metal::*;
@@ -12,7 +12,7 @@ use crate::layout::PlantInstance;
 use crate::plants::PlantAssets;
 
 /// Видов, которые расставляет GPU (`plants::SPECIES` без гриба).
-pub const GPU_SPECIES: usize = 16;
+pub const GPU_SPECIES: usize = 38;
 /// Деревья — первые виды; у каждого свой список теней (LOD 1).
 pub const TREE_MESHES: usize = 6;
 /// Списки, которые рисует камера (вид × LOD); дальше — тени деревьев.
@@ -22,10 +22,10 @@ pub const PROPS_LIST: usize = CAMERA_LISTS + TREE_MESHES;
 pub const FOREST_LISTS: usize = PROPS_LIST + 1;
 /// Радиус ствола у груди при масштабе 1 по видам деревьев, м (столкновения).
 const TRUNK_R: [f32; TREE_MESHES] = [0.9, 0.75, 2.0, 0.45, 0.4, 0.5];
-pub const FOREST_CAP: usize = 16384;
+pub const FOREST_CAP: usize = 8192;
 pub const FOREST_GRID: usize = 160;
-/// u32 в буфере счётчиков: 64 счётчика (55 занято), затем аргументы по 5 u32.
-const COUNTS_WORDS: usize = 64;
+/// u32 в буфере счётчиков: 128 счётчиков (121 занят), затем аргументы по 5 u32.
+const COUNTS_WORDS: usize = 128;
 pub const ARGS_OFFSET: usize = COUNTS_WORDS * 4;
 const COUNTERS_BYTES: usize = ARGS_OFFSET + FOREST_LISTS * 20;
 
@@ -92,12 +92,14 @@ impl ForestGpu {
             };
             self.obstacles.clear();
             // (список, радиус при масштабе 1, м): деревья — списки теней,
-            // валуны (вид 6) и пни (вид 11) — LOD 0.
+            // валуны-сканы (виды 6, 16–18) и пни (11, 25) — LOD 0.
             let trees = (0..TREE_MESHES).map(|s| (CAMERA_LISTS + s, TRUNK_R[s]));
-            for (list, r) in trees.chain([(6 * 3, 1.3), (11 * 3, 1.1)]) {
+            let rocks = [6, 16, 17, 18].map(|s| (s * 3, 0.9f32));
+            let stumps = [11, 25].map(|s| (s * 3, 0.6f32));
+            for (list, r) in trees.chain(rocks).chain(stumps) {
                 let n = (words[list] as usize).min(FOREST_CAP);
                 for p in &all[list * FOREST_CAP..list * FOREST_CAP + n] {
-                    if list == 6 * 3 && p.scale < 0.6 {
+                    if r == 0.9 && p.scale < 0.6 {
                         continue; // мелкий камень перешагивается
                     }
                     self.obstacles

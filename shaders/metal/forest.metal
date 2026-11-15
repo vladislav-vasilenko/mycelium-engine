@@ -17,13 +17,13 @@ constant int FOREST_GRID = 160;               // клеток по сторон�
 // 10 упавший ствол, 11 полый пень, 12 вывороченное дерево, 13 лесной сор,
 // 14 подушка мха, 15 корни и камни на тропе; 16 — гриб, только из списка
 // предметов с CPU.
-constant uint GPU_SPECIES = 16;
+constant uint GPU_SPECIES = 38;
 constant uint TREE_MESHES = 6;
 constant uint CAMERA_LISTS = GPU_SPECIES * 3;                 // вид × LOD
 constant uint PROPS_LIST = CAMERA_LISTS + TREE_MESHES;        // 54
 constant uint FOREST_LISTS = PROPS_LIST + 1;                  // 55
-constant uint COUNTS_WORDS = 64;               // счётчики, затем indirect-аргументы
-constant uint FOREST_CAP = 16384;             // экземпляров в списке
+constant uint COUNTS_WORDS = 128;               // счётчики, затем indirect-аргументы
+constant uint FOREST_CAP = 8192;             // экземпляров в списке
 constant uint SPECIES_SUGI = 0;
 constant uint SPECIES_SUGI_OLD = 2;
 constant uint SPECIES_BROAD = 3;
@@ -37,9 +37,12 @@ constant uint SPECIES_WINDFALL = 12;
 constant uint SPECIES_DEBRIS = 13;
 constant uint SPECIES_MOSS = 14;
 constant uint SPECIES_TRAIL_ROOTS = 15;
-constant uint SPECIES_MUSHROOM = 16;
+constant uint SPECIES_GRASS = 33;           // 33–37 — пучки травы (сканы)
+constant uint SPECIES_MUSHROOM = 38;
 // Высота вида при масштабе 1, м (сфера отсечения).
-constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3};
+constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3,
+                                         2.2, 2.2, 2.2, 1.0, 1.0, 1.0, 2.4, 2.4, 1.0, 2.0, 0.3, 0.3, 0.3,
+                                         0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5};
 // Подлесок: подклетки 2 м до UNDER_DIST (кусты — до SHRUB_DIST), LOD на 15 и 35 м.
 constant float UNDER_DIST = 70.0;
 constant float SHRUB_DIST = 100.0;
@@ -59,6 +62,27 @@ inline uint hash3(int x, int z, uint salt) {
 }
 inline float rnd(uint h, uint k) {
     return float(hash3(int(h), int(k), 0x51u) & 0xffffffu) / 16777216.0;
+}
+
+// Вариант сетки вида по хэшу (02.11, сессия 4): фотосканы дают по 2–5
+// сеток на вид; списки — по сеткам.
+static uint variant_of(uint species, uint h) {
+    float r = rnd(h, 13);
+    auto pick = [&](uint a, uint b, uint c, uint d, uint e, uint n) {
+        uint i = min(uint(r * float(n)), n - 1);
+        return i == 0 ? a : (i == 1 ? b : (i == 2 ? c : (i == 3 ? d : e)));
+    };
+    switch (species) {
+        case 6: return pick(6, 16, 17, 18, 18, 4);       // валуны
+        case 7: return pick(7, 19, 20, 21, 21, 4);       // папоротник
+        case 9: return pick(9, 22, 23, 23, 23, 3);       // кустарник
+        case 10: return pick(10, 24, 24, 24, 24, 2);     // ствол
+        case 11: return pick(11, 25, 25, 25, 25, 2);     // пень
+        case 15: return pick(15, 26, 27, 28, 28, 4);     // корни на тропе
+        case 13: return pick(13, 29, 30, 31, 32, 5);     // сор
+        case 33: return pick(33, 34, 35, 36, 37, 5);     // трава
+        default: return species;
+    }
 }
 
 // Гладкий шум пятен 0…1 с ячейкой `cell` м: куртины папоротника и кустов.
@@ -183,7 +207,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
                 continue;
             }
             species = SPECIES_BOULDER;
-            scale = 0.4 + 1.2 * rnd(h, 5) * rnd(h, 6);
+            scale = 0.3 + 0.8 * rnd(h, 5) * rnd(h, 6);  // сканы камней 2–3 м
         }
         // Не на тропах, дорогах и в руслах.
         FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
@@ -217,7 +241,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             continue;
         }
         uint lod = dist < LOD_DIST[0] ? 0 : (dist < LOD_DIST[1] ? 1 : 2);
-        uint list = species * 3 + lod;
+        uint list = variant_of(species, h) * 3 + lod;
         uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
         if (k < FOREST_CAP) {
             out[list * FOREST_CAP + k] = inst;
@@ -250,8 +274,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         float edge = smoothstep(1.5, 3.0, fd.trail) * (1.0 - smoothstep(4.0, 12.0, fd.trail));
         float fern_patch = smoothstep(0.35, 0.75, patch_noise(p, 14.0, 0xFE11u));
         float shrub_patch = smoothstep(0.45, 0.8, patch_noise(p, 22.0, 0x5B11u));
-        float fern_p = forest * (0.15 + 0.5 * mc.b + 0.35 * hollow + 0.5 * brook) * (0.25 + 1.2 * fern_patch);
-        float shrub_p = forest * (0.04 + 0.25 * edge) * (0.3 + 1.4 * shrub_patch);
+        float fern_p = forest * (0.25 + 0.5 * mc.b + 0.35 * hollow + 0.5 * brook) * (0.35 + 1.3 * fern_patch);
+        float shrub_p = forest * (0.08 + 0.3 * edge) * (0.4 + 1.5 * shrub_patch);
         float sasa_p = cv.z * 0.6 + forest * 0.03;
         float r = rnd(h, 3);
         uint species;
@@ -293,7 +317,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         inst._pad = 0.0;
         float l0 = species == SPECIES_SHRUB ? 25.0 : 15.0;
         uint lod = dxz < l0 ? 0 : (dxz < l0 * 2.4 ? 1 : 2);
-        uint list = species * 3 + lod;
+        uint list = variant_of(species, h) * 3 + lod;
         uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
         if (k < FOREST_CAP) {
             out[list * FOREST_CAP + k] = inst;
@@ -324,8 +348,15 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         // На полотне лесной тропы (расстояние до края < 0) — корни и камни
         // поперёк неё: ось сетки X — по градиенту расстояния до края.
         bool on_trail = fd.trail < -0.2 && forest > 0.2;
+        // Низкая трава (02.11): густо на лугах и открытом, умеренно под
+        // пологом, пятнами; сор потеснился.
+        float grass_p = (cv.z * 0.9 + forest * 0.35 + max(1.0 - forest - cv.w, 0.0) * 0.7)
+                      * (0.45 + 0.8 * patch_noise(p, 9.0, 0x6A55u));
+        float dp = debris_p * 0.6;
         uint species = on_trail ? (rnd(h, 10) < 0.35 ? SPECIES_TRAIL_ROOTS : 99u)
-                                : (r < moss_p ? SPECIES_MOSS : (r < moss_p + debris_p ? SPECIES_DEBRIS : 99u));
+                                : (r < moss_p ? SPECIES_MOSS
+                                   : (r < moss_p + dp ? SPECIES_DEBRIS
+                                      : (r < moss_p + dp + grass_p ? SPECIES_GRASS : 99u)));
         if (species == 99u) {
             continue;
         }
@@ -367,7 +398,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         inst.phase = rnd(h, 9) * 6.2831853;
         inst._pad = 0.0;
         uint lod = dxz < 8.0 ? 0 : (dxz < 16.0 ? 1 : 2);
-        uint list = species * 3 + lod;
+        uint list = variant_of(species, h) * 3 + lod;
         uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
         if (k < FOREST_CAP) {
             out[list * FOREST_CAP + k] = inst;
@@ -537,7 +568,14 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         // Фотоскан (02.11): свой цвет и нормаль (слой = материал − 16), базис
         // нормали — по производным, как у коры (AD-66).
         uint layer = uint(mat - 16.0);
-        albedo = scan_albedo.sample(ms, in.uv, layer).rgb;
+        float4 sa = scan_albedo.sample(ms, in.uv, layer);
+        // Альфа-маска листвы и травы (непрозрачные сканы — 1), заострённая
+        // по производным, как у карточек.
+        float aw = max(fwidth(sa.a), 1e-4);
+        if (saturate((sa.a - 0.5) / aw + 0.5) < 0.5) {
+            discard_fragment();
+        }
+        albedo = sa.rgb;
         float3 dp1 = dfdx(in.rel), dp2 = dfdy(in.rel);
         float2 du1 = dfdx(in.uv), du2 = dfdy(in.uv);
         float3 p2 = cross(dp2, n), p1 = cross(n, dp1);
@@ -608,7 +646,7 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
             float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
             float3 tn = bark_normal.sample(ms, in.uv, uint(mat)).xyz * 2.0 - 1.0;
             n = normalize(T * inv * tn.x + B * inv * tn.y + n * tn.z);
-            albedo *= mat < 0.5 ? float3(0.52, 0.38, 0.30)  // кора якусуги — красно-бурая, не оранжевая
+            albedo *= mat < 0.5 ? float3(0.85, 0.80, 0.78)  // кора якусуги — скан японской криптомерии (02.11), свой цвет
                                 : float3(0.24, 0.22, 0.19); // серо-бурая кора лиственных
             // Мох: у основания, на верхних сторонах ветвей и на валежнике.
             float3 mossc = mat_albedo.sample(ms, in.uv * 1.3, 3).rgb;
@@ -691,8 +729,17 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
 }
 
 fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
-                              texture2d_array<float> albedo_tex [[texture(0)]]) {
+                              texture2d_array<float> albedo_tex [[texture(0)]],
+                              texture2d_array<float> scan_albedo [[texture(2)]]) {
     float mat = round(in.mat);
+    if (mat > 15.5) {
+        // Сканы (02.11): отсечение по альфа-маске.
+        constexpr sampler ss(filter::linear, mip_filter::linear, address::repeat);
+        if (scan_albedo.sample(ss, in.uv, uint(mat - 16.0)).a < 0.5) {
+            discard_fragment();
+        }
+        return;
+    }
     bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
     if (leafy && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
         discard_fragment();

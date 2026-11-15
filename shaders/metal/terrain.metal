@@ -225,7 +225,7 @@ constant int MAT_GRAVEL = 8;
 constant int MAT_MOSSROCK = 9;
 constant int MAT_COUNT = 10;
 // Размер повтора слоя на земле, м.
-constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0, 2.0, 2.5, 2.5, 2.0, 3.0};
+constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0, 2.0, 2.5, 2.5, 2.5, 3.0};
 // Насколько слой темнеет и блестит от влаги (песок впитывает и блестит сильнее камня).
 constant float MAT_POROSITY[MAT_COUNT] = {0.25, 1.0, 0.7, 0.4, 0.5, 0.4, 0.5, 0.5, 0.6, 0.3};
 // Цвета слоёв в отладочном виде «слои материалов».
@@ -259,7 +259,8 @@ struct MatSample {
 };
 
 // Глубина рельефа слоя для параллакса, м (02.2, детализация вблизи).
-constant float MAT_DEPTH_M[MAT_COUNT] = {0.06, 0.015, 0.03, 0.04, 0.035, 0.05, 0.03, 0.03, 0.03, 0.06};
+// Тропа (слой 8, каменистая тропа Poly Haven, 02.11): крупные камни — глубокий параллакс.
+constant float MAT_DEPTH_M[MAT_COUNT] = {0.06, 0.015, 0.03, 0.04, 0.035, 0.05, 0.03, 0.03, 0.09, 0.06};
 
 // Вторая выборка против повторов: повёрнутые и растянутые координаты.
 inline float2 rot_uv(float2 uv) {
@@ -472,8 +473,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float under = smoothstep(0.0, -0.6, in.world.y);
     float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     // Полотно тропы — утоптанная почва с щебнем, бровка — опад с почвой.
-    over[MAT_SOIL] += 0.6 * trail + 0.4 * road_px + 0.3 * trail_edge * (1.0 - trail);
-    over[MAT_GRAVEL] += (belts ? 0.4 : 0.0) * trail;
+    // Полотно лесной тропы Якусимы — крупные камни и корни (02.11), почва между.
+    over[MAT_SOIL] += (belts ? 0.25 : 0.6) * trail + 0.4 * road_px + 0.3 * trail_edge * (1.0 - trail);
+    over[MAT_GRAVEL] += (belts ? 0.8 : 0.0) * trail;
     over[MAT_SOIL] += (belts ? 0.0 : 0.4) * trail;
     over[MAT_LITTER] += (belts ? 0.3 : 0.0) * trail_edge * (1.0 - trail);
     over[MAT_SOIL] += (belts ? 0.0 : 0.3) * trail_edge * (1.0 - trail);

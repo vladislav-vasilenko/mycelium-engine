@@ -346,3 +346,19 @@ fn yakushima_trails_are_benches() {
     assert!(n > 50, "мало отрезков троп в зоне: {n}");
     assert!(flat * 10 >= n * 9, "ровных поперёк {flat} из {n}");
 }
+
+/// 02.10: после врезки троп узлы зоны на сетке острова совпадают с ним
+/// (иначе грубые уровни кластеров дают шипы на дороге).
+#[test]
+fn zone_matches_island_after_carving() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/world/yakushima/far");
+    let w = crate::world::layers::import(&dir).unwrap();
+    let z = w.zone.as_ref().unwrap();
+    let (n, r) = (z.grid.nx, z.ratio);
+    for b in (0..n).step_by(r) {
+        for a in (0..n).step_by(r) {
+            let far = w.heightfield.heights[(z.j0 + b / r) * w.heightfield.nx + z.i0 + a / r];
+            assert_eq!(far, z.grid.heights[b * n + a], "узел ({a}, {b})");
+        }
+    }
+}

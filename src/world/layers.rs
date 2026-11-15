@@ -548,6 +548,7 @@ pub fn import(dir: &Path) -> Result<World, String> {
         if let Some(z) = &mut world.zone {
             let o = z.origin(&world.heightfield);
             super::carve::carve_paths(&mut z.grid, o, f);
+            z.sync_far(&mut world.heightfield);
         }
     }
     Ok(world)

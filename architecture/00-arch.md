@@ -568,7 +568,7 @@ sequenceDiagram
 
 | Файл | Элементы |
 | --- | --- |
-| `src/world/carve.rs` | `Line { segs, start_s, profile }` (`height_at(s)`), `lines(src, origin, features)` — подряд идущие отрезки одного вида в полилинии, профиль через `PROFILE_STEP_M` = 1 м, сглаживание треугольным окном `SMOOTH_ROAD_M` = 12 / `SMOOTH_TRAIL_M` = 5 м (02.10, AD-67); `carve_paths(hf, origin, features) -> usize`: узел берёт ближайшую ось и тянется к высоте сглаженного профиля в ближайшей точке (до 02.10 — к сырой высоте рельефа в ближайшей точке осевой линии) (в полуширине — полностью, на бровке 2,5 м у тропы и 4 м у дороги — по smoothstep); вызывается в `layers::import` для поля острова и зоны 1 м до ключа кэша кластеров |
+| `src/world/carve.rs` | `Line { segs, start_s, profile }` (`height_at(s)`), `lines(src, origin, features)` — подряд идущие отрезки одного вида в полилинии, профиль через `PROFILE_STEP_M` = 1 м, сглаживание треугольным окном `SMOOTH_ROAD_M` = 12 / `SMOOTH_TRAIL_M` = 5 м (02.10, AD-67); после врезки зоны — `ZoneField::sync_far(far)` (узлы зоны на сетке острова копируются в поле острова — инвариант стыковки, иначе шипы на грубых уровнях кластеров); `carve_paths(hf, origin, features) -> usize`: узел берёт ближайшую ось и тянется к высоте сглаженного профиля в ближайшей точке (до 02.10 — к сырой высоте рельефа в ближайшей точке осевой линии) (в полуширине — полностью, на бровке 2,5 м у тропы и 4 м у дороги — по smoothstep); вызывается в `layers::import` для поля острова и зоны 1 м до ключа кэша кластеров |
 
 ### 4.9h. Крупная детализация рельефа (02.9)
 
@@ -1406,3 +1406,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 05.2 | после `9436884` | AD-64: `game/sense.rs`, `game/closeup.rs`, `game/ui.rs` (интерфейс вынесен из `game/mod.rs`), `Focus`, бусины в `plant_fs` (`kind` 8–10), `sim::projection_fov`, `RigInput.offset`, `Args.sense` (`--sense`), клавиша C |
 | 2026-11-15 | 02.10 (сессия 1) | после `594548e` | AD-65, AD-66: `tools/plants/{mesh,trees,ground}.py`, 16 сеток растений (старые `yakusugi`/`broadleaf` удалены), `GPU_SPECIES` 15, `FOREST_LISTS` 52, `COUNTS_WORDS` 64, `bark_normal`, материал 8 почвы, атрибут мха, кусты/валежник/сор/мох в `forest_place`, `patch_noise`, форма экземпляра в `plant_world`, обход треугольников по нормалям |
 | 2026-11-15 | 02.10 (сессия 2) | после `98d4e24` | AD-67: `carve.rs` (полилинии, `Line`, профиль, ближайшая ось), трава и асфальт в `terrain_fs`, видимость неба^1,5 и отражённый свет (`terrain.metal`, `forest.metal`), тонмаппинг с сохранением оттенка (`tonemap.metal`) |
+| 2026-11-15 | 02.10 (сессия 2) | после `338b912` | `ZoneField::sync_far`, вызов после врезки зоны в `layers::import`; тест `world::tests::zone_matches_island_after_carving` |

@@ -39,6 +39,19 @@ impl ZoneField {
         Vec2::new(self.i0 as f32, self.j0 as f32) * far.step_m
     }
 
+    /// Инвариант стыковки: каждый `ratio`-й узел зоны и совпадающий с ним узел
+    /// острова равны. Вызывается после правок зоны (врезка троп, 02.10): иначе
+    /// грубые уровни кластеров, взявшие узлы острова, торчат шипами.
+    pub fn sync_far(&self, far: &mut HeightField) {
+        let (n, r) = (self.grid.nx, self.ratio);
+        for b in (0..n).step_by(r) {
+            for a in (0..n).step_by(r) {
+                far.heights[(self.j0 + b / r) * far.nx + self.i0 + a / r] =
+                    self.grid.heights[b * n + a];
+            }
+        }
+    }
+
     fn inside_cell(&self, i: usize, j: usize) -> bool {
         (self.i0..self.i0 + self.cells).contains(&i) && (self.j0..self.j0 + self.cells).contains(&j)
     }

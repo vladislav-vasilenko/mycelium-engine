@@ -145,11 +145,11 @@ def yakusugi(lod, seed=0x5091):
         for k in range(7 if lod == 0 else 5):
             th = 2 * math.pi * (k + rng.uniform(-0.2, 0.2)) / (7 if lod == 0 else 5)
             d = np.array([math.cos(th), 0, math.sin(th)])
-            start = np.array([0, rng.uniform(1.6, 2.6), 0]) + d * R0 * 0.6
-            mid = d * rng.uniform(1.6, 2.4) + np.array([0, 0.5, 0])
-            end = d * rng.uniform(2.8, 4.4) + np.array([0, -0.45, 0])
+            start = np.array([0, rng.uniform(0.9, 1.5), 0]) + d * R0 * 0.55
+            mid = d * rng.uniform(1.3, 1.7) + np.array([0, 0.15, 0])
+            end = d * rng.uniform(2.0, 2.8) + np.array([0, -0.9, 0])
             pts = bezier(start, mid, end, 10 if lod == 0 else 6)
-            rr = np.linspace(R0 * 0.55, 0.1, len(pts))
+            rr = np.linspace(R0 * 0.6, 0.12, len(pts))
             tube(m, pts, rr, 8 if lod == 0 else 5, BARK_SUGI, lambda q: 0.0, 0.85)
 
     # Ветви ярусами по золотому углу, хвоя пучками на внешних 2/3.
@@ -169,11 +169,11 @@ def yakusugi(lod, seed=0x5091):
             rb = np.interp(y, ys, radii) * 0.22
             tube(m, pts, np.linspace(rb, 0.03, 5), 5 if lod == 0 else 4, BARK_SUGI, wind, 0.8)
         # Пучки хвои: на вершине ветви звезда из карточек, вдоль ветви — по одной.
-        tufts = [3, 2, 1][lod]
+        tufts = [5, 3, 2][lod]
         for k in range(tufts):
-            s = 1.0 - k * 0.3
+            s = 1.0 - k * (0.75 / max(tufts - 1, 1))
             c = bezier(base, mid, tip, 11)[int(round(s * 10))]
-            size = (1.0 + 0.5 * L / 5.0) * [1.0, 1.3, 2.2][lod] * rng.uniform(0.85, 1.15)
+            size = (1.4 + 0.6 * L / 5.0) * [1.0, 1.3, 2.0][lod] * rng.uniform(0.85, 1.15)
             ao = 0.55 + 0.45 * min(1.0, np.hypot(c[0], c[2]) / max(crown_r(y), 0.5))
             out = np.array([c[0], 0, c[2]])
             out = out / (np.linalg.norm(out) + 1e-6)

@@ -18,7 +18,7 @@ struct FrameUniforms {
     float underwater_m;    // глубина глаз под водой, 0 — над водой
     float canopy_eye;      // доля леса у глаз 0…1: тень полога на руках
     float pre_exposure;    // освещённые шейдеры пишут яркость × это (04.1)
-    float _pad_uw;
+    float forest;          // лес нарисован (02.4): без ложных пятен полога
     float4x4 view_proj_rel; // проекция × поворот вида без сдвига (AD-49)
     float4 cam_hi;         // камера = cam_hi + cam_lo; cam_hi кратна 256 м
     float4 cam_lo;
@@ -167,6 +167,23 @@ struct TerrainCluster {
 };
 
 // Входы неба от CPU (src/layout.rs, SkyInputs), 176 байт.
+// Растения (02.8, 02.4): src/layout.rs, PlantVertex / PlantInstance.
+struct PlantVertex {
+    packed_float3 position;
+    packed_float3 normal;
+    packed_float2 uv;
+    uchar4 attr;
+};
+
+struct PlantInstance {
+    packed_float3 position;
+    float scale;
+    float yaw;
+    float tint;
+    float phase;
+    float _pad;
+};
+
 // Выбор кластеров на GPU (02.5): src/layout.rs, CullView / CullNode / CullBounds / CullCluster.
 struct CullView {
     float4 planes[6];  // xyz — нормаль внутрь, w — смещение

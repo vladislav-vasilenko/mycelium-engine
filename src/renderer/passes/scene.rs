@@ -1,7 +1,6 @@
 //! Проход `scene`: ландшафт, кубы (тестовая сцена или маркеры), затем
 //! прозрачная вода. Цели — HDR и глубина reversed-Z.
 
-use objc2::runtime::ProtocolObject;
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx};
@@ -15,7 +14,7 @@ use crate::water::WATER_LEVELS;
 
 pub(in crate::renderer) struct ScenePass;
 
-type RenderEncoder = ProtocolObject<dyn MTL4RenderCommandEncoder>;
+use super::RenderEncoder;
 
 const BOTH_STAGES: MTLRenderStages =
     MTLRenderStages(MTLRenderStages::Vertex.0 | MTLRenderStages::Fragment.0);
@@ -42,6 +41,7 @@ impl FramePass for ScenePass {
         });
         if ctx.input.draw_terrain {
             draw_terrain(ctx, &enc);
+            super::forest::draw_scene(ctx, &enc);
         }
         draw_cubes(ctx, &enc);
         draw_sky(ctx, &enc);

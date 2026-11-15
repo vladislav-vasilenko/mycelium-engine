@@ -89,4 +89,6 @@ kernel void layout_probe(device uint* out [[buffer(0)]],
     out[46] = uint((thread char*)&cv.params - (thread char*)&cv);
     out[47] = sizeof(CullNode);
     out[48] = sizeof(CullCluster);
+    out[49] = sizeof(PlantVertex);
+    out[50] = sizeof(PlantInstance);
 }

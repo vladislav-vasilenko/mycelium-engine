@@ -572,13 +572,17 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         float fleck = detail.sample(s, pattern_uv(frame, lxz, 6.0)).r * 0.6
                     + detail.sample(s, pattern_uv(frame, lxz, 2.3)).g * 0.4;
         sun_flecks = mix(1.0, smoothstep(0.55, 0.75, fleck) * 0.6 + 0.08, canopy_shade);
+        // С настоящим лесом (02.4) пятна дают тени деревьев, а не шум.
+        sun_flecks = frame.forest > 0.5 ? 1.0 : sun_flecks;
     }
 
     // Полог леса вдали (до деревьев 02.4): с 80–450 м под лесом виден не опад,
     // а кроны — тёмная зелень с пятнами крон; у кедрового пояса темнее и синее.
     if (belts) {
         float tree = (cv.x + cv.y) * forest_w * (1.0 - steep * 0.7);
-        float far_k = smoothstep(80.0, 450.0, length(in.rel));
+        // С лесом кроны вблизи — настоящие деревья (до ~480 м), полог-подкраска — дальше.
+        float far_k = frame.forest > 0.5 ? smoothstep(400.0, 500.0, length(in.rel))
+                                         : smoothstep(80.0, 450.0, length(in.rel));
         float3 crown = mix(float3(0.050, 0.090, 0.030), float3(0.026, 0.052, 0.030),
                            cv.y / max(cv.x + cv.y, 1e-4));
         crown *= 0.7 + 0.6 * detail.sample(s, pattern_uv(frame, lxz, 31.0)).g;

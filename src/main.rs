@@ -21,6 +21,7 @@ mod app;
 mod frame_graph;
 mod hands;
 mod layout;
+mod plants;
 mod platform;
 mod reference;
 mod renderer;

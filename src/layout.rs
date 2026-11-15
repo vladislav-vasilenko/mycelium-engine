@@ -32,7 +32,8 @@ pub struct FrameUniforms {
     /// Предэкспозиция (04.1): освещённые шейдеры пишут яркость × это число,
     /// тонмаппинг делит обратно — ночные яркости ~10⁻⁶ не теряются в half.
     pub pre_exposure: f32,
-    pub _pad: f32,
+    /// Лес нарисован (02.4): 1 — ложные пятна полога на земле не нужны.
+    pub forest: f32,
     /// Проекция × поворот вида без сдвига: позиции идут относительно камеры
     /// (AD-49), иначе сдвиг на десятки км съедает точность f32.
     pub view_proj_rel: [[f32; 4]; 4],
@@ -217,6 +218,30 @@ pub struct ShadowUniforms {
     pub params: [f32; 4],
 }
 
+/// Вершина растения (02.8), 36 байт: `PlantVertex` в `forest.metal`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct PlantVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    /// R — материал (0 кора якусуги, 1 кора лиственного, 2 хвоя, 3 листья,
+    /// 4 камень), G — сила ветра, B — затенение в кроне, A — 255.
+    pub attr: [u8; 4],
+}
+
+/// Экземпляр растения (02.4), 32 байта; пишет ядро `forest_place`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct PlantInstance {
+    pub position: [f32; 3],
+    pub scale: f32,
+    pub yaw: f32,
+    pub tint: f32,
+    pub phase: f32,
+    pub _pad: f32,
+}
+
 /// Камера выбора кластеров на GPU (02.5), 128 байт: то же, что
 /// `terrain_clusters::View`. На GPU — `CullView` в `common.h`.
 #[repr(C, align(16))]
@@ -338,10 +363,12 @@ pub fn expected_probe() -> [u32; LAYOUT_PROBE_LEN] {
         offset_of!(CullView, params) as u32,
         size_of::<CullNode>() as u32,
         size_of::<CullCluster>() as u32,
+        size_of::<PlantVertex>() as u32,
+        size_of::<PlantInstance>() as u32,
     ]
 }
 
-pub const LAYOUT_PROBE_LEN: usize = 49;
+pub const LAYOUT_PROBE_LEN: usize = 51;
 
 pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "sizeof(FrameUniforms)",
@@ -393,6 +420,8 @@ pub const LAYOUT_PROBE_NAMES: [&str; LAYOUT_PROBE_LEN] = [
     "CullView.params",
     "sizeof(CullNode)",
     "sizeof(CullCluster)",
+    "sizeof(PlantVertex)",
+    "sizeof(PlantInstance)",
 ];
 
 #[cfg(test)]
@@ -407,7 +436,7 @@ mod tests {
             [
                 240, 16, 64, 80, 96, 100, 104, 108, 112, 116, 128, 144, 224, 80, 64, 32, 12, 24,
                 32, 12, 24, 28, 32, 432, 48, 304, 32, 52, 12, 24, 32, 36, 144, 128, 32, 16, 20, 16,
-                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32
+                12, 176, 80, 96, 32, 304, 256, 128, 112, 32, 32, 36, 32
             ]
         );
     }

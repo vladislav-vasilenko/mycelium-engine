@@ -107,6 +107,27 @@ impl App {
                 )
             }),
         })?;
+        // Лес (02.4) — у мира с поясами растительности (Якусима).
+        if self.world.cover.is_some() {
+            let t = std::time::Instant::now();
+            match crate::plants::load(
+                &crate::plants::models_dir(),
+                &crate::terrain_materials::source_dir(),
+            )
+            .and_then(|a| r.set_forest(&a).map(|_| a))
+            {
+                Ok(a) => {
+                    eprintln!(
+                        "растения: {} видов, {} вершин, {} треугольников, за {} мс",
+                        crate::plants::SPECIES.len(),
+                        a.vertices.len(),
+                        a.indices.len() / 3,
+                        t.elapsed().as_millis()
+                    );
+                }
+                Err(e) => eprintln!("растения не загружены: {e}"),
+            }
+        }
         eprintln!(
             "кластеры рельефа: {} кластеров, {} групп, {} уровней, {} треугольников (уровень 0 — {}), {:.1} МБ, {} за {:.0} мс",
             clusters.gpu.len(),

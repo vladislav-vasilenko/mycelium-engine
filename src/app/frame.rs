@@ -99,6 +99,13 @@ impl App {
         let pre_exposure = r.last_exposure();
         // Время мира от тиков симуляции: волны и накат детерминированы.
         let time = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
+        // Лес (02.4): кластерный рельеф, выбор на GPU, не в самопроверке.
+        let forest = self.forest_loaded
+            && self.use_clusters
+            && self.clusters.is_some()
+            && !self.args.cpu_cull
+            && !selftest
+            && self.scene == SceneMode::Terrain;
         let uniforms = FrameUniforms {
             view_proj: (proj * view).to_cols_array_2d(),
             camera_pos: camera.position.extend(1.0).to_array(),
@@ -141,7 +148,7 @@ impl App {
             } else {
                 1.0
             },
-            _pad: 0.0,
+            forest: if forest { 1.0 } else { 0.0 },
             // Относительно камеры (AD-49): поворот вида без сдвига, камера =
             // крупная часть (кратна 256 м) + остаток.
             view_proj_rel: view_proj_rel.to_cols_array_2d(),
@@ -237,6 +244,7 @@ impl App {
             shadows,
             shadow_clusters: &self.shadow_clusters,
             cull,
+            forest,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {

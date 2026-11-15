@@ -15,6 +15,7 @@
 
 mod cull;
 mod device;
+mod forest;
 mod frame;
 mod hands;
 mod passes;
@@ -39,6 +40,7 @@ use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 pub use cull::{CULL_VIEWS, CullFrame, CullStats};
 pub use device::{DeviceInfo, probe_device};
+pub use forest::ForestStats;
 pub use frame::{FrameInput, FrameOutcome, Stats, WaterFrame};
 pub use hands::{HandsFrame, MAX_JOINTS};
 pub use readback::Readback;
@@ -106,6 +108,9 @@ pub struct Renderer {
     shadows: shadows::ShadowGpu,
     /// Итог выбора кластеров на GPU последнего завершённого кадра (02.5).
     cull_stats: Option<CullStats>,
+    /// Лес (02.4) и его числа последнего завершённого кадра.
+    forest: Option<forest::ForestGpu>,
+    forest_stats: Option<ForestStats>,
     pub stats: Stats,
 }
 
@@ -241,6 +246,8 @@ impl Renderer {
             sky,
             shadows,
             cull_stats: None,
+            forest: None,
+            forest_stats: None,
             stats: Stats::default(),
         })
     }
@@ -385,6 +392,11 @@ impl Renderer {
             && let Some(s) = c.cull.take_and_reset(slot_index, frame_index + 1)
         {
             self.cull_stats = Some(s);
+        }
+        if let Some(f) = self.forest.as_mut()
+            && let Some(s) = f.take_and_reset(slot_index)
+        {
+            self.forest_stats = Some(s);
         }
 
         let Some(drawable) = self.layer.nextDrawable() else {

@@ -46,6 +46,8 @@ const RES_EXPOSURE: ResourceId = ResourceId(8);
 const RES_SHADOW: ResourceId = ResourceId(9);
 /// Списки видимых кластеров и indirect-аргументы (02.5).
 const RES_CULL: ResourceId = ResourceId(10);
+/// Списки растений и их indirect-аргументы (02.4).
+const RES_FOREST: ResourceId = ResourceId(11);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -80,6 +82,8 @@ pub struct FrameInput<'a> {
     /// Выбор кластеров на GPU (02.5): камеры видов. Тогда `clusters` и
     /// `shadow_clusters` не используются, рисование — по indirect-аргументам.
     pub cull: Option<super::cull::CullFrame>,
+    /// Рисовать лес (02.4); нужны растения, кластеры и выбор на GPU.
+    pub forest: bool,
 }
 
 /// Вода в кадре (03.1).
@@ -115,9 +119,12 @@ pub(super) enum Table {
     Exposure,
     Shadow,
     Cull,
+    Forest,
+    Plant,
+    PlantShadow,
 }
 
-const TABLE_NAMES: [&str; 15] = [
+const TABLE_NAMES: [&str; 18] = [
     "pattern",
     "scene",
     "readback",
@@ -133,6 +140,9 @@ const TABLE_NAMES: [&str; 15] = [
     "exposure",
     "shadow",
     "cull",
+    "forest",
+    "plant",
+    "plant shadow",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -140,7 +150,7 @@ const TABLE_NAMES: [&str; 15] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 15],
+    tables: [Obj<dyn MTL4ArgumentTable>; 18],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -182,7 +192,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("15 таблиц")),
+                .unwrap_or_else(|_| unreachable!("18 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -222,9 +232,15 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
             writes: vec![(RES_CULL, Stages::DISPATCH)],
         },
         PassDecl {
+            name: "forest",
+            kind: PassKind::Compute,
+            reads: vec![],
+            writes: vec![(RES_FOREST, Stages::DISPATCH)],
+        },
+        PassDecl {
             name: "shadows",
             kind: PassKind::Render,
-            reads: vec![(RES_CULL, Stages::VERTEX)],
+            reads: vec![(RES_CULL, Stages::VERTEX), (RES_FOREST, Stages::VERTEX)],
             writes: vec![(RES_SHADOW, Stages::FRAGMENT)],
         },
         PassDecl {
@@ -236,6 +252,7 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
                 (RES_SKY, Stages::FRAGMENT),
                 (RES_SHADOW, Stages::FRAGMENT),
                 (RES_CULL, Stages::VERTEX),
+                (RES_FOREST, Stages::VERTEX),
             ],
             writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
         },

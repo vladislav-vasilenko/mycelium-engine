@@ -47,6 +47,11 @@ pub struct Pipelines {
     pub sky_multiscatter: Obj<dyn MTLComputePipelineState>,
     pub sky_view: Obj<dyn MTLComputePipelineState>,
     pub sky_view_moon: Obj<dyn MTLComputePipelineState>,
+    /// Лес (02.4): растения, их тени, расстановка и indirect-аргументы.
+    pub plant: Obj<dyn MTLRenderPipelineState>,
+    pub plant_shadow: Obj<dyn MTLRenderPipelineState>,
+    pub forest_place: Obj<dyn MTLComputePipelineState>,
+    pub forest_finish: Obj<dyn MTLComputePipelineState>,
     /// Выбор кластеров на GPU (02.5): глубина дерева и indirect-аргументы.
     pub cull_clusters: Obj<dyn MTLComputePipelineState>,
     pub cull_finish: Obj<dyn MTLComputePipelineState>,
@@ -213,11 +218,17 @@ fn depth_only_pipeline(
     file: &str,
     label: &str,
     vs: &str,
+    fs: Option<&str>,
 ) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
     require_function(lib, file, vs)?;
     let desc = MTL4RenderPipelineDescriptor::new();
     desc.setLabel(Some(&NSString::from_str(label)));
     desc.setVertexFunctionDescriptor(Some(&function(lib, vs)));
+    // Фрагментный шейдер без цвета — только отсечение по альфе (листва в тенях).
+    if let Some(fs) = fs {
+        require_function(lib, file, fs)?;
+        desc.setFragmentFunctionDescriptor(Some(&function(lib, fs)));
+    }
     compiler
         .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
         .map_err(|e| ShaderError {
@@ -290,6 +301,7 @@ pub fn build_pipelines(
     let hands_lib = compile_library(device, dir, "hands.metal", over)?;
     let sky_lib = compile_library(device, dir, "sky.metal", over)?;
     let cull_lib = compile_library(device, dir, "cull.metal", over)?;
+    let forest_lib = compile_library(device, dir, "forest.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
         layout_probe: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "layout_probe")?,
@@ -375,7 +387,27 @@ pub fn build_pipelines(
             "terrain.metal",
             "terrain shadow",
             "terrain_shadow_vs",
+            None,
         )?,
+        plant: render_pipeline(
+            compiler,
+            &forest_lib,
+            "forest.metal",
+            "plants",
+            ("plant_vs", "plant_fs"),
+            HDR_FORMAT,
+            Blend::Opaque,
+        )?,
+        plant_shadow: depth_only_pipeline(
+            compiler,
+            &forest_lib,
+            "forest.metal",
+            "plant shadow",
+            "plant_shadow_vs",
+            Some("plant_shadow_fs"),
+        )?,
+        forest_place: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_place")?,
+        forest_finish: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_finish")?,
         stars: render_pipeline(
             compiler,
             &sky_lib,

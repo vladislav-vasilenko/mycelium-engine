@@ -94,6 +94,8 @@ impl FramePass for ShadowsPass {
                     );
                 }
             }
+            // Деревья — в ближних каскадах (02.4).
+            super::forest::draw_shadow(ctx, &enc, k);
             enc.endEncoding();
         }
     }

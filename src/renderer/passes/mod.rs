@@ -7,6 +7,7 @@
 
 mod cull;
 mod exposure;
+pub(super) mod forest;
 mod pattern;
 mod readback;
 mod scene;
@@ -51,6 +52,9 @@ impl PassBarrier {
 }
 
 /// Всё, что нужно проходу для кодирования одного кадра.
+/// Кодировщик отрисовки Metal 4.
+pub(super) type RenderEncoder = ProtocolObject<dyn MTL4RenderCommandEncoder>;
+
 pub(super) struct PassCtx<'a> {
     /// Ресурсы и pipeline рендерера (только чтение).
     pub r: &'a Renderer,
@@ -74,11 +78,12 @@ pub(super) trait FramePass: Sync {
     fn encode(&self, ctx: &PassCtx, barrier: &PassBarrier);
 }
 
-static REGISTRY: [&dyn FramePass; 10] = [
+static REGISTRY: [&dyn FramePass; 11] = [
     &pattern::PatternPass,
     &wet_sand::WetSandPass,
     &sky_lut::SkyLutPass,
     &cull::CullPass,
+    &forest::ForestPass,
     &shadows::ShadowsPass,
     &scene::ScenePass,
     &readback::ReadbackPass,

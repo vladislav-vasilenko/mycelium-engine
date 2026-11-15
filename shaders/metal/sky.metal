@@ -362,9 +362,9 @@ kernel void exposure_meter(texture2d<float> hdr [[texture(0)]],
                            constant SkyInputs& sky [[buffer(2)]],
                            device float4* state [[buffer(4)]],
                            uint tid [[thread_index_in_threadgroup]]) {
-    threadgroup float2 acc[METER_THREADS];
+    threadgroup float3 acc[METER_THREADS];
     constexpr sampler s(filter::linear, address::clamp_to_edge);
-    float2 sum = 0.0;
+    float3 sum = 0.0;
     uint n = METER_GRID.x * METER_GRID.y;
     for (uint i = tid; i < n; i += METER_THREADS) {
         float2 uv = (float2(i % METER_GRID.x, i / METER_GRID.x) + 0.5) / float2(METER_GRID);
@@ -373,14 +373,14 @@ kernel void exposure_meter(texture2d<float> hdr [[texture(0)]],
         // Центр кадра весит больше (центрально-взвешенный замер).
         float2 d = uv - 0.5;
         float w = 1.0 + 2.0 * exp(-dot(d, d) * 12.0);
-        sum += float2(log(max(l, 1e-9)) * w, w);
+        sum += float3(log(max(l, 1e-9)) * w, w, l * w);
     }
     acc[tid] = sum;
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid != 0) {
         return;
     }
-    float2 total = 0.0;
+    float3 total = 0.0;
     for (uint t = 0; t < METER_THREADS; ++t) {
         total += acc[t];
     }
@@ -389,7 +389,11 @@ kernel void exposure_meter(texture2d<float> hdr [[texture(0)]],
     // глаз адаптируется к темноте не полностью, ночь остаётся ночью.
     float day = smoothstep(log(1e-6), log(3e-3), log(avg));
     float key = mix(0.03, 0.22, day);
-    float target = clamp(key / avg, 0.5, 1e5);
+    // Защита светов: тёмный лес с солнечными полянами — логарифмическое
+    // среднее тянет экспозицию вверх и выжигает освещённое. Среднее яркости
+    // (его тянут светлые места) после экспозиции — не больше 0,3.
+    float mean = total.z / total.y;
+    float target = clamp(min(key / avg, 0.3 / max(mean, 1e-9)), 0.5, 1e5);
     float cur = state[0].x > 0.0 ? state[0].x : target;
     float k = 1.0 - exp(-sky.params.y / 0.8);
     cur = exp(mix(log(cur), log(target), k));

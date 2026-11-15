@@ -36,6 +36,7 @@ impl ApplicationHandler for App {
                 self.shore = Some(shore);
                 self.hands = hands;
                 self.clusters = Some(clusters);
+                self.forest_loaded = r.has_forest();
                 let size = window.inner_size();
                 r.resize(size.width, size.height, window.scale_factor());
                 eprintln!(

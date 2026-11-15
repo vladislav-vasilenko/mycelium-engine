@@ -131,7 +131,7 @@ sequenceDiagram
     A->>R: take_readbacks()
 ```
 
-Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `cull` (compute, срез кластеров на GPU, 02.5) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
+Порядок проходов: `pattern` (compute) → `wet_sand` (compute, маска мокрого песка, если загружена вода) → `sky_lut` (compute, 04.1) → `cull` (compute, срез кластеров на GPU, 02.5) → `forest` (compute, расстановка леса, 02.4) → `shadows` (render, 4 каскада карты теней, 04.2) → `scene` (render: ландшафт, кубы, затем прозрачная вода) → `readback` (compute, только по запросу) → `viewmodel` (render: руки поверх сцены с очищенной глубиной, если они в кадре) → `tonemap` (render).
 
 ## 4. Модули, структуры и методы
 
@@ -270,6 +270,8 @@ sequenceDiagram
 | `SkinnedVertex` | 52 Б, 4 | `position [f32;3]` @0, `normal [f32;3]` @12, `uv [f32;2]` @24, `joints [u8;4]` @32, `weights [f32;4]` @36. В MSL — `packed_float3`, `packed_float3`, `packed_float2`, `uchar4`, `packed_float4`: всё упаковано, без хвоста |
 | `TerrainCluster` | 16 Б, 4 | `vertex_offset` @0, `triangle_offset` @4, `triangle_count` @8, `depth` @12 |
 | `FeatureSegment` | 32 Б, 8 | `a [f32;2]` @0, `b [f32;2]` @8, `half_width` @16, `kind u32` @20 (0 тропа, 1 река, 2 дорога), `_pad [f32;2]` @24 |
+| `PlantVertex` | 36 Б, 4 | `position` @0, `normal` @12, `uv` @24, `attr [u8;4]` @32 (материал, ветер, затенение) |
+| `PlantInstance` | 32 Б, 4 | `position` @0, `scale` @12, `yaw` @16, `tint` @20, `phase` @24 |
 | `CullView` | 128 Б, 16 | `planes [[f32;4];6]` @0, `camera` @96 (w — пикселей на единицу), `params` @112 (znear, порог, орто, включён) |
 | `CullNode` | 32 Б, 4 | `sphere` @0, `error` @16, `group i32` @20, `child_offset` @24, `child_count` @28 |
 | `CullBounds` | 32 Б, 4 | `sphere` @0, `error` @16 |
@@ -585,6 +587,17 @@ sequenceDiagram
 | `passes/cull.rs` | `CullPass`: dispatch `cull_clusters` на глубину (потоки = узлов на глубине × 5 видов), барьеры внутри кодировщика, `cull_finish` пишет `MTLDrawPrimitivesIndirectArguments` |
 | `shaders/metal/cull.metal` | `cull_error`, `cull_visible`, ядра `cull_clusters` (то же правило, что `select`: ошибка узла, сфера узла, ошибка грубой и точной группы, сфера кластера; атомарные счётчики фронта и списка, переполнение) и `cull_finish` |
 | Отрисовка | `draw_clusters` и `ShadowsPass` при `FrameInput.cull` — `drawPrimitives:indirectBuffer:` с областью видимых своего вида; без него — CPU-срез 02.3 (`--cpu-cull`) |
+
+### 4.9j. Лес (02.8, 02.4)
+
+| Файл | Элементы |
+| --- | --- |
+| `tools/plants/build_plants.py` | процедурные сетки (numpy) в `assets/models/plants/{yakusugi,broadleaf,boulder}.glb` с `lod0..lod2`: ствол с желобами и корнями-наплывами, ярусы ветвей, хвоя и листья карточками; атлас `foliage.png` 1024 × 512 (хвоя и листья по 4 варианта); COLOR_0: материал, ветер, затенение |
+| `src/plants/mod.rs` | `SPECIES`, `LODS`, `TEXTURE_SIZE`/`TEXTURE_LAYERS`, `LodRange`, `PlantAssets { vertices, indices, lods, albedo }`, `load(models, ambientcg)` (glb + кора Bark012/Bark007 + атлас в верхнюю половину слоя 2), `models_dir` |
+| `src/renderer/forest.rs` | `FOREST_LISTS` = 12 (вид × LOD и тени вида), `FOREST_CAP` = 16 384, `FOREST_GRID` = 160, `ForestGpu` (общие вершины и индексы, `lods` — диапазоны, массив альбедо, на слот — экземпляры и shared-счётчики с indirect-аргументами), `take_and_reset`, `ForestStats`; `Renderer::set_forest`, `has_forest`, `forest_stats` |
+| `passes/forest.rs` | `ForestPass` (`forest_place` 160² потоков, `forest_finish`), `active`, `draw_scene` (9 списков `drawIndexedPrimitives:…indirectBuffer:`), `draw_shadow` (каскады 0–1, списки теней) |
+| `shaders/metal/forest.metal` | `ground_height` (поле острова или зона 1 м), `forest_place` (клетка 6 м, хэш клетки мира; дерево и валун; пояса `cover`, уклон, тропы/дороги/реки, море; основание по нижней точке у ствола; LOD 45/150 м, предел 480 м, валуны 180 м; тени до 160 м), `forest_finish`, `plant_world` (поворот, масштаб, ветер), `plant_vs`/`plant_fs` (кора, листва с заострённой альфой, просвет, валун трёхпроекционно из слоёв рельефа 0 и 9, тени, небо, дымка), `plant_shadow_vs`/`plant_shadow_fs` |
+| Рельеф | `FrameUniforms.forest`: с лесом ложные пятна полога выключены, подкраска «кронами» — с 400–500 м |
 
 ### 4.10. Сборка `.app`
 
@@ -1247,6 +1260,23 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 - **Цена.** Ручные правила по японским названиям; движок пока видит только 4 пояса — сообщества используются только при расстановке леса.
 - **Пересмотреть.** На 02.4: виды деревьев и подлеска по сообществу, а не по поясу.
 
+
+### AD-62. Лес расставляется на GPU каждый кадр по хэшу клеток мира
+
+- **Решение.** Растения не хранятся: ядро `forest_place` каждый кадр проходит сетку 160 × 160 клеток по 6 м вокруг камеры, в клетке — кандидат на смещении из хэша номера клетки мира (детерминированно, без зависимости от порядка), отбор по поясам `cover.png` (02.7/AD-61), уклону, тропам, дорогам, рекам и морю; видимые — в списки вида × LOD с indirect-аргументами, ближние — в списки теней. Сетки трёх видов — из генератора на numpy, а не из Blender.
+- **Почему.** Нет памяти и стриминга под миллионы деревьев острова; тот же подход, что выбор кластеров (02.5): решение на GPU, CPU — 0 работы. Детерминизм — один и тот же лес при каждом заходе.
+- **Отброшено.** Расстановка на CPU по тайлам с кэшем — память и подгрузка; Blender (спецификация 02.8) — карточки и трубки проще и воспроизводимее строить напрямую.
+- **Цена.** Деревья только до 480 м (дальше — подкраска кронами), без импосторов; тени деревьев — до 160 м; нет столкновений со стволами; подлеска нет; при каждом кадре 25 600 потоков и выборки рельефа.
+- **Пересмотреть.** Импосторы и дальний лес (02.8 п. 4), подлесок и папоротники, сообщества `vegetation.png` для видов, столкновения (13).
+
+### AD-63. Экспозиция с защитой светов
+
+- **Решение.** Цель автоэкспозиции — минимум из «ключ / логарифмическое среднее» и «0,3 / среднее яркости» (взвешенное по центру).
+- **Почему.** В тёмном лесу с солнечными полянами логарифмическое среднее поднимало экспозицию и выжигало освещённое в белое.
+- **Отброшено.** Гистограмма с процентилями — дороже; экспозиция по освещённости — пересвечивала закат (AD-51).
+- **Цена.** Сцены с ярким небом в кадре немного темнее, чем раньше.
+- **Пересмотреть.** С bloom (04.2 п. 4) и гистограммой.
+
 ## 11. Ограничения и ближайшие изменения
 
 - Извлечение снимка сцены и цикл окна живут в `main.rs`. В этапе 02 выделить функцию извлечения `RenderScene` и модуль `World`.
@@ -1310,3 +1340,4 @@ Renderer хранит четыре плана `plans[prev][cur]` и выбира
 | 2026-11-15 | 02.2 | после `d577755` | AD-59: 10 слоёв материалов (`Ground023`, `Ground078`, `Ground081`, `Rock064`), `MAT_LITTER`/`MAT_LEAVES`/`MAT_GRAVEL`/`MAT_MOSSROCK`, прослойки опада на стыках, щебень троп и осыпей, асфальт и обочины дорог, без пятен полога над дорогой; скан 2 : 1 в `terrain_materials::decode` |
 | 2026-11-15 | 03.1 | после `5b0d3e5` | AD-60: маска мокрого песка RG16Float 1024² — окно вокруг камеры с кольцевой адресацией и меткой оборота (`wet_sand_update`), выборка в `terrain_fs` по XZ / 1024 с повтором и затуханием у края окна; размер маски не зависит от карты |
 | 2026-11-15 | 02.7 | после `1a37616` | AD-61: `tools/geo/vegetation.py`, пояса `cover.png` по карте растительности 1 : 25 000, `vegetation.png` + `vegetation.json` (47 сообществ), `assets/source/geo/vegetation/` (выборка и лицензия), источник в `world.json` |
+| 2026-11-15 | 02.4, 02.8 | после `9c43df9` | AD-62, AD-63: `tools/plants/build_plants.py`, `assets/models/plants/`, `src/plants/`, `renderer/forest.rs`, проход `forest` и `RES_FOREST`, таблицы `forest`/`plant`/`plant shadow` (18 таблиц), `forest.metal`, `PlantVertex`/`PlantInstance` (раскладка 51 поле), `FrameUniforms.forest` (вместо `_pad`), `depth_only_pipeline(…, fs)`, конвейеры `plant`, `plant_shadow`, `forest_place`, `forest_finish`, `PassCtx`-тип `RenderEncoder` в `passes/mod.rs`; защита светов в `exposure_meter` |

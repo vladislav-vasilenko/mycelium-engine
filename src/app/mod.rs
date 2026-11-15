@@ -79,6 +79,8 @@ pub struct App {
     /// Кластеры каскадов теней подряд (04.2) и список одного каскада.
     shadow_clusters: Vec<u32>,
     shadow_scratch: Vec<u32>,
+    /// Растения загружены в рендерер (02.4).
+    forest_loaded: bool,
     use_clusters: bool,
     cluster_stats: crate::terrain_clusters::SelectStats,
     cluster_select_ms: f64,
@@ -159,6 +161,7 @@ impl App {
             visible_clusters: Vec::new(),
             shadow_clusters: Vec::new(),
             shadow_scratch: Vec::new(),
+            forest_loaded: false,
             use_clusters: !tiles_only,
             cluster_stats: Default::default(),
             cluster_select_ms: 0.0,

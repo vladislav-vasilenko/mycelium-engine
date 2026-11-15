@@ -73,13 +73,26 @@ impl App {
             if self.use_clusters && self.clusters.is_some() {
                 match self.renderer.as_ref().and_then(|r| r.cull_stats()) {
                     Some(g) if !self.args.cpu_cull => format!(
-                        " · рельеф: {} кл. (GPU), тени {}{}",
+                        " · рельеф: {} кл. (GPU), тени {}{}{}",
                         g.visible[0],
                         g.visible[1..].iter().sum::<u32>(),
                         if g.overflow > 0 {
                             format!(", переполнение {}", g.overflow)
                         } else {
                             String::new()
+                        },
+                        match self.renderer.as_ref().and_then(|r| r.forest_stats()) {
+                            Some(f) if self.forest_loaded => format!(
+                                " · лес: {} раст., в тенях {}{}",
+                                f.visible,
+                                f.shadow,
+                                if f.overflow {
+                                    " (переполнение)"
+                                } else {
+                                    ""
+                                }
+                            ),
+                            _ => String::new(),
                         }
                     ),
                     _ => {

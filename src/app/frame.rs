@@ -81,7 +81,7 @@ impl App {
                         .map(|(level, flow)| crate::sim::Water { level, flow })
                 });
             self.sim.step(&input, Some(&*self.world));
-            if self.sim.tick % 60 == 0 && std::env::var_os("ECHO_SWIM_LOG").is_some() {
+            if self.sim.tick.is_multiple_of(60) && std::env::var_os("ECHO_SWIM_LOG").is_some() {
                 let p = self.sim.curr.position;
                 eprintln!(
                     "вода: {:?}, плывёт {}, позиция ({:.1}, {:.2}, {:.1})",

@@ -10,8 +10,8 @@
     "name": "trowel_01",
     "label": "совок",
     "joint": "palm_middle.R",
-    "offset": [-0.01, 0.0, 0.0],
-    "rotation_deg": [-15, 0, 0]
+    "offset": [-0.01, 0.0, -0.02],
+    "rotation_deg": [10, 180, 0]
   },
   {
     "name": "vintage_flashlight",

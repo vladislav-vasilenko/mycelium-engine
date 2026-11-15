@@ -111,7 +111,7 @@ impl RtGpu {
             let r = a.lods[species][lod];
             let start = indices.len();
             let tris = &a.indices[r.index_start as usize..(r.index_start + r.index_count) as usize];
-            for t in tris.chunks_exact(3) {
+            for t in tris.as_chunks::<3>().0 {
                 let g = [
                     t[0] + r.base_vertex,
                     t[1] + r.base_vertex,

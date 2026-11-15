@@ -277,7 +277,7 @@ impl NightEscape {
             let base = if ahead >= -1.0 { 1.0 } else { 0.35 };
             for k in 0..3u32 {
                 let h = hash(i as i32, k as i32, 0x6F);
-                let a = (h & 0xff) as f32 / 255.0 * 6.28;
+                let a = (h & 0xff) as f32 / 255.0 * std::f32::consts::TAU;
                 let r = 0.15 + ((h >> 8) & 0xff) as f32 / 255.0 * 0.35;
                 out.push(PlantInstance {
                     position: (*g + Vec3::new(a.cos() * r, 0.0, a.sin() * r)).to_array(),
@@ -292,7 +292,7 @@ impl NightEscape {
             if ahead >= -1.0 {
                 for k in 0..3u32 {
                     let h = hash(i as i32, k as i32 + 7, 0x5B);
-                    let a = (h & 0xff) as f32 / 255.0 * 6.28 + self.time * 0.3;
+                    let a = (h & 0xff) as f32 / 255.0 * std::f32::consts::TAU + self.time * 0.3;
                     let y = 0.8
                         + 0.5 * (((h >> 8) & 0xff) as f32 / 255.0)
                         + 0.15 * (self.time * 1.3 + k as f32).sin();

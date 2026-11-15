@@ -518,7 +518,9 @@ kernel void forest_finish(device uint* counts [[buffer(9)]],
         return;
     }
     uint species = i < CAMERA_LISTS ? i / 3 : (i == PROPS_LIST ? SPECIES_MUSHROOM : i - CAMERA_LISTS);
-    uint lod = i < CAMERA_LISTS ? i % 3 : (i == PROPS_LIST ? 0u : 1u);
+    // Тени деревьев — LOD 1; у пихты-скана (виды 0–1) — LOD 2: её LOD 1 —
+    // слои увеличенных карточек хвои, дорогие в каскадах (02.13).
+    uint lod = i < CAMERA_LISTS ? i % 3 : (i == PROPS_LIST ? 0u : (species < 2u ? 2u : 1u));
     uint4 r = lods[species * 3 + lod];
     device uint* a = counts + COUNTS_WORDS + i * 5;
     a[0] = r.y;
@@ -531,7 +533,8 @@ kernel void forest_finish(device uint* counts [[buffer(9)]],
 // --- Отрисовка ---------------------------------------------------------------
 
 struct PlantOut {
-    float4 position [[position]];
+    // Инвариантна: предпроход глубины и затенение дают одну глубину (02.13).
+    float4 position [[position, invariant]];
     float3 world;
     float3 rel;
     float3 normal;
@@ -685,19 +688,17 @@ static float4 plant_albedo(texture2d_array<float> albedo, float mat, float2 uv) 
     return a;
 }
 
-fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
-                         constant FrameUniforms& frame [[buffer(1)]],
-                         device const SkyFrame& skyf [[buffer(3)]],
-                         constant ShadowUniforms& shadows [[buffer(4)]],
-                         texture2d_array<float> albedo_tex [[texture(0)]],
-                         depth2d_array<float> shadow_map [[texture(1)]],
-                         texture3d<float> aerial [[texture(2)]],
-                         texture2d_array<float> mat_albedo [[texture(3)]],
-                         texture2d_array<float> bark_normal [[texture(4)]],
-                         texture2d<float> rt_ao_tex [[texture(5)]],
-                         texture2d_array<float> scan_albedo [[texture(6)]],
-                         texture2d_array<float> scan_normal [[texture(7)]],
-                         device const float4* probes [[buffer(9)]]) {
+// Затенение растений. `alpha_test` = false — после предпрохода глубины
+// (02.13): пиксели вне альфы отброшены сравнением глубины на равенство, а
+// шейдер без `discard` не ломает удаление скрытых поверхностей GPU Apple —
+// каждый пиксель листвы затеняется один раз, а не по слою на карточку.
+static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant FrameUniforms& frame,
+                          device const SkyFrame& skyf, constant ShadowUniforms& shadows,
+                          texture2d_array<float> albedo_tex, depth2d_array<float> shadow_map,
+                          texture3d<float> aerial, texture2d_array<float> mat_albedo,
+                          texture2d_array<float> bark_normal, texture2d<float> rt_ao_tex,
+                          texture2d_array<float> scan_albedo, texture2d_array<float> scan_normal,
+                          device const float4* probes) {
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
     constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
@@ -720,7 +721,9 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         float4 ph = albedo_tex.sample(gs, guv, tuft ? 4u : 3u);
         float aw = max(fwidth(ph.a), 1e-4);
         if (saturate((ph.a - 0.5) / aw + 0.5) < 0.5) {
-            discard_fragment();
+            if (alpha_test) {
+                discard_fragment();
+            }
         }
         float3 lp = in.rel + frame.cam_lo.xyz;
         float big = patch_noise(lp.xz, 12.0, 0x6C01u);
@@ -743,7 +746,9 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         // по производным, как у карточек.
         float aw = max(fwidth(sa.a), 1e-4);
         if (saturate((sa.a - 0.5) / aw + 0.5) < 0.5) {
-            discard_fragment();
+            if (alpha_test) {
+                discard_fragment();
+            }
         }
         albedo = sa.rgb;
         float3 dp1 = dfdx(in.rel), dp2 = dfdy(in.rel);
@@ -802,7 +807,9 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     } else {
         float4 a = plant_albedo(albedo_tex, mat, in.uv);
         if (a.a < 0.5) {
-            discard_fragment();
+            if (alpha_test) {
+                discard_fragment();
+            }
         }
         albedo = a.rgb;
         if (mat < 1.5) {
@@ -880,6 +887,45 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         color = apply_aerial(aerial, frame, in.rel, color);
     }
     return float4(color * frame.pre_exposure, 1.0);
+}
+
+#define PLANT_FS_ARGS PlantOut in [[stage_in]], bool front [[front_facing]], \
+    constant FrameUniforms& frame [[buffer(1)]], device const SkyFrame& skyf [[buffer(3)]], \
+    constant ShadowUniforms& shadows [[buffer(4)]], texture2d_array<float> albedo_tex [[texture(0)]], \
+    depth2d_array<float> shadow_map [[texture(1)]], texture3d<float> aerial [[texture(2)]], \
+    texture2d_array<float> mat_albedo [[texture(3)]], texture2d_array<float> bark_normal [[texture(4)]], \
+    texture2d<float> rt_ao_tex [[texture(5)]], texture2d_array<float> scan_albedo [[texture(6)]], \
+    texture2d_array<float> scan_normal [[texture(7)]], device const float4* probes [[buffer(9)]]
+
+// После предпрохода глубины: без `discard`, глубина — на равенство.
+fragment float4 plant_fs_prepassed(PLANT_FS_ARGS) {
+    return plant_shade(in, front, false, frame, skyf, shadows, albedo_tex, shadow_map, aerial, mat_albedo,
+                       bark_normal, rt_ao_tex, scan_albedo, scan_normal, probes);
+}
+
+// Предпроход глубины растений (02.13): та же альфа, что в `plant_shade`
+// (заострение по производным), — глубина пишется ровно там, где лист.
+fragment void plant_depth_fs(PlantOut in [[stage_in]],
+                             texture2d_array<float> albedo_tex [[texture(0)]],
+                             texture2d_array<float> scan_albedo [[texture(6)]]) {
+    float mat = round(in.attr.x);
+    float alpha = 1.0;
+    if (mat > 8.5 && mat < 9.5) {
+        bool tuft = in.uv.x >= 1.0;
+        float2 guv = float2(in.uv.x - (tuft ? 1.0 : 0.0), in.uv.y);
+        constexpr sampler gs(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
+        float4 ph = albedo_tex.sample(gs, guv, tuft ? 4u : 3u);
+        alpha = saturate((ph.a - 0.5) / max(fwidth(ph.a), 1e-4) + 0.5);
+    } else if (mat > 15.5) {
+        constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+        float4 sa = scan_albedo.sample(ms, in.uv, uint(mat - 16.0));
+        alpha = saturate((sa.a - 0.5) / max(fwidth(sa.a), 1e-4) + 0.5);
+    } else if (!(mat > 3.5 && mat < 4.5) && !(mat > 6.5 && mat < 8.5)) {
+        alpha = plant_albedo(albedo_tex, mat, in.uv).a;
+    }
+    if (alpha < 0.5) {
+        discard_fragment();
+    }
 }
 
 // Тени: глубина растений в каскад; листва — с отсечением по альфе.

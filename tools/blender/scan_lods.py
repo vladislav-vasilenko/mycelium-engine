@@ -35,7 +35,8 @@ BUDGET = {
     "wood": (8000, 2000, 500),
     "foliage": (6000, 2500, 900),
     "moss": (4000, 1000, 300),
-    "tree": (80000, 16000, 4000),
+    # Деревья (02.13): LOD 2 пихты в движке — процедурная криптомерия.
+    "tree": (40000, 6000, 1500),
 }
 
 
@@ -110,7 +111,7 @@ def decimated(obj, target):
     return c
 
 
-def tree_lod(obj, target, alpha_slots, seed=7):
+def tree_lod(obj, target, alpha_slots, area=1.0, seed=7):
     """Дерево-скан (02.13): листва прореживается целыми веточками (островками),
     оставшиеся веточки увеличиваются вокруг своего центра — крона сохраняет
     плотность (Decimate схлопывал карточки хвои и крона «облетала»);
@@ -126,7 +127,9 @@ def tree_lod(obj, target, alpha_slots, seed=7):
     wood_tris = sum(len(f.verts) - 2 for f in bm.faces) - leaf_tris
     leaf_target = int(target * 0.75)
     keep = min(1.0, leaf_target / max(leaf_tris, 1))
-    grow = min(2.5, (1.0 / keep) ** 0.5)
+    # `area` — доля исходной площади хвои: вдали крону и так видно
+    # слоями, лишняя площадь — только перерисовка.
+    grow = max(1.0, min(2.5, (area / keep) ** 0.5))
     rng = np.random.default_rng(seed)
     seen, kill = set(), []
     for f in leaf:
@@ -326,7 +329,7 @@ def process(name, catalog):
             target = min(budget, src_tris if not counts else int(counts[-1] * (0.45 if len(counts) == 1 else 0.35)))
             alpha_slots = {i for i, m in slot_map.items() if mats[m]["alpha"] != "OPAQUE"}
             if role == "tree" and alpha_slots:
-                d = tree_lod(obj, target, alpha_slots)
+                d = tree_lod(obj, target, alpha_slots, area=(1.0, 0.55, 0.45)[len(counts)])
             else:
                 d = decimated(obj, target)
                 thin_foliage(d, target, alpha_slots)

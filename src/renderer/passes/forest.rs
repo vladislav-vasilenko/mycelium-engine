@@ -150,12 +150,23 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setAddress_atIndex(probes.gpuAddress(), 9);
     }
     bind_ground(ctx, table);
-    enc.pushDebugGroup(&label("forest: plants (indirect)"));
-    enc.setRenderPipelineState(&ctx.r.pipelines.plant);
+    // Предпроход глубины (02.13): отсечение по альфе пишет глубину листвы,
+    // затенение — без `discard`, на равенство глубины: GPU Apple удаляет
+    // скрытые слои карточек до фрагментного шейдера (было +8 мс на пихте).
+    enc.pushDebugGroup(&label("forest: plants depth prepass (indirect)"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.plant_depth);
     enc.setCullMode(MTLCullMode::None);
     for list in (0..CAMERA_LISTS).chain([PROPS_LIST]) {
         draw_list(ctx, enc, table, list);
     }
+    enc.popDebugGroup();
+    enc.pushDebugGroup(&label("forest: plants (indirect)"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.plant_prepassed);
+    enc.setDepthStencilState(Some(&ctx.r.depth_equal_state));
+    for list in (0..CAMERA_LISTS).chain([PROPS_LIST]) {
+        draw_list(ctx, enc, table, list);
+    }
+    enc.setDepthStencilState(Some(&ctx.r.depth_state));
     enc.popDebugGroup();
 }
 

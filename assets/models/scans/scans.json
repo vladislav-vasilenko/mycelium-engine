@@ -1353,9 +1353,9 @@
   "role": "tree",
   "source_triangles": 1072212,
   "lod_triangles": [
-   62057,
-   14705,
-   5633
+   32345,
+   7505,
+   4193
   ],
   "size_m": [
    4.208,
@@ -1394,9 +1394,9 @@
   "role": "tree",
   "source_triangles": 2062487,
   "lod_triangles": [
-   55356,
-   11276,
-   2492
+   26776,
+   3769,
+   1545
   ],
   "size_m": [
    2.917,
@@ -1435,9 +1435,9 @@
   "role": "tree",
   "source_triangles": 4176819,
   "lod_triangles": [
-   69135,
-   21253,
-   12454
+   39421,
+   13902,
+   10425
   ],
   "size_m": [
    6.534,
@@ -1566,9 +1566,9 @@
   "role": "tree",
   "source_triangles": 2300624,
   "lod_triangles": [
-   65950,
-   15967,
-   6982
+   34258,
+   8552,
+   5191
   ],
   "size_m": [
    5.613,
@@ -1631,9 +1631,9 @@
   "role": "tree",
   "source_triangles": 505494,
   "lod_triangles": [
-   65448,
-   16686,
-   7843
+   34721,
+   9115,
+   5496
   ],
   "size_m": [
    6.306,

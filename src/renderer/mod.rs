@@ -83,6 +83,8 @@ pub struct Renderer {
     depth_state: Obj<dyn MTLDepthStencilState>,
     /// Глубина для прозрачной воды: проверка без записи.
     water_depth_state: Obj<dyn MTLDepthStencilState>,
+    /// Глубина на равенство без записи: затенение растений после предпрохода (02.13).
+    pub(crate) depth_equal_state: Obj<dyn MTLDepthStencilState>,
     slots: Vec<FrameSlot>,
     pipelines: Pipelines,
     targets: Option<Targets>,
@@ -177,6 +179,15 @@ impl Renderer {
 
         let depth_state = depth_state(&device, true, "reversed-Z GreaterEqual")?;
         let water_depth_state = depth_state_no_write(&device, "reversed-Z test, no write (water)")?;
+        let depth_equal_state = {
+            let d = MTLDepthStencilDescriptor::new();
+            d.setDepthCompareFunction(MTLCompareFunction::Equal);
+            d.setDepthWriteEnabled(false);
+            d.setLabel(Some(&label("depth equal, no write (plants after prepass)")));
+            device
+                .newDepthStencilStateWithDescriptor(&d)
+                .ok_or("depth state equal")?
+        };
 
         let shader_dir = shaders::shader_dir();
         let pipelines = shaders::build_pipelines(&device, &compiler, &shader_dir, 1, None)
@@ -234,6 +245,7 @@ impl Renderer {
             event,
             depth_state,
             water_depth_state,
+            depth_equal_state,
             slots,
             pipelines,
             targets: None,

@@ -219,12 +219,25 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         let scan = catalog.as_ref().and_then(|c| {
             scans::SCAN_SPECIES
                 .iter()
-                .find(|x| x.0 == s && scan_dir.join(format!("{}.glb", x.1)).exists() && (x.0 >= 2 || std::env::var_os("ECHO_SCAN_TREES").is_some()))
+                .find(|x| {
+                    x.0 == s
+                        && scan_dir.join(format!("{}.glb", x.1)).exists()
+                        && (x.0 >= 2 || std::env::var_os("ECHO_SCAN_TREES").is_some())
+                })
                 .map(|x| (c, x))
         });
         a.lods[s] = match scan {
             Some((c, &(_, variant, yaw, scale))) => {
-                scans::load_variant(&scan_dir, c, variant, yaw, scale, &mut tex, &mut a)?
+                let mut lods =
+                    scans::load_variant(&scan_dir, c, variant, yaw, scale, &mut tex, &mut a)?;
+                if s < 2 {
+                    // Пихта-скан вдали (> 150 м, тысячи деревьев) — LOD 2
+                    // процедурной криптомерии: 0,7 тыс. треугольников вместо
+                    // 7,8 тыс., силуэт — тот же конус (02.13).
+                    let p = load_glb(&models.join(format!("{name}.glb")), &mut a)?;
+                    lods[2] = p[2];
+                }
+                lods
             }
             None => load_glb(&models.join(format!("{name}.glb")), &mut a)?,
         };

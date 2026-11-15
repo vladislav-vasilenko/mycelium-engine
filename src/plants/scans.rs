@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use super::{LODS, LodRange, PlantAssets, TEXTURE_SIZE, jpeg_rgba, load_glb};
 
-/// Номер материала вершины для слоя 0 массива сканов (`plant_fs`: mat ≥ 16).
+/// Номер материала вершины для слоя 0 массива сканов (`plant_shade`: mat ≥ 16).
 pub const SCAN_MATERIAL_BASE: u8 = 16;
 
 /// Вид на GPU → вариант скана, поворот сетки вокруг Y, рад, и масштаб сетки
@@ -37,7 +37,7 @@ pub const SCAN_SPECIES: [(usize, &str, f32, f32); 30] = [
     (20, "fern_02_c", 0.0, 1.0),
     (21, "fern_02_d", 0.0, 1.0),
     (22, "island_tree_02", 0.0, 1.2), // подрост: молодое широколиственное (02.13)
-    (23, "tree_small_02", 0.0, 1.0), // подрост (02.13)
+    (23, "tree_small_02", 0.0, 1.0),  // подрост (02.13)
     (24, "dead_tree_trunk_02", 0.0, 1.0),
     (25, "tree_stump_02", 0.0, 1.0),
     (26, "root_cluster_02_f", std::f32::consts::FRAC_PI_2, 1.0),

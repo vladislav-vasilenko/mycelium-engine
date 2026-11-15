@@ -54,8 +54,10 @@ pub struct Pipelines {
     pub sky_view: Obj<dyn MTLComputePipelineState>,
     pub sky_view_moon: Obj<dyn MTLComputePipelineState>,
     /// Лес (02.4): растения, их тени, расстановка и indirect-аргументы.
-    pub plant: Obj<dyn MTLRenderPipelineState>,
     pub plant_shadow: Obj<dyn MTLRenderPipelineState>,
+    /// Предпроход глубины растений и затенение после него (02.13).
+    pub plant_depth: Obj<dyn MTLRenderPipelineState>,
+    pub plant_prepassed: Obj<dyn MTLRenderPipelineState>,
     pub forest_place: Obj<dyn MTLComputePipelineState>,
     pub forest_finish: Obj<dyn MTLComputePipelineState>,
     /// Выбор кластеров на GPU (02.5): глубина дерева и indirect-аргументы.
@@ -176,6 +178,10 @@ fn compile_library(
 ) -> Result<Obj<dyn MTLLibrary>, ShaderError> {
     let source = read_source(dir, file, over)?;
     let options = MTLCompileOptions::new();
+    // Инвариантная позиция растений (предпроход глубины, 02.13) — бит в бит.
+    if file == "forest.metal" {
+        options.setPreserveInvariance(true);
+    }
     device
         .newLibraryWithSource_options_error(&NSString::from_str(&source), Some(&options))
         .map_err(|e| ShaderError {
@@ -304,6 +310,33 @@ fn render_pipeline(
         color.setDestinationAlphaBlendFactor(MTLBlendFactor::One);
         color.setAlphaBlendOperation(MTLBlendOperation::Add);
     }
+    compiler
+        .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
+        .map_err(|e| ShaderError {
+            file: file.to_string(),
+            stage: "render pipeline",
+            message: e.localizedDescription().to_string(),
+        })
+}
+
+/// Только глубина в проходе с цветом: формат цвета как у сцены, запись цвета
+/// выключена; фрагментный шейдер — отсечение по альфе.
+fn color_masked_pipeline(
+    compiler: &ProtocolObject<dyn MTL4Compiler>,
+    lib: &ProtocolObject<dyn MTLLibrary>,
+    file: &str,
+    label: &str,
+    (vs, fs): (&str, &str),
+) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
+    require_function(lib, file, vs)?;
+    require_function(lib, file, fs)?;
+    let desc = MTL4RenderPipelineDescriptor::new();
+    desc.setLabel(Some(&NSString::from_str(label)));
+    desc.setVertexFunctionDescriptor(Some(&function(lib, vs)));
+    desc.setFragmentFunctionDescriptor(Some(&function(lib, fs)));
+    let color = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
+    color.setPixelFormat(HDR_FORMAT);
+    color.setWriteMask(MTLColorWriteMask::None);
     compiler
         .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
         .map_err(|e| ShaderError {
@@ -446,12 +479,19 @@ pub fn build_pipelines(
             "terrain_shadow_vs",
             None,
         )?,
-        plant: render_pipeline(
+        plant_depth: color_masked_pipeline(
             compiler,
             &forest_lib,
             "forest.metal",
-            "plants",
-            ("plant_vs", "plant_fs"),
+            "plants depth",
+            ("plant_vs", "plant_depth_fs"),
+        )?,
+        plant_prepassed: render_pipeline(
+            compiler,
+            &forest_lib,
+            "forest.metal",
+            "plants (prepassed)",
+            ("plant_vs", "plant_fs_prepassed"),
             HDR_FORMAT,
             Blend::Opaque,
         )?,

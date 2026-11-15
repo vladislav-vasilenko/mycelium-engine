@@ -53,6 +53,7 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
                         texture2d<float, access::write> out [[texture(3)]],
                         constant TaaUniforms& t [[buffer(0)]],
                         texture2d<float> vol [[texture(4)]],
+                        texture2d<float> clouds [[texture(6)]],
                         uint2 gid [[thread_position_in_grid]]) {
     uint2 size = uint2(cur.get_width(), cur.get_height());
     if (any(gid >= size)) {
@@ -70,7 +71,10 @@ kernel void taa_resolve(texture2d<float> cur [[texture(0)]],
             // Объёмный свет (11) — четверть разрешения, добавляется здесь:
             // TAA заодно усредняет его шум.
             constexpr sampler vs(filter::linear, address::clamp_to_edge);
-            float3 c = cur.read(uint2(p)).rgb + vol.sample(vs, (float2(p) + 0.5) / float2(size), level(0)).rgb;
+            // Облака (04.3): кадр × пропускание + свет облаков.
+            float4 cl = clouds.sample(vs, (float2(p) + 0.5) / float2(size), level(0));
+            float3 c = cur.read(uint2(p)).rgb * cl.a + cl.rgb
+                     + vol.sample(vs, (float2(p) + 0.5) / float2(size), level(0)).rgb;
             c = c / (1.0 + dot(c, float3(0.2126, 0.7152, 0.0722)));
             float3 yc = rgb_to_ycocg(c);
             m1 += yc;
@@ -130,6 +134,7 @@ kernel void upscale_prep(texture2d<float, access::read_write> scene [[texture(0)
                          texture2d<float, access::write> motion [[texture(3)]],
                          texture2d<float> vol [[texture(4)]],
                          texture2d<float> wind [[texture(5)]],
+                         texture2d<float> clouds [[texture(6)]],
                          constant TaaUniforms& t [[buffer(0)]],
                          uint2 gid [[thread_position_in_grid]]) {
     uint2 size = uint2(scene.get_width(), scene.get_height());
@@ -139,7 +144,9 @@ kernel void upscale_prep(texture2d<float, access::read_write> scene [[texture(0)
     constexpr sampler vs(filter::linear, address::clamp_to_edge);
     float2 uv = (float2(gid) + 0.5) / float2(size);
     float4 c = scene.read(gid);
-    scene.write(float4(c.rgb + vol.sample(vs, uv, level(0)).rgb, c.a), gid);
+    // Облака (04.3): кадр × пропускание + свет облаков.
+    float4 cl = clouds.sample(vs, uv, level(0));
+    scene.write(float4(c.rgb * cl.a + cl.rgb + vol.sample(vs, uv, level(0)).rgb, c.a), gid);
     float d = depth.read(gid);
     float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0) - t.jitter.xy;
     float4 rel = t.inv_view_proj_rel * float4(ndc, d, 1.0);

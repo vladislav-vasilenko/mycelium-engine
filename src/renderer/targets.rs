@@ -40,6 +40,9 @@ pub(super) struct Targets {
     pub rt_ao: Obj<dyn MTLTexture>,
     /// Объёмный свет (11): четверть кадра, добавляется в проходе `taa`.
     pub vol: Obj<dyn MTLTexture>,
+    /// Объёмные облака (04.3, сессия 4б): четверть разрешения рендера, rgb —
+    /// свет облаков, a — пропускание; кадр пишет одну, читает другую.
+    pub clouds: [Obj<dyn MTLTexture>; 2],
 }
 
 /// Уровней цепочки bloom: от 1/2 до 1/64 кадра.
@@ -166,6 +169,16 @@ impl Targets {
             MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
             "volumetric light",
         );
+        let clouds = [0, 1].map(|k| {
+            private_texture(
+                device,
+                shaders::HDR_FORMAT,
+                (rw / 4).max(1),
+                (rh / 4).max(1),
+                MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+                &format!("volumetric clouds {k}"),
+            )
+        });
         Targets {
             width,
             height,
@@ -182,6 +195,7 @@ impl Targets {
             bloom_up,
             rt_ao,
             vol,
+            clouds,
         }
     }
 
@@ -207,6 +221,7 @@ impl Targets {
         v.extend(self.bloom_up.iter().cloned());
         v.push(self.rt_ao.clone());
         v.push(self.vol.clone());
+        v.extend(self.clouds.iter().cloned());
         v
     }
 }

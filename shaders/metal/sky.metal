@@ -374,8 +374,11 @@ fragment float4 sky_fs(SkyOut in [[stage_in]],
     // внутри облака — плотность чуть ближе к светилу: светлые края, тёмные
     // днища) и небом; у горизонта тают в дымке. Диск светила закрывают.
     float cloud = saturate(sky.view.z);
-    float dens = cloud_along(view, frame.camera_pos.xz, cloud, frame.time, frame.weather.w)
-               * smoothstep(0.02, 0.15, view.y) * hits_ground;
+    // Объёмные облака (сессия 4б) — после сцены, по её глубине (`clouds_march`,
+    // склейка в `upscale_prep` / `taa_resolve`); здесь — только плоский слой без TAA.
+    float dens = sky.view.w > 0.5 ? 0.0
+               : cloud_along(view, frame.camera_pos.xz, cloud, frame.time, frame.weather.w)
+                 * smoothstep(0.02, 0.15, view.y) * hits_ground;
     if (dens > 0.0) {
         float2 p = frame.camera_pos.xz + view.xz * (CLOUD_H / max(view.y, 0.02));
         float toward = cloud_density(p + sun.xz * 350.0, cloud, frame.time, frame.weather.w);
@@ -390,7 +393,10 @@ fragment float4 sky_fs(SkyOut in [[stage_in]],
     float3 overcast = skyf.exposure.w * float3(0.92, 0.95, 1.0) * (0.55 + 0.9 * saturate(view.y));
     // Слоистая облачность — едва заметная фактура свода.
     overcast *= 0.9 + 0.2 * cloud_fbm((frame.camera_pos.xz + view.xz * (CLOUD_H / max(view.y, 0.05))) / 900.0);
-    col = mix(col, overcast * hits_ground + col * (1.0 - hits_ground), smoothstep(0.55, 1.0, cloud));
+    // С объёмными облаками свод сереет только к сплошной облачности (морось,
+    // ливень): в «облачно» видны голубые просветы между облаками.
+    float veil = sky.view.w > 0.5 ? smoothstep(0.82, 1.0, cloud) : smoothstep(0.55, 1.0, cloud);
+    col = mix(col, overcast * hits_ground + col * (1.0 - hits_ground), veil);
     return float4(col * frame.pre_exposure, 1.0);
 }
 
@@ -517,4 +523,145 @@ vertex StarOut stars_vs(uint vid [[vertex_id]],
 
 fragment float4 stars_fs(StarOut in [[stage_in]]) {
     return float4(in.color, 1.0);
+}
+
+// --- Объёмные облака (04.3, сессия 4б) ---------------------------------------
+// Луч из камеры сквозь слой 1500–3500 м над морем (вершины Якусимы входят в
+// облака). Плотность: двумерная карта формы `cloud_density` задаёт высоту
+// облака, трёхмерный шум разъедает края. Свет: короткий проход к светилу
+// (закон Бера, «пудра» у краёв), двойное рассеяние Хеньи — Гринстейна, свет
+// неба снизу темнее. Четверть разрешения, смещение старта луча по кадру и
+// накопление во времени с переносом истории по повороту камеры.
+constant float CLOUD_BASE = 1500.0;
+constant float CLOUD_TOP = 3500.0;
+
+inline float cloud_hash3(float3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+inline float cloud_noise3(float3 p) {
+    float3 i = floor(p), f = fract(p);
+    float3 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(cloud_hash3(i), cloud_hash3(i + float3(1, 0, 0)), u.x),
+                   mix(cloud_hash3(i + float3(0, 1, 0)), cloud_hash3(i + float3(1, 1, 0)), u.x), u.y),
+               mix(mix(cloud_hash3(i + float3(0, 0, 1)), cloud_hash3(i + float3(1, 0, 1)), u.x),
+                   mix(cloud_hash3(i + float3(0, 1, 1)), cloud_hash3(i + float3(1, 1, 1)), u.x), u.y), u.z);
+}
+
+inline float cloud_vol(float3 p, float cover, float t, float wind) {
+    float h = (p.y - CLOUD_BASE) / (CLOUD_TOP - CLOUD_BASE);
+    if (h < 0.0 || h > 1.0) {
+        return 0.0;
+    }
+    // Мягкая карта формы (та же, что у `cloud_density`, с широким краем):
+    // облако растёт к центру — купол, а не столб с отвесными стенками.
+    float2 drift = float2(0.8, 0.6) * t * (6.0 + 18.0 * wind);
+    float2 q2 = (p.xz + drift) / 1600.0;
+    float n = cloud_fbm(q2) - 0.18 * cloud_fbm(q2 * 4.3 + 7.7);
+    float th = 0.66 - 0.62 * cover;
+    float m = smoothstep(th - 0.06, th + 0.3, n);
+    if (m <= 0.0) {
+        return 0.0;
+    }
+    float top = mix(0.1, 1.0, pow(m, 0.8));
+    float profile = smoothstep(0.0, 0.1, h) * (1.0 - smoothstep(top * 0.3, top, h));
+    float3 q = (p + float3(drift.x, 0.0, drift.y)) / 450.0;
+    float detail = 0.6 * cloud_noise3(q) + 0.4 * cloud_noise3(q * 3.1 + 3.1);
+    return saturate(m * profile * 1.4 - 0.55 * detail * (1.0 - 0.4 * m) - 0.05);
+}
+
+inline float cloud_hg(float c, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * SKY_PI * pow(1.0 + g2 - 2.0 * g * c, 1.5));
+}
+
+kernel void clouds_march(texture2d<float, access::write> out [[texture(0)]],
+                         texture2d<float> history [[texture(1)]],
+                         texture2d<float> transmittance [[texture(2)]],
+                         constant FrameUniforms& frame [[buffer(1)]],
+                         constant SkyInputs& sky [[buffer(2)]],
+                         device const SkyFrame& skyf [[buffer(3)]],
+                         constant TaaUniforms& taa [[buffer(4)]],
+                         depth2d<float> depth [[texture(3)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    uint2 size = uint2(out.get_width(), out.get_height());
+    if (any(gid >= size)) {
+        return;
+    }
+    float2 uv = (float2(gid) + 0.5) / float2(size);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 pr = taa.inv_view_proj_rel * float4(ndc, 0.5, 1.0);
+    float3 d = normalize(pr.xyz / pr.w);
+    float3 cam = frame.camera_pos.xyz;
+    float cover = saturate(sky.view.z);
+    float wind = frame.weather.w;
+    float t_now = frame.time;
+    float3 L = 0.0;
+    float T = 1.0;
+    // Дальность до сцены (глубина 0 — небо): облако закрывает вершины в слое
+    // и склоны за ним; луч идёт сквозь слой только до поверхности.
+    constexpr sampler ds_(filter::nearest, address::clamp_to_edge);
+    float z = depth.sample(ds_, uv);
+    float t_scene = 1e9;
+    if (z > 0.0) {
+        float4 sp = taa.inv_view_proj_rel * float4(ndc, z, 1.0);
+        t_scene = length(sp.xyz / sp.w);
+    }
+    // Вход и выход луча в слое (камера ниже, внутри или выше слоя).
+    float ta = (CLOUD_BASE - cam.y) / (abs(d.y) > 1e-4 ? d.y : 1e-4);
+    float tb = (CLOUD_TOP - cam.y) / (abs(d.y) > 1e-4 ? d.y : 1e-4);
+    float t0 = max(min(ta, tb), 0.0);
+    float t1 = min(max(ta, tb), t_scene);
+    if (t1 > t0 && cover > 0.02) {
+        t1 = min(t1, t0 + 12000.0);
+        float fade = 1.0 - smoothstep(18000.0, 40000.0, t0);
+        if (fade > 0.0) {
+            const int STEPS = 40;
+            float ds = (t1 - t0) / float(STEPS);
+            // Смещение старта по кадру (накопление во времени гасит полосы).
+            float jitter = fract(sin(dot(float2(gid) + float(frame.frame_index % 64u) * 7.13, float2(12.9898, 78.233))) * 43758.5453);
+            float3 sun = normalize(sky.sun_dir.xyz);
+            float E = sky.params.w;
+            float3 atm = atmosphere_camera(cam.y);
+            float3 sun_l = E * SUN_TINT * sample_transmittance(transmittance, atm, sun) * smoothstep(-0.05, 0.05, sun.y);
+            float c = dot(d, sun);
+            float phase = mix(cloud_hg(c, -0.25), cloud_hg(c, 0.65), 0.7) * 4.0 * SKY_PI;
+            float3 amb = skyf.sh[0].rgb * 0.282095;
+            for (int i = 0; i < STEPS && T > 0.02; ++i) {
+                float3 p = cam + d * (t0 + (float(i) + jitter) * ds);
+                float dens = cloud_vol(p, cover, t_now, wind);
+                if (dens <= 0.0) {
+                    continue;
+                }
+                // Свет к светилу: 5 шагов по 150 м.
+                float od = 0.0;
+                for (int k = 1; k <= 5; ++k) {
+                    od += cloud_vol(p + sun * (150.0 * float(k)), cover, t_now, wind);
+                }
+                float sigma = 0.012;
+                float t_light = exp(-sigma * od * 150.0);
+                float powder = 1.0 - exp(-dens * 4.0);
+                float h = (p.y - CLOUD_BASE) / (CLOUD_TOP - CLOUD_BASE);
+                float3 S = sun_l * phase * t_light * mix(0.4, 1.0, powder) * 0.9 + amb * mix(0.45, 1.0, h);
+                float ext = sigma * dens * ds;
+                float a = 1.0 - exp(-ext);
+                L += T * S * a;
+                T *= 1.0 - a;
+            }
+            L *= fade;
+            T = mix(1.0, T, fade);
+        }
+    }
+    // Как объёмный свет: яркость × предэкспозиция кадра (склейка — в HDR сцены).
+    float4 cur = float4(L * frame.pre_exposure, T);
+    // История: то же направление в прошлом кадре (облака далеко — только поворот).
+    float4 pc = taa.prev_view_proj_rel * float4(d * 1000.0, 1.0);
+    float2 puv = float2(pc.x / pc.w * 0.5 + 0.5, 0.5 - pc.y / pc.w * 0.5);
+    if (taa.cam_delta.w > 0.5 && pc.w > 0.0 && all(puv >= 0.0) && all(puv <= 1.0)) {
+        constexpr sampler hs(filter::linear, address::clamp_to_edge);
+        cur = mix(history.sample(hs, puv, level(0)), cur, 0.25);
+    }
+    out.write(cur, gid);
 }

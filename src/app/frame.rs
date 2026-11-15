@@ -204,7 +204,11 @@ impl App {
         };
         let view_proj_rel = proj * rot;
         let terrain_scene = self.scene == SceneMode::Terrain;
-        let sky = terrain_scene.then(|| self.sky_frame(view_proj_rel, self.frame_dt, h));
+        let mut sky = terrain_scene.then(|| self.sky_frame(view_proj_rel, self.frame_dt, h));
+        // Объёмные облака считаются с TAA (матрицы и история) — флаг небу.
+        if let Some(s) = sky.as_mut() {
+            s.inputs.view[3] = if taa.is_some() { 1.0 } else { 0.0 };
+        }
         let Some(r) = self.renderer.as_mut() else {
             return;
         };

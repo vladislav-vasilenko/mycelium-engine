@@ -5,7 +5,7 @@
 use objc2_metal::*;
 
 use super::{FramePass, PassBarrier, PassCtx, size2};
-use crate::renderer::frame::{SHADOW_OFFSET, TAA_OFFSET, Table};
+use crate::renderer::frame::{SHADOW_OFFSET, SKY_OFFSET, TAA_OFFSET, Table};
 use crate::renderer::resources::label;
 
 pub(in crate::renderer) struct TaaPass;
@@ -41,6 +41,7 @@ impl FramePass for TaaPass {
             table.setTexture_atIndex(read.gpuResourceID(), 2);
             table.setTexture_atIndex(write.gpuResourceID(), 3);
             table.setTexture_atIndex(t.vol.gpuResourceID(), 4);
+            table.setTexture_atIndex(t.clouds[cur].gpuResourceID(), 6);
         }
         enc.setComputePipelineState(&ctx.r.pipelines.taa_resolve);
         enc.setArgumentTable(Some(table));
@@ -84,6 +85,7 @@ fn encode_upscale(
         table.setTexture_atIndex(t.motion.gpuResourceID(), 3);
         table.setTexture_atIndex(t.vol.gpuResourceID(), 4);
         table.setTexture_atIndex(t.wind.gpuResourceID(), 5);
+        table.setTexture_atIndex(t.clouds[(ctx.frame_index % 2) as usize].gpuResourceID(), 6);
     }
     enc.setComputePipelineState(&ctx.r.pipelines.upscale_prep);
     enc.setArgumentTable(Some(table));
@@ -152,6 +154,26 @@ impl FramePass for VolumetricPass {
         enc.dispatchThreads_threadsPerThreadgroup(
             size2(t.vol.width(), t.vol.height()),
             size2(16, 16),
+        );
+        // Объёмные облака (04.3, сессия 4б): по глубине сцены — закрывают
+        // вершины в облачном слое; склейка — в `upscale_prep` / `taa_resolve`.
+        let cur = (ctx.frame_index % 2) as usize;
+        let ct = ctx.slot.table(Table::Clouds);
+        unsafe {
+            ct.setTexture_atIndex(t.clouds[cur].gpuResourceID(), 0);
+            ct.setTexture_atIndex(t.clouds[1 - cur].gpuResourceID(), 1);
+            ct.setTexture_atIndex(ctx.r.sky.transmittance.gpuResourceID(), 2);
+            ct.setTexture_atIndex(t.scene_depth.gpuResourceID(), 3);
+            ct.setAddress_atIndex(ctx.upload_addr, 1);
+            ct.setAddress_atIndex(ctx.upload_addr + SKY_OFFSET as u64, 2);
+            ct.setAddress_atIndex(ctx.r.sky.frame.gpuAddress(), 3);
+            ct.setAddress_atIndex(ctx.upload_addr + TAA_OFFSET as u64, 4);
+        }
+        enc.setComputePipelineState(&ctx.r.pipelines.clouds_march);
+        enc.setArgumentTable(Some(ct));
+        enc.dispatchThreads_threadsPerThreadgroup(
+            size2(t.clouds[cur].width(), t.clouds[cur].height()),
+            size2(8, 8),
         );
         enc.endEncoding();
     }

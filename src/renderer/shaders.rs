@@ -86,6 +86,8 @@ pub struct Pipelines {
     /// LUT воздушной перспективы (04.2).
     pub sky_aerial: Obj<dyn MTLComputePipelineState>,
     pub sky_ambient: Obj<dyn MTLComputePipelineState>,
+    /// Объёмные облака (04.3, сессия 4б).
+    pub clouds_march: Obj<dyn MTLComputePipelineState>,
     pub sky: Obj<dyn MTLRenderPipelineState>,
     pub exposure_meter: Obj<dyn MTLComputePipelineState>,
     /// Глубина кластеров рельефа в каскады теней (04.2), без фрагментного шейдера.
@@ -533,6 +535,7 @@ pub fn build_pipelines(
             "volumetric_light",
         )?,
         sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
+        clouds_march: compute_pipeline(compiler, &sky_lib, "sky.metal", "clouds_march")?,
         exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
         terrain_shadow: depth_only_pipeline(
             compiler,

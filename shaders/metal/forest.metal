@@ -788,7 +788,7 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
             if (in.tint > 0.55) {
                 // Маяк ночного побега (05.6): флуоресценция видна при любой
                 // экспозиции, как бусины чувства мицелия.
-                glow = float3(0.35, 1.0, 0.45) * in.tint * 0.12 / max(frame.pre_exposure, 1e-12)
+                glow = float3(0.35, 1.0, 0.45) * in.tint * 0.025 / max(frame.pre_exposure, 1e-12)
                      * (in.uv.y > 0.5 ? 1.0 : 0.5);
             }
         }
@@ -895,7 +895,16 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
         // Под водой реки или моря: дымка толщи (растения в разливе).
         color = underwater_fog(color, length(in.rel), frame.underwater_m, underwater_light(skyf));
     }
-    return float4(color * frame.pre_exposure, 1.0);
+    // Связь с мицелием (05.6): листва и травы у игрока мерцают — лес
+    // «дышит» волной, бегущей к цели.
+    float3 myc = float3(0.0);
+    if (frame.mycelium.x > 0.0 && leaf) {
+        float d = length(in.rel);
+        float2 p = in.rel.xz + frame.cam_lo.xz;
+        float wave = pow(0.5 + 0.5 * sin(length(p - frame.mycelium.zw) * 0.35 + frame.time * 2.4), 4.0);
+        myc = float3(0.2, 0.9, 0.7) * frame.mycelium.x * exp(-d / 10.0) * (0.15 + wave) * 0.012;
+    }
+    return float4(color * frame.pre_exposure + myc, 1.0);
 }
 
 #define PLANT_FS_ARGS PlantOut in [[stage_in]], bool front [[front_facing]], \

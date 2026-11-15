@@ -28,8 +28,13 @@ const DETECT_RANGE_M: f32 = 80.0;
 /// Сила прожектора (в единицах `spot_light`: освещённость × d²).
 pub const BEAM_INTENSITY: f32 = 0.05;
 /// Рост тревоги в луче на открытом месте, 1/с; спад вне луча, 1/с.
-const ALERT_RISE: f32 = 0.9;
+const ALERT_RISE: f32 = 0.45;
 const ALERT_DECAY: f32 = 0.25;
+fn smoothstep01(x: f32) -> f32 {
+    let t = x.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Шаг грибов-маяков вдоль реки, м; отступ от оси к берегу, м.
 const GUIDE_STEP_M: f32 = 7.0;
 /// Водопад: перепад уровня на 20 м пути, м; поиск — не дальше, м.
@@ -67,6 +72,11 @@ pub struct NightEscape {
     pub checkpoint: usize,
     pub phase: Phase,
     time: f32,
+    /// Связь с мицелием (сессия 2): 0 — нет, 1 — нити видны; секунд с касания
+    /// первого гриба (`None` — ещё не касался); сила галлюциногенного эффекта.
+    pub connected: f32,
+    contact: Option<f32>,
+    pub trip: f32,
 }
 
 impl NightEscape {
@@ -133,8 +143,11 @@ impl NightEscape {
                 pos: Vec3::new(start.x + 60.0, ground(start) + DRONE_ALT_M, start.y + 40.0),
                 beam: Vec3::NEG_Y,
                 // Начало: дрон прочёсывает тропу впереди игрока.
-                search: guide.get(3).map_or(start, |g: &Vec3| Vec2::new(g.x, g.z)),
-                retarget_s: 12.0,
+                search: guide
+                    .get(7)
+                    .or(guide.last())
+                    .map_or(start, |g: &Vec3| Vec2::new(g.x, g.z)),
+                retarget_s: 15.0,
                 sweep: 0.0,
                 alert: 0.0,
                 seed: 0x0D0E,
@@ -144,6 +157,9 @@ impl NightEscape {
             checkpoint: 0,
             phase: Phase::Playing,
             time: 0.0,
+            connected: 0.0,
+            contact: None,
+            trip: 0.0,
         })
     }
 
@@ -167,6 +183,32 @@ impl NightEscape {
     ) -> Option<Vec3> {
         self.time += dt;
         let p2 = Vec2::new(player.x, player.z);
+        // Соединение с мицелием: касание первого светящегося гриба — споры,
+        // переход (2 с нарастания, 3 с пика, 6 с спада до фона), нити
+        // проступают под почвой; эффект сильнее у маяков.
+        if self.contact.is_none()
+            && let Some(g) = self.guide.first()
+            && Vec2::new(g.x, g.z).distance(p2) < 2.5
+        {
+            self.contact = Some(0.0);
+        }
+        if let Some(c) = self.contact.as_mut() {
+            *c += dt;
+            let c = *c;
+            let peak = smoothstep01(c / 2.0) * (1.0 - smoothstep01((c - 5.0) / 6.0));
+            let near = self
+                .guide
+                .iter()
+                .map(|g| Vec2::new(g.x, g.z).distance(p2))
+                .fold(f32::INFINITY, f32::min);
+            let node = 0.15 * (1.0 - (near / 6.0).min(1.0));
+            self.trip = (peak + 0.06 + node).min(1.0);
+            self.connected = smoothstep01((c - 1.5) / 4.0);
+        }
+        if self.connected < 0.5 {
+            // Дрон появляется после соединения: сначала — гриб и переход.
+            return None;
+        }
         // Маяки: дошёл — следующий становится точкой возврата.
         while self.checkpoint + 1 < self.guide.len()
             && Vec2::new(
@@ -270,45 +312,39 @@ impl NightEscape {
             if Vec2::new(g.x, g.z).distance(near) > 120.0 {
                 continue;
             }
+            // До соединения светится только первый гриб — зовёт к себе.
+            if i > 0 && self.connected < 0.05 {
+                continue;
+            }
             // Волна свечения от игрока к водопаду: «лес показывает дорогу».
             let ahead = i as f32 - self.checkpoint as f32;
             let wave = ((ahead * 0.6 - self.time * 2.2).rem_euclid(9.0) - 4.5).abs();
             let pulse = (1.0 - wave / 1.6).max(0.0);
             let base = if ahead >= -1.0 { 1.0 } else { 0.35 };
+            // До соединения первый гриб зовёт — ровное яркое свечение.
+            let pulse = if self.connected < 0.05 {
+                0.8 + 0.2 * (self.time * 2.0).sin()
+            } else {
+                pulse
+            };
             for k in 0..3u32 {
                 let h = hash(i as i32, k as i32, 0x6F);
                 let a = (h & 0xff) as f32 / 255.0 * std::f32::consts::TAU;
                 let r = 0.15 + ((h >> 8) & 0xff) as f32 / 255.0 * 0.35;
                 out.push(PlantInstance {
                     position: (*g + Vec3::new(a.cos() * r, 0.0, a.sin() * r)).to_array(),
-                    scale: 2.0 + (k as f32) * 0.6,
+                    scale: 0.8 + (k as f32) * 0.2,
                     yaw: a,
                     tint: (0.6 + 2.5 * pulse) * base,
                     phase: 0.0,
                     _pad: 0.0,
                 });
             }
-            // Споры над маяками впереди — зелёные бусины, видны над травой.
-            if ahead >= -1.0 {
-                for k in 0..3u32 {
-                    let h = hash(i as i32, k as i32 + 7, 0x5B);
-                    let a = (h & 0xff) as f32 / 255.0 * std::f32::consts::TAU + self.time * 0.3;
-                    let y = 0.8
-                        + 0.5 * (((h >> 8) & 0xff) as f32 / 255.0)
-                        + 0.15 * (self.time * 1.3 + k as f32).sin();
-                    out.push(PlantInstance {
-                        position: (*g + Vec3::new(a.cos() * 0.4, y, a.sin() * 0.4)).to_array(),
-                        scale: 0.5,
-                        yaw: 0.0,
-                        tint: 0.35 + 1.4 * pulse,
-                        phase: 0.0,
-                        _pad: 8.0,
-                    });
-                }
-            }
         }
-        // Огни дрона: белый прожектор и мигающий красный (тело — сессия 2).
-        if self.phase != Phase::Escaped || self.drone.pos.distance(camera) < 400.0 {
+        // Огни дрона: белый прожектор и мигающий красный (тело — сессия 4).
+        if self.connected >= 0.5
+            && (self.phase != Phase::Escaped || self.drone.pos.distance(camera) < 400.0)
+        {
             let d = &self.drone;
             out.push(PlantInstance {
                 position: d.pos.to_array(),
@@ -334,7 +370,7 @@ impl NightEscape {
 
     /// Прожектор для `FrameUniforms` (относительно `cam_hi`).
     pub fn spot(&self, cam_hi: Vec3) -> ([f32; 4], [f32; 4]) {
-        if self.phase == Phase::Escaped {
+        if self.phase == Phase::Escaped || self.connected < 0.5 {
             return ([0.0; 4], [0.0; 4]);
         }
         let p = self.drone.pos - cam_hi;
@@ -349,8 +385,36 @@ impl NightEscape {
         )
     }
 
+    /// Связь с мицелием для `FrameUniforms.mycelium` (цель — водопад).
+    pub fn mycelium(&self, cam_hi: Vec3) -> [f32; 4] {
+        [
+            self.connected,
+            self.trip,
+            self.goal.x - cam_hi.x,
+            self.goal.z - cam_hi.z,
+        ]
+    }
+
+    /// Проверка: как будто гриба коснулись `t` секунд назад.
+    pub fn debug_contact(&mut self, t: f32) {
+        self.contact = Some(t);
+    }
+
+    /// Рука тянется к грибу в первые секунды касания.
+    pub fn reaching(&self) -> bool {
+        self.contact.is_some_and(|c| c < 2.5)
+    }
+
     /// Строка состояния для интерфейса.
     pub fn status(&self) -> String {
+        match self.contact {
+            None => return "У ручья светится гриб. Подойди и коснись его.".to_string(),
+            Some(c) if c < 6.0 => {
+                return "Споры… земля под ногами начинает светиться. Лес говорит с тобой."
+                    .to_string();
+            }
+            _ => {}
+        }
         match self.phase {
             Phase::Escaped => "Шум водопада скрыл тебя. Дрон потерял след.".to_string(),
             Phase::Caught(_) => {

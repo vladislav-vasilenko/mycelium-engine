@@ -273,6 +273,15 @@ impl App {
                 ),
                 None => eprintln!("побег: нет реки рядом"),
             }
+            let mut e = e;
+            if let (Some(e), Some(t)) = (
+                e.as_mut(),
+                std::env::var("ECHO_ESCAPE_CONTACT")
+                    .ok()
+                    .and_then(|v| v.parse().ok()),
+            ) {
+                e.debug_contact(t);
+            }
             // Старт — у первого маяка, лицом ко второму (вниз по течению).
             if let Some(e) = &e
                 && e.guide.len() > 1

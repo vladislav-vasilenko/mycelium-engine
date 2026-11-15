@@ -57,15 +57,32 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
     // Bloom (04.5): цепочка суммирует 6 уровней — делим на их число и
     // подмешиваем 4 % (рассеяние в оптике); без bloom здесь тот же кадр.
     constexpr sampler bs(filter::linear, address::clamp_to_edge);
-    float3 scene = hdr.sample(s, in.uv).rgb;
+    // Галлюциногенный переход (05.6): кадр «дышит» (масштаб к центру),
+    // волны искажения бегут по экрану, каналы расходятся.
+    float trip = frame.mycelium.y;
+    float2 uv = in.uv;
+    if (trip > 0.0) {
+        float2 cc = uv - 0.5;
+        float r = length(cc);
+        float t = frame.time;
+        float breathe = 1.0 - trip * 0.03 * (0.5 + 0.5 * sin(t * 1.7));
+        float2 wave = float2(sin(cc.y * 18.0 + t * 2.3), cos(cc.x * 15.0 - t * 1.9)) * 0.006 * trip;
+        uv = 0.5 + cc * breathe + wave * (0.3 + r);
+    }
+    float3 scene = hdr.sample(s, uv).rgb;
+    if (trip > 0.0) {
+        float2 ca = (uv - 0.5) * 0.02 * trip * (0.6 + 0.4 * sin(frame.time * 3.1));
+        scene.r = hdr.sample(bs, uv + ca).r;
+        scene.b = hdr.sample(bs, uv - ca).b;
+    }
     // Хроматическая аберрация линзы (кинематографичная обработка): красный и
     // синий чуть расходятся к краям кадра (до ~4 пикселей в углу).
     float2 uvc = in.uv - 0.5;
     bool grade = frame.camera_pos.w > 0.5;
     if (grade) {
         float2 ca = uvc * dot(uvc, uvc) * 0.006;
-        scene.r = hdr.sample(bs, in.uv + ca).r;
-        scene.b = hdr.sample(bs, in.uv - ca).b;
+        scene.r = hdr.sample(bs, uv + ca).r;
+        scene.b = hdr.sample(bs, uv - ca).b;
     }
     float3 glow = bloom.sample(bs, in.uv).rgb;
     float3 c = mix(scene, glow * (bloom.get_width() == hdr.get_width() ? 1.0 : 1.0 / 6.0), 0.04) * e;
@@ -75,7 +92,8 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
         float avg = exposure_state[0].z;
         float scotopic = 1.0 - smoothstep(log(2e-6), log(5e-4), log(max(avg, 1e-12)));
         float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
-        c = mix(c, lum * float3(0.62, 0.78, 1.05), scotopic * 0.75);
+        // Связь с мицелием (05.6) меняет восприятие: цвета ночью не блёкнут.
+        c = mix(c, lum * float3(0.62, 0.78, 1.05), scotopic * 0.75 * (1.0 - 0.85 * frame.mycelium.x));
     }
     // AgX (02.13) вместо смеси ACES и кривой по яркости (02.10): та
     // сохраняла оттенок, и трава с цветами выходили кислотно-яркими.
@@ -93,6 +111,15 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
         g = mix(g, g * g * (3.0 - 2.0 * g), 0.4);
         mapped = pow(g, 2.2);
         mapped *= 1.0 - 0.3 * smoothstep(0.08, 0.5, dot(uvc, uvc));
+    }
+    // Переход: цвет пульсирует к бирюзе и фиолету, края кадра темнеют
+    // в такт сердцу.
+    if (trip > 0.0) {
+        float t = frame.time;
+        float beat = pow(0.5 + 0.5 * sin(t * 7.0), 8.0) * 0.6 + 0.4;
+        float3 hue = mix(float3(0.7, 1.15, 1.05), float3(1.1, 0.8, 1.2), 0.5 + 0.5 * sin(t * 0.8 + length(uvc) * 6.0));
+        mapped = mix(mapped, mapped * hue * 1.15, trip * 0.7);
+        mapped *= 1.0 - trip * 0.45 * beat * smoothstep(0.05, 0.45, dot(uvc, uvc));
     }
     // Дизеринг ±½ шага 8-битного вывода (02.10): плавный градиент неба без полос.
     uint2 px = uint2(in.position.xy);

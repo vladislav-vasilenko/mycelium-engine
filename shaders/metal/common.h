@@ -25,7 +25,47 @@ struct FrameUniforms {
     float4 weather;        // 04.3: x — облачность, y — дождь, z — влажность земли + уровень луж (0…2), w — ветер
     float4 spot_pos;       // 05.6: прожектор дрона — xyz относительно cam_hi, w — cos половины угла (0 — выкл.)
     float4 spot_dir;       // xyz — направление луча, w — сила света
+    float4 mycelium;       // 05.6: x — связь с мицелием, y — галлюциногенный переход, zw — цель пульса (xz отн. cam_hi)
 };
+
+// Шум значений для узоров мицелия (05.6): гладкий, без текстур.
+inline float myc_hash(float2 p) {
+    p = fract(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+inline float myc_noise(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(myc_hash(i), myc_hash(i + float2(1, 0)), u.x),
+               mix(myc_hash(i + float2(0, 1)), myc_hash(i + float2(1, 1)), u.x), u.y);
+}
+
+// Нити мицелия под почвой (05.6, сессия 2): гребни шума (тонкие линии там,
+// где шум ≈ 0,5) двух масштабов — ветвящаяся сеть; пульс бежит по сети к
+// цели (фаза по расстоянию до цели), ярче у игрока. Возвращает излучение в
+// единицах «после предэкспозиции» (не зависит от экспозиции, как бусины).
+inline float3 mycelium_glow(constant FrameUniforms& f, float3 rel) {
+    if (f.mycelium.x <= 0.0) {
+        return float3(0.0);
+    }
+    float2 p = rel.xz + f.cam_lo.xz;         // относительно cam_hi — точность f32
+    float2 q = p + f.cam_hi.xz;              // мировые: узор не «плывёт» за камерой
+    float2 w = q + 2.0 * float2(myc_noise(q * 0.07), myc_noise(q * 0.07 + 17.0));  // изгиб
+    float r1 = 1.0 - abs(myc_noise(w * 0.45) * 2.0 - 1.0);
+    float r2 = 1.0 - abs(myc_noise(w * 1.3 + 5.0) * 2.0 - 1.0);
+    float vein = pow(r1, 14.0) + 0.6 * pow(r2, 18.0);
+    float d_goal = length(p - f.mycelium.zw);
+    float t = f.time;
+    // Пульс к цели: фаза растёт по расстоянию — гребень движется к цели.
+    float pulse = pow(0.5 + 0.5 * sin(d_goal * 0.35 + t * 2.4), 6.0);
+    // Сигнал острова: раз в ~6 с длинная яркая волна.
+    float signal = pow(0.5 + 0.5 * sin(d_goal * 0.08 + t * 1.05), 24.0);
+    float near = exp(-length(rel.xz) / 28.0);
+    float breathe = 0.55 + 0.45 * sin(t * 0.9);
+    float k = f.mycelium.x * vein * (0.15 * breathe + 1.2 * pulse + 2.5 * signal) * (0.25 + 0.75 * near);
+    return float3(0.25, 1.0, 0.75) * k * 0.12;
+}
 
 // Прожектор дрона (05.6): освещённость точки (`rel` — относительно камеры) с нормалью `n` (уже × на
 // альбедо снаружи). Мягкий край конуса, спад 1/d², без теней (сессия 2 — тени

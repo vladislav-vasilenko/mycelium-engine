@@ -42,7 +42,12 @@ impl App {
             }
             // Поза рук от игры (05.2): ладони к земле в чувстве мицелия,
             // указание при макро-осмотре; после — обратно «relaxed».
-            let (pose, offset) = self.game.hands_hint();
+            let (mut pose, mut offset) = self.game.hands_hint();
+            // Соединение с мицелием (05.6): рука тянется к шляпке гриба.
+            if self.escape.as_ref().is_some_and(|e| e.reaching()) {
+                pose = Some(3);
+                offset = glam::Vec3::new(0.0, -0.12, -0.05);
+            }
             match pose {
                 Some(p) => {
                     h.rig.set_pose(p);

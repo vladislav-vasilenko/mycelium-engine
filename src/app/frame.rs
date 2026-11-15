@@ -439,6 +439,10 @@ impl App {
             weather: self.weather.uniforms(),
             spot_pos: self.escape.as_ref().map_or([0.0; 4], |e| e.spot(cam_hi).0),
             spot_dir: self.escape.as_ref().map_or([0.0; 4], |e| e.spot(cam_hi).1),
+            mycelium: self
+                .escape
+                .as_ref()
+                .map_or([0.0; 4], |e| e.mycelium(cam_hi)),
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3): на GPU
         // (02.5) или на CPU (`--cpu-cull`). Самопроверка считает и CPU-срез —

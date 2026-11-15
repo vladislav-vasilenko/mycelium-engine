@@ -85,6 +85,22 @@ impl FramePass for ForestPass {
         );
         enc.setComputePipelineState(&ctx.r.pipelines.forest_finish);
         enc.dispatchThreads_threadsPerThreadgroup(size2(FOREST_LISTS, 1), size2(32, 1));
+        // Вода на земле (04.3, сессия 6): 4 подшага A → B → A → B → A.
+        enc.setComputePipelineState(&ctx.r.pipelines.ground_water);
+        for k in 0..4 {
+            enc.barrierAfterEncoderStages_beforeEncoderStages_visibilityOptions(
+                MTLStages::Dispatch,
+                MTLStages::Dispatch,
+                MTL4VisibilityOptions::Device,
+            );
+            unsafe {
+                table.setTexture_atIndex(f.water[k % 2].gpuResourceID(), 3);
+                table.setTexture_atIndex(f.water[1 - k % 2].gpuResourceID(), 4);
+            }
+            enc.setArgumentTable(Some(table));
+            let n = crate::renderer::forest::WATER_N as usize;
+            enc.dispatchThreads_threadsPerThreadgroup(size2(n, n), size2(16, 16));
+        }
         enc.endEncoding();
     }
 }

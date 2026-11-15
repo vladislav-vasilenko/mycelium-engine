@@ -304,7 +304,7 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
                 (RES_SKY, Stages::FRAGMENT),
                 (RES_SHADOW, Stages::FRAGMENT),
                 (RES_CULL, Stages::VERTEX),
-                (RES_FOREST, Stages::VERTEX),
+                (RES_FOREST, Stages::VERTEX | Stages::FRAGMENT),
                 (RES_RT, Stages::FRAGMENT),
                 (RES_AO, Stages::FRAGMENT),
                 (RES_PROBES, Stages::FRAGMENT),

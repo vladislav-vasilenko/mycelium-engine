@@ -1007,3 +1007,77 @@ fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
         }
     }
 }
+
+// --- Вода на земле (04.3, сессия 6) ------------------------------------------
+// Сетка 256² клеток по 0,5 м вокруг камеры (128 м), кольцевая адресация, как у
+// маски мокрого песка: тексель хранит клетку мира с номером ≡ gid (mod N).
+// Дождь добавляет воду, почва впитывает; вода перетекает к соседям по
+// разнице уровней «земля + вода» (поток антисимметричен — вода сохраняется,
+// ограничен запасом источника) и собирается в ложбинах: лужи растут и
+// сливаются, по склонам бегут ручейки. R — глубина, м; G — метка оборота
+// окна; BA — поток (м/шаг по X и Z) для ряби течения.
+constant int WATER_N = 256;
+constant float WATER_CELL = 0.5;
+
+static float water_micro(int2 cell) {
+    // Микрорельеф ±2 см: лужи неровные, не по сетке поля высот.
+    uint h = hash3(cell.x, cell.y, 0x57A7u);
+    uint h2 = hash3(cell.x >> 2, cell.y >> 2, 0x57A8u);
+    return (rnd(h, 1) - 0.5) * 0.012 + (rnd(h2, 2) - 0.5) * 0.03;
+}
+
+kernel void ground_water(texture2d<float, access::read> src [[texture(3)]],
+                         texture2d<float, access::write> dst [[texture(4)]],
+                         device const float* heights [[buffer(0)]],
+                         constant FrameUniforms& frame [[buffer(1)]],
+                         device const float* zone_heights [[buffer(5)]],
+                         constant TerrainZone& zone [[buffer(6)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= uint(WATER_N) || gid.y >= uint(WATER_N)) {
+        return;
+    }
+    int n = WATER_N;
+    int2 c0 = int2(floor(frame.camera_pos.xz / WATER_CELL)) - n / 2;
+    auto cell_of = [&](int2 g) {
+        int2 rel = (g - c0) % n;
+        rel += select(int2(0), int2(n), rel < 0);
+        return c0 + rel;
+    };
+    auto tag_of = [&](int2 cell, int2 g) {
+        int2 lap = (cell - g) / n;
+        return float((lap.x & 63) * 64 + (lap.y & 63) + 1);
+    };
+    int2 g = int2(gid);
+    int2 cell = cell_of(g);
+    float4 old = src.read(gid);
+    float h = old.g == tag_of(cell, g) ? old.r : 0.0;
+    float2 p = (float2(cell) + 0.5) * WATER_CELL;
+    float Hi = ground_height(p, heights, zone_heights, zone, frame) + water_micro(cell) + h;
+    // Шаг — реальное время (кадр делится на 4 подшага).
+    float dt = frame.cam_lo.w * 0.25;
+    float dh = 0.0;
+    float2 flow = 0.0;
+    const int2 offs[4] = {int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1)};
+    for (int k = 0; k < 4; ++k) {
+        int2 nc = cell + offs[k];
+        int2 rel = nc - c0;
+        float hn = 0.0;
+        if (all(rel >= 0) && all(rel < n)) {
+            int2 ng = ((nc % n) + n) % n;
+            float4 o = src.read(uint2(ng));
+            hn = o.g == tag_of(nc, ng) ? o.r : 0.0;
+        }
+        float2 pn = (float2(nc) + 0.5) * WATER_CELL;
+        float Hn = ground_height(pn, heights, zone_heights, zone, frame) + water_micro(nc) + hn;
+        // Поток i → n: 0,2 разницы уровней, не больше четверти запаса источника.
+        float f = 0.2 * (Hi - Hn);
+        f = f > 0.0 ? min(f, h * 0.25) : max(f, -hn * 0.25);
+        dh -= f;
+        flow += float2(offs[k]) * f;
+    }
+    // Дождь (ливень ~1 мм за 3 с реального времени — с ускорением суток) и
+    // впитывание почвой (лужа уходит за минуты после дождя).
+    dh += frame.weather.y * 3.5e-4 * dt;
+    h = max(h + dh - 4e-5 * dt, 0.0);
+    dst.write(float4(h, tag_of(cell, g), flow), gid);
+}

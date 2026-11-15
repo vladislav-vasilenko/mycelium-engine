@@ -218,6 +218,12 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
         // Карта укрытия от дождя (04.3).
         table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 11);
+        // Вода на земле (04.3, сессия 6); без леса — любая текстура (не читается).
+        if let Some(f) = ctx.r.forest.as_ref() {
+            table.setTexture_atIndex(f.water[0].gpuResourceID(), 12);
+        } else {
+            table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 12);
+        }
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(terrain.feat_segments.gpuAddress(), 2);
         table.setAddress_atIndex(terrain.feat_cells.gpuAddress(), 3);
@@ -312,6 +318,12 @@ fn bind_clusters(
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 7);
         // Карта укрытия от дождя (04.3).
         table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 11);
+        // Вода на земле (04.3, сессия 6); без леса — любая текстура (не читается).
+        if let Some(f) = ctx.r.forest.as_ref() {
+            table.setTexture_atIndex(f.water[0].gpuResourceID(), 12);
+        } else {
+            table.setTexture_atIndex(ctx.r.shadows.rain.gpuResourceID(), 12);
+        }
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 8);
         table.setAddress_atIndex(c.zone_heights.gpuAddress(), 10);
         table.setAddress_atIndex(c.zone_info.gpuAddress(), 11);

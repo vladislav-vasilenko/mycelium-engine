@@ -340,6 +340,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
                            texture2d<float> macro_tex [[texture(9)]],
                            texture2d<float> rt_ao_tex [[texture(10)]],
                            depth2d<float> rain_occ [[texture(11)]],
+                           texture2d<float> ground_water [[texture(12)]],
                            device const float4* probes [[buffer(13)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     constexpr sampler clamp_s(filter::linear, address::clamp_to_edge);
@@ -745,6 +746,31 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float level = saturate(frame.weather.z - 1.0);
     float th = mix(0.74, 0.42, level);
     float puddle = smoothstep(th, th + 0.05, pv) * smoothstep(0.5, 0.9, rain_wet);
+    // Вода из симуляции (сессия 6): в 60 м — глубина воды на земле (лужи
+    // растут и сливаются, по склонам бегут ручейки), дальше — лужи по шуму.
+    float2 water_flow = 0.0;
+    float film = 0.0;
+    if (frame.forest > 0.5) {
+        constexpr sampler wsm(filter::linear, address::repeat);
+        float4 wv = ground_water.sample(wsm, (xz / 0.5 - 0.5 + 0.5) / 256.0);
+        float wd = wv.r;
+        float near_w = 1.0 - smoothstep(48.0, 60.0, max(abs(in.rel.x), abs(in.rel.z)));
+        float sim_puddle = smoothstep(0.003, 0.012, wd);
+        film = smoothstep(0.0004, 0.003, wd) * (1.0 - sim_puddle);
+        water_flow = wv.ba;
+        puddle = mix(puddle, sim_puddle, near_w);
+        film *= near_w;
+    }
+    // Бегущая плёнка (ручейки): мокро и гладко, рябь движется по течению.
+    if (film > 0.0) {
+        float fl = length(water_flow);
+        float2 fdir = fl > 1e-9 ? water_flow / fl : float2(0.0);
+        float speed = saturate(fl * 4000.0);
+        float2 rip = detail.sample(s, pattern_uv(frame, lxz - fdir * frame.time * 0.8, 0.7)).rg - 0.5;
+        nxy = mix(nxy, rip * 0.5, film * (0.4 + 0.5 * speed));
+        rough = mix(rough, 0.04, film);
+        albedo *= mix(1.0, 0.7, film);
+    }
     if (puddle > 0.0) {
         albedo *= mix(1.0, 0.3, puddle);
         rough = mix(rough, 0.03, puddle);
@@ -829,7 +855,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         }
         case VIEW_WETNESS:
             // Синий — мокрый песок у моря, зелёный — влажность от дождя (04.3).
-            return float4(shelter_dbg < 0.0 ? 1.0 : 0.1 + 0.9 * shelter_dbg, 0.1 + 0.8 * rain_wet, 0.1 + 0.9 * wet_mask, 1.0);
+            // Синий — мокрый песок и вода на земле (симуляция, сессия 6).
+            return float4(shelter_dbg < 0.0 ? 1.0 : 0.1 + 0.9 * shelter_dbg, 0.1 + 0.8 * rain_wet,
+                          0.1 + 0.9 * max(wet_mask, max(puddle, film * 0.5)), 1.0);
         case VIEW_MATERIALS: {
             float3 c = 0.0;
             for (int i = 0; i < MAT_COUNT; ++i) {

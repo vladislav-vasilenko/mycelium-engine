@@ -24,6 +24,8 @@ pub const FOREST_LISTS: usize = PROPS_LIST + 1;
 // Пихта-скан × 1,4 / 1,6 (02.13): ствол ~0,4 м.
 const TRUNK_R: [f32; TREE_MESHES] = [0.55, 0.55, 2.0, 0.45, 0.4, 0.5];
 pub const FOREST_CAP: usize = 8192;
+/// Сторона сетки воды на земле, клеток (04.3; `WATER_N` в `forest.metal`).
+pub const WATER_N: u32 = 256;
 pub const FOREST_GRID: usize = 160;
 /// u32 в буфере счётчиков: 128 счётчиков (121 занят), затем аргументы по 5 u32.
 const COUNTS_WORDS: usize = 160;
@@ -56,6 +58,10 @@ pub(super) struct ForestGpu {
     pub instances: Vec<Obj<dyn MTLBuffer>>,
     pub counters: Vec<Obj<dyn MTLBuffer>>,
     counted: [bool; FRAME_SLOTS],
+    /// Вода на земле (04.3, сессия 6): 256² клеток по 0,5 м вокруг камеры,
+    /// RGBA32Float (глубина, метка окна, поток); кадр — 4 подшага A → B → A,
+    /// итог всегда в `water[0]`.
+    pub water: [Obj<dyn MTLTexture>; 2],
     /// Стволы и крупные валуны завершённого кадра (x, z, радиус): деревья —
     /// из списков теней (все в 160 м от камеры), валуны — из LOD 0 (45 м).
     pub obstacles: Vec<[f32; 3]>,
@@ -213,6 +219,26 @@ impl super::Renderer {
         }])?;
         let table: Vec<[f32; 8]> = vegetation.map_or(vec![[0.0; 8]; 256], |v| v.forest.clone());
         let inst_bytes = FOREST_LISTS * FOREST_CAP * std::mem::size_of::<PlantInstance>();
+        let mut water = Vec::new();
+        for k in 0..2 {
+            let w = super::resources::sampled_texture_usage(
+                &self.device,
+                MTLPixelFormat::RGBA32Float,
+                WATER_N,
+                1,
+                false,
+                MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+                &format!("ground water {k}"),
+            )?;
+            self.upload_textures(&[super::resources::TextureUpload {
+                texture: &w,
+                data: &vec![0u8; (WATER_N * WATER_N * 16) as usize],
+                pixel_bytes: 16,
+                mips: false,
+            }])?;
+            water.push(w);
+        }
+        let water: [Obj<dyn MTLTexture>; 2] = water.try_into().map_err(|_| "вода: 2 текстуры")?;
         let g = ForestGpu {
             vertices: buf(bytemuck::cast_slice(&a.vertices), "plants: vertices"),
             indices: buf(bytemuck::cast_slice(&a.indices), "plants: indices"),
@@ -242,8 +268,12 @@ impl super::Renderer {
                 })
                 .collect(),
             counted: [false; FRAME_SLOTS],
+            water,
             obstacles: Vec::new(),
         };
+        for w in &g.water {
+            self.residency.addAllocation(as_allocation(&**w));
+        }
         self.residency.addAllocation(as_allocation(&*g.vegetation));
         for b in [&g.vertices, &g.indices, &g.lods, &g.vegetation_table]
             .into_iter()

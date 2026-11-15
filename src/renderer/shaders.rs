@@ -60,6 +60,8 @@ pub struct Pipelines {
     pub plant_prepassed: Obj<dyn MTLRenderPipelineState>,
     pub forest_place: Obj<dyn MTLComputePipelineState>,
     pub forest_finish: Obj<dyn MTLComputePipelineState>,
+    /// Вода на земле (04.3, сессия 6).
+    pub ground_water: Obj<dyn MTLComputePipelineState>,
     /// Выбор кластеров на GPU (02.5): глубина дерева и indirect-аргументы.
     pub cull_clusters: Obj<dyn MTLComputePipelineState>,
     pub cull_finish: Obj<dyn MTLComputePipelineState>,
@@ -582,6 +584,7 @@ pub fn build_pipelines(
         )?,
         forest_place: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_place")?,
         forest_finish: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_finish")?,
+        ground_water: compute_pipeline(compiler, &forest_lib, "forest.metal", "ground_water")?,
         stars: render_pipeline(
             compiler,
             &sky_lib,

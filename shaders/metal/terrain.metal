@@ -773,7 +773,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     }
     if (puddle > 0.0) {
         albedo *= mix(1.0, 0.3, puddle);
-        rough = mix(rough, 0.03, puddle);
+        rough = mix(rough, 0.08, puddle);
         nxy *= 1.0 - puddle;
         if (frame.weather.y > 0.02) {
             // Круги: в клетке 0,35 м — одна капля со своей фазой, кольцо
@@ -924,15 +924,23 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         sky_c *= ao;
         bounce *= ao;
     }
-    float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks;
+    // Под сплошными облаками у солнца нет блика: иначе гладкая вода в лужах
+    // с рябью от капель светилась молочно-белым (04.3).
+    float spec_k = 1.0 - smoothstep(0.6, 1.0, frame.weather.x);
+    float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks * spec_k;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {
         // Поверхность воды горизонтальна, а русло на сетке 30 м лежит на склоне:
         // отражение — по нормали воды (вверх) с рябью от детальной текстуры.
         float2 rip = (detail.sample(s, pattern_uv(frame, lxz, 3.0) + frame.time * 0.05).rg - 0.5) * 0.25;
         float3 Nw = normalize(float3(rip.x, 1.0, rip.y));
-        float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(Nw, V)), 5.0);
-        float3 sky_refl = sky_ambient_term(skyf, float3(0, 1, 0)) * 1.1;
+        // Френель — по вертикали (рябь лишь сдвигает отражение); у горизонта
+        // в воде — тёмные склоны и лес, а не небо (в пасмурность вода иначе
+        // белела целиком).
+        float fres = 0.02 + 0.98 * pow(1.0 - saturate(V.y), 5.0);
+        float3 Rw = reflect(-V, Nw);
+        float3 sky_up = sky_ambient_term(skyf, float3(0, 1, 0));
+        float3 sky_refl = mix(sky_up * 0.1 * float3(0.75, 0.9, 0.75), sky_up * 0.7, smoothstep(0.12, 0.45, Rw.y)) * occ;
         // Сквозь мелкую воду видно мокрое дно.
         float3 bed = albedo * 0.35 * (sun * nl + sky);
         float3 Hw = normalize(L + V);
@@ -942,10 +950,18 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     }
     // Лужи (04.3): отражение неба по Френелю (нормаль — с кругами от капель),
     // под пологом — тусклее.
+    // Отражение не только неба: луч ниже ~10–25° над горизонтом упирается
+    // в склоны и лес — тёмное окружение; иначе лужа светилась белым.
     if (puddle > 0.0) {
-        float fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(N, V)), 5.0);
-        float3 sky_refl = sky_ambient_term(skyf, float3(0, 1, 0)) * 1.1 * occ;
-        color = mix(color, color * 0.7 + sky_refl, fres * puddle);
+        // Вода ровная: Френель — по вертикали (по нормали почвы с рябью он
+        // взлетал, и лужа сверху отражала всё небо — белое пятно).
+        float3 Nw = normalize(float3(nxy.x * 0.3, 1.0, nxy.y * 0.3));
+        float fres = 0.02 + 0.98 * pow(1.0 - saturate(V.y), 5.0);
+        float3 R = reflect(-V, Nw);
+        float3 sky_rad = sky_ambient_term(skyf, float3(0, 1, 0));
+        float3 env = sky_rad * 0.1 * float3(0.75, 0.9, 0.75);
+        float3 refl = mix(env, sky_rad * 0.6, smoothstep(0.12, 0.45, R.y)) * occ;
+        color = mix(color, color * 0.6 + refl, fres * puddle);
     }
     if (frame.underwater_m > 0.0) {
         // Под водой: свет у точки ниже моря ослаблен толщей над ней, путь от

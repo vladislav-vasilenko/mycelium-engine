@@ -13,7 +13,7 @@
 // `app::raft::LEVEL_SCALE`).
 constant float LEVEL_SCALE = 3.0;
 // Наименьшая глубина демо, м (ручьи по гидрологии — сантиметры).
-constant float LEVEL_MIN_M = 0.9;
+constant float LEVEL_MIN_M = 3.9;
 
 struct RiverOut {
     float4 position [[position]];
@@ -46,7 +46,10 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float2 nrm = float2(-dir.y, dir.x);
     float len = length(b - a);
     // Вода выше — разлив шире (откос берега ~0,6): +1,5 м на метр глубины.
-    float hw = s.half_width + s._pad.x + max(s._pad.y * LEVEL_SCALE, LEVEL_MIN_M) * 1.2;
+    // Лента шире на подъём воды над дном (откос ~0,4): край воды задаёт
+    // пересечение с берегом (растворение по глубине под пикселем), а не
+    // прямой срез ленты.
+    float hw = s.half_width + s._pad.x + max(s._pad.y * LEVEL_SCALE, LEVEL_MIN_M) * 2.5;
     bool has_prev = iid > 0 && segs[iid - 1].kind == 1u && all(abs(segs[iid - 1].b - a) < 0.01);
     bool has_next = segs[iid + 1].kind == 1u && all(abs(segs[iid + 1].a - b) < 0.01);
     uint corner = vid % 6u;
@@ -84,7 +87,12 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     // Уровень воды — профиль с CPU (`Hydrology::levels`): плёсы ровные и
     // горизонтальные, перепады — водопады и сливы.
     float2 lv = levels[iid];
-    float y = v < 0.5 ? lv.x : lv.y;
+    // Не ниже рельефа GPU + глубина: дно профиля — поле высот CPU, а рельеф
+    // на GPU (детализация зоны, шум) у русла выше на десятки сантиметров —
+    // вода выходила тонкой плёнкой и уходила под кочки. Над ямами профиль
+    // выше — плёс остаётся ровным.
+    // Только высота самой вершины — она общая у соседей (без ступенек).
+    float y = max(v < 0.5 ? lv.x : lv.y, (v < 0.5 ? ha : hb) + depth);
     o.world = float3(xz.x, y, xz.y);
     o.position = frame.view_proj_rel * float4(camera_relative(frame, o.world), 1.0);
     // Течение у вершины — среднее с соседом на стыке: плавно вдоль ленты
@@ -133,7 +141,11 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float2 fn = float2(-fd.y, fd.x);
     // Мировые координаты со сдвигом по (плавному) течению, две фазы — узор
     // непрерывен на стыках отрезков и не растягивается со временем.
-    float2 xz = in.world.xz;
+    // Начало координат узора — у камеры, шаг 256 м (кратен всем масштабам
+    // ниже — смена начала без скачка): мировые координаты ~20 км в float
+    // теряют точность, а поворот в систему течения умножал малое изменение
+    // направления на 20 км — узор пены сжимался в поперечные полосы.
+    float2 xz = in.world.xz - floor(frame.camera_pos.xz / 256.0) * 256.0;
     float ph0 = fract(t * 0.25), ph1 = fract(t * 0.25 + 0.5);
     float w0 = 1.0 - abs(ph0 * 2.0 - 1.0);
     auto adv = [&](float ph, float k) { return fd * ph * speed * 4.0 * k; };
@@ -141,7 +153,7 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
         return detail.sample(s, (xz - adv(ph, 1.0)) / sc).rg - 0.5;
     };
     float2 r = (rip(ph0, 2.0) * w0 + rip(ph1, 2.0) * (1.0 - w0))
-             + 0.5 * (rip(ph0, 0.7) * w0 + rip(ph1, 0.7) * (1.0 - w0));
+             + 0.5 * (rip(ph0, 0.8) * w0 + rip(ph1, 0.8) * (1.0 - w0));
     float turb = smoothstep(0.02, 0.12, slope);
     // Бурление: на скатах волны выше и круче.
     // Рябь всегда заметна (вода живая), на скатах — сильнее.
@@ -163,19 +175,28 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float3 L = -frame.light_dir.xyz;
     float3 Hh = normalize(L + V);
     refl += sun * pow(saturate(dot(n, Hh)), 400.0) * 2.0 * saturate(L.y * 3.0);
-    // Пена (белая вода горных ручьёв): вытянутые вдоль течения струи и
-    // клочья поверх прозрачной воды. Узор — в системе течения (направление
-    // течения плавное вдоль ленты — без швов), доля покрытия растёт с
-    // уклоном: плёс — редкие линии пены, перекат — струи, слив и водопад —
-    // почти сплошь. Порог по шуму с мягким краем — форма клочьев, а не пятна
-    // «камуфляжа».
-    float2 fq = float2(dot(xz, fn), dot(xz, fd));
-    auto foam_n = [&](float ph, float2 sc, float k) {
-        return detail.sample(s, (fq - float2(0.0, ph * speed * 4.0 * k)) / sc);
+    // Пена (белая вода горных ручьёв): струи и клочья поверх воды, доля
+    // покрытия растёт с уклоном: плёс — редкие линии, перекат — струи,
+    // слив — почти сплошь. Узор в мировых координатах со сдвигом по течению;
+    // вытянутость вдоль течения — среднее четырёх выборок по течению (без
+    // поворота координат — без швов и полос). Порог по шуму с мягким краем —
+    // форма клочьев, а не пятна «камуфляжа».
+    auto foam_n = [&](float ph, float sc, float k) {
+        return detail.sample(s, (xz - adv(ph, k)) / sc);
     };
-    float lines = foam_n(ph0, float2(0.18, 2.6), 1.0).b * w0 + foam_n(ph1, float2(0.18, 2.6), 1.0).b * (1.0 - w0);
-    float clumps = foam_n(ph0, float2(0.6, 1.5), 1.2).r * w0 + foam_n(ph1, float2(0.6, 1.5), 1.2).r * (1.0 - w0);
-    float big = foam_n(ph0, float2(3.0, 6.0), 0.8).g * w0 + foam_n(ph1, float2(3.0, 6.0), 0.8).g * (1.0 - w0);
+    auto streak_n = [&](float ph) {
+        float2 o = xz - adv(ph, 1.0);
+        float v = 0.0;
+        for (int k = 0; k < 4; ++k) {
+            v += detail.sample(s, (o + fd * (float(k) - 1.5) * 0.3) / 0.4).b;
+        }
+        return v * 0.25;
+    };
+    float lines = streak_n(ph0) * w0 + streak_n(ph1) * (1.0 - w0);
+    // Среднее сжимает разброс шума — растянуть обратно к 0…1.
+    lines = saturate((lines - 0.5) * 1.8 + 0.5);
+    float clumps = foam_n(ph0, 0.8, 1.2).r * w0 + foam_n(ph1, 0.8, 1.2).r * (1.0 - w0);
+    float big = foam_n(ph0, 4.0, 0.8).g * w0 + foam_n(ph1, 4.0, 0.8).g * (1.0 - w0);
     float edge = smoothstep(0.55, 1.0, abs(in.across));
     float cover = saturate(smoothstep(0.04, 0.45, slope) * 0.75 + smoothstep(0.45, 0.9, slope) * 0.3 + 0.05 * edge);
     // Покрытие неравномерно: крупный шум делит русло на струи и окна воды.
@@ -193,22 +214,30 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     // прозрачно, видно дно; на глубине — голубая, затем тёмно-бирюзовая
     // мгла. Путь света — по преломлённому лучу (закон Снеллиуса, n = 1,33):
     // под водой луч круче, чем над ней.
-    float bed = ground_height(xz, heights, zone_heights, zone, frame);
+    float bed = ground_height(in.world.xz, heights, zone_heights, zone, frame);
     float dz = max(in.world.y - bed, 0.0);
     float3 Tr = refract(-V, n, 1.0 / 1.33);
     float path_w = dz / max(-Tr.y, 0.2);
     // Та же модель воды, что у моря (`water.metal`): поглощение и рассеяние
     // одной воды — у устья цвета совпадают. Реки Якусимы прозрачные, с
     // бирюзой на глубине; толща ×1,5 — немного взвеси от течения.
-    const float3 absorb = float3(0.42, 0.085, 0.055) * 1.5;
+    // Плюс мутность горного потока (пузырьки, взвесь) — серое ослабление
+    // 1,2/м: за метр толщи дно почти не видно, вода голубеет, а не
+    // просвечивает до камней.
+    const float3 absorb = float3(0.42, 0.085, 0.055) * 1.5 + 0.5;
     float3 T = exp(-absorb * path_w);
     // Рассеяние неба, преломлённого в толщу, ярче под рябью, повёрнутой к небу.
     float sky_in = 0.7 + 0.5 * saturate(n.y);
     float3 scatter = float3(0.010, 0.085, 0.095) * (sun * 0.6 + sky_up * sky_in) * 2.6;
+    // Взвесь не только гасит, но и рассеивает свет: мутная вода светлая,
+    // голубовато-бирюзовая (доля мутности в ослаблении ~0,7).
+    scatter = mix(scatter, float3(0.035, 0.085, 0.095) * (sun * 0.4 * saturate(L.y) + sky_up * sky_in) * 2.6, 0.45);
     float3 water = refl * fres + scatter * (1.0 - T) * (1.0 - fres);
     float opacity = saturate(1.0 - dot(T, float3(0.33)) * (1.0 - fres));
     // Край ленты растворяется — без резкой границы на берегу.
-    float soft = 1.0 - smoothstep(0.75, 1.0, abs(in.across));
+    // Край: вода растворяется к береговой линии (глубина под пикселем → 0)
+    // и в крайней трети ленты — на склоне вбок прямой срез не виден.
+    float soft = smoothstep(0.0, 0.35, dz) * (1.0 - smoothstep(0.55, 1.0, abs(in.across)));
     // Устье: где дно ниже моря, лента растворяется в морской поверхности
     // (море рисуется своим проходом, с волнами и прибоем).
     soft *= smoothstep(-1.5, 0.0, bed);

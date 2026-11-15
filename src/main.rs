@@ -21,6 +21,7 @@ mod app;
 mod frame_graph;
 mod game;
 mod hands;
+mod hydrology;
 mod layout;
 mod plants;
 mod platform;

@@ -288,6 +288,17 @@ impl Renderer {
         self.targets.as_ref().map(|t| (t.width, t.height))
     }
 
+    /// Разлив рек (03.2): расширение полосы каждого отрезка объектов карты, м —
+    /// в `FeatureSegment._pad[0]` (у не-рек — 0). Буфер общий с CPU.
+    pub fn set_river_spread(&self, spread: &[f32]) {
+        let Some(t) = &self.terrain else { return };
+        let stride = std::mem::size_of::<crate::layout::FeatureSegment>();
+        let n = (t.feat_segments.length() / stride).min(spread.len());
+        for (i, v) in spread.iter().take(n).enumerate() {
+            resources::upload_bytes(&t.feat_segments, i * stride + 24, bytemuck::bytes_of(v));
+        }
+    }
+
     /// Размер рендера сцены (04.6): по нему — дрожание камеры TAA/MetalFX.
     pub fn render_size(&self) -> Option<(u32, u32)> {
         self.targets.as_ref().map(|t| (t.rw, t.rh))

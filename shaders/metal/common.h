@@ -156,7 +156,7 @@ struct FeatureSegment {
     float2 b;
     float half_width;
     uint kind;          // 0 тропа, 1 река, 2 дорога
-    float2 _pad;
+    float2 _pad;        // x — разлив реки от подъёма воды, м (03.2)
 };
 
 // Кластер рельефа (src/layout.rs, TerrainCluster), 16 байт.

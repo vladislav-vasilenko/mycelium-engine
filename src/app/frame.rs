@@ -220,7 +220,32 @@ impl App {
         let world_dt = (time - self.prev_world_time).clamp(0.0, 0.1);
         // Погода идёт по игровым часам (ускорение хода суток).
         if !self.time.paused {
-            self.weather.update(self.frame_dt * self.time.scale as f32);
+            let dt_game = self.frame_dt * self.time.scale as f32;
+            self.weather.update(dt_game);
+            // Реки (03.2): сток от дождя → расход → уровень; разлив в рендер
+            // дважды в секунду.
+            self.hydrology
+                .update(dt_game, self.weather.rain, self.weather.ground_wet);
+        }
+        self.river_push_s -= self.frame_dt;
+        if self.river_push_s <= 0.0 {
+            self.river_push_s = 0.5;
+            if let Some(f) = self.world.features.as_ref() {
+                r.set_river_spread(&self.hydrology.spread(f.segments.len()));
+                // С `--gpu-times` — ближайшая река в журнал (проверка паводка).
+                if self.args.gpu_times && r.frame_index() % 600 < 30 {
+                    let p = self.sim.curr.position;
+                    if let Some((rv, d)) = self.hydrology.nearest(f, glam::Vec2::new(p.x, p.z)) {
+                        eprintln!(
+                            "река в {d:.0} м: {:.3} м³/с, глубина {:.2} м (межень {:.2}), водосбор {:.2} км²",
+                            rv.q,
+                            rv.depth,
+                            rv.base_depth,
+                            rv.area_m2 / 1e6
+                        );
+                    }
+                }
+            }
         }
         self.prev_world_time = time;
         // Лес (02.4): кластерный рельеф, выбор на GPU, не в самопроверке.

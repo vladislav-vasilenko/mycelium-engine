@@ -65,6 +65,10 @@ pub struct App {
     prev_world_time: f32,
     /// Погода (04.3).
     weather: crate::weather::Weather,
+    /// Гидрология острова (03.2): уровень рек от дождя.
+    hydrology: crate::hydrology::Hydrology,
+    /// Время до следующей передачи разлива рек в рендер, с.
+    river_push_s: f32,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
     grade: bool,
     taa_frame: u32,
@@ -136,6 +140,19 @@ impl App {
         let selftest = args.selftest.then(SelfTest::new);
         let started = Instant::now();
         let world = load_world(&args);
+        let flow = args.world.as_ref().and_then(|d| {
+            crate::hydrology::FlowGrid::load(&d.join("flow.png"), world.size_m().x)
+                .map_err(|e| eprintln!("гидрология: {e} — водосбор по длине рек"))
+                .ok()
+        });
+        let hydrology = world.features.as_ref().map_or_else(Default::default, |f| {
+            crate::hydrology::Hydrology::build(
+                f,
+                |p| world.sample_ground(p.x, p.y).map(|g| g.height),
+                flow.as_ref(),
+            )
+        });
+        eprintln!("гидрология: {} участков рек", hydrology.reaches.len());
         eprintln!(
             "мир: {}, seed {:#x}, {}×{} тайлов, генератор v{}, собран за {:.0} мс, контрольная сумма {:016x}",
             args.world
@@ -190,6 +207,8 @@ impl App {
             taa_prev: None,
             prev_world_time: 0.0,
             weather,
+            hydrology,
+            river_push_s: 0.0,
             grade: true,
             taa_frame: 0,
             scene,

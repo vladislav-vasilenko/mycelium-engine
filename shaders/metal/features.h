@@ -27,7 +27,8 @@ static FeatureDist feature_distances(float2 p, float map_size_m,
         FeatureSegment s = segs[list[cell.x + k]];
         float2 ab = s.b - s.a;
         float t = saturate(dot(p - s.a, ab) / max(dot(ab, ab), 1e-6));
-        float dist = length(p - (s.a + ab * t)) - s.half_width;
+        // У рек — разлив от подъёма воды (03.2, `_pad.x`, м).
+        float dist = length(p - (s.a + ab * t)) - s.half_width - (s.kind == 1 ? s._pad.x : 0.0);
         if (s.kind == 0) {
             d.trail = min(d.trail, dist);
         } else if (s.kind == 1) {

@@ -115,10 +115,19 @@ impl App {
             String::new()
         };
         let clock = if self.scene == SceneMode::Terrain {
+            // Ближайшая река (03.2): расход и глубина.
+            let river = self.world.features.as_ref().and_then(|f| {
+                let p = self.sim.curr.position;
+                self.hydrology
+                    .nearest(f, glam::Vec2::new(p.x, p.z))
+                    .filter(|(_, d)| *d < 150.0)
+                    .map(|(r, _)| format!(" · река {:.2} м³/с, {:.2} м", r.q, r.depth))
+            });
             format!(
-                " · {} · {}{}",
+                " · {} · {}{}{}",
                 self.time_label(),
                 self.weather.preset.label(),
+                river.unwrap_or_default(),
                 if self.grade {
                     ""
                 } else {

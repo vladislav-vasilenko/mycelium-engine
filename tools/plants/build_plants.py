@@ -3,10 +3,10 @@
 Запуск: `.venv-geo/bin/python -I tools/plants/build_plants.py`. Детерминирован
 (seed в каждом виде). Пишет в `assets/models/plants/`:
 
-- `yakusugi.glb` — криптомерия якусуги: ствол с продольными желобами,
-  корни-наплывы, ярусы ветвей, хвоя пучками карточек;
-- `broadleaf.glb` — вечнозелёное широколиственное дерево (кастанопсис):
-  ствол делится на ветви, округлая крона из карточек листьев;
+- деревья, кустарник и валежник — `tools/plants/trees.py` (02.4, итерация 4):
+  `sugi_a`, `sugi_b`, `sugi_old`, `broad_a`, `broad_b`, `broad_c`, `shrub`,
+  `log`, `stump`, `windfall`; мелочь под ногами — `tools/plants/ground.py`:
+  `debris`, `moss_cushion`;
 - `boulder.glb` — валун (мох и камень — в шейдере по нормали);
 - `foliage.png` — атлас RGBA 1024 × 512: слева хвоя криптомерии, справа
   листья, по 2 × 2 варианта.
@@ -14,7 +14,8 @@
 В каждом `.glb` три сетки `lod0`, `lod1`, `lod2`. Оси glTF: Y вверх, метры,
 основание ствола в начале координат. Атрибуты вершины: POSITION, NORMAL,
 TEXCOORD_0 и COLOR_0 (u8): R — материал (0 кора якусуги, 1 кора лиственного,
-2 хвоя, 3 листья, 4 камень), G — сила ветра, B — затенение внутри кроны.
+2 хвоя, 3 листья, 4 камень, 5 папоротник, 6 якудзаса, 7 гриб), G — сила
+ветра, B — затенение внутри кроны, A — мох на коре.
 
 Вместо Blender (спецификация 02.8) — numpy: карточки листвы и трубки ветвей
 проще строить напрямую, а детерминизм и проверка числа треугольников — тут же.
@@ -28,223 +29,16 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mesh import (BARK_SUGI, FERN, LEAVES, MUSHROOM, NEEDLES, ROCK, SASA,  # noqa: E402
+                  Mesh, atlas_rect, card, frame, tube)
+import ground  # noqa: E402
+import trees  # noqa: E402
+
 OUT = Path(__file__).resolve().parents[2] / "assets/models/plants"
-BARK_SUGI, BARK_BROAD, NEEDLES, LEAVES, ROCK, FERN, SASA, MUSHROOM = 0, 1, 2, 3, 4, 5, 6, 7
 
-
-class Mesh:
-    def __init__(self):
-        self.p, self.n, self.uv, self.c, self.i = [], [], [], [], []
-
-    def vert(self, p, n, uv, mat, wind, ao):
-        self.p.append(p)
-        self.n.append(n / (np.linalg.norm(n) + 1e-9))
-        self.uv.append(uv)
-        self.c.append((mat, int(np.clip(wind, 0, 1) * 255), int(np.clip(ao, 0, 1) * 255), 255))
-        return len(self.p) - 1
-
-    def tri(self, a, b, c):
-        self.i += [a, b, c]
-
-    def tris(self):
-        return len(self.i) // 3
-
-
-def frame(d):
-    """Два перпендикуляра к направлению d."""
-    d = d / np.linalg.norm(d)
-    a = np.array([0.0, 0.0, 1.0]) if abs(d[1]) > 0.9 else np.array([0.0, 1.0, 0.0])
-    u = np.cross(d, a)
-    u /= np.linalg.norm(u)
-    return u, np.cross(u, d)
-
-
-def tube(m, pts, radii, sides, mat, wind_of, ao=1.0, flute=None, u_tiles=1.0):
-    """Трубка по ломаной `pts` с радиусами `radii`; `flute(t, θ)` — множитель радиуса."""
-    pts = np.asarray(pts, float)
-    rings = []
-    vlen = 0.0
-    for k, (p, r) in enumerate(zip(pts, radii)):
-        d = pts[min(k + 1, len(pts) - 1)] - pts[max(k - 1, 0)]
-        u, w = frame(d)
-        if k > 0:
-            vlen += np.linalg.norm(pts[k] - pts[k - 1])
-        ring = []
-        for s in range(sides + 1):
-            th = 2 * math.pi * s / sides
-            f = flute(k / max(len(pts) - 1, 1), th) if flute else 1.0
-            dirv = u * math.cos(th) + w * math.sin(th)
-            q = p + dirv * r * f
-            ring.append(m.vert(q, dirv, (s / sides * u_tiles, vlen / 1.5), mat, wind_of(q), ao))
-        rings.append(ring)
-    for a, b in zip(rings, rings[1:]):
-        for s in range(sides):
-            m.tri(a[s], b[s], a[s + 1])
-            m.tri(a[s + 1], b[s], b[s + 1])
-
-
-def card(m, center, right, up, normal, rect, mat, wind, ao):
-    """Карточка листвы: квадрат со стороной `right`/`up`, uv — прямоугольник атласа."""
-    u0, v0, u1, v1 = rect
-    vs = [
-        m.vert(center - right - up, normal, (u0, v1), mat, wind, ao),
-        m.vert(center + right - up, normal, (u1, v1), mat, wind, ao),
-        m.vert(center + right + up, normal, (u1, v0), mat, wind, ao),
-        m.vert(center - right + up, normal, (u0, v0), mat, wind, ao),
-    ]
-    m.tri(vs[0], vs[1], vs[2])
-    m.tri(vs[0], vs[2], vs[3])
-
-
-def atlas_rect(side, variant):
-    """Атлас 1024 × 1024, четверти по 512²: 0 — хвоя, 1 — листья (верх),
-    2 — вайи папоротника, 3 — листья сасы (низ); в четверти 2 × 2 варианта."""
-    x0 = (side % 2) * 0.5 + (variant % 2) * 0.25
-    y0 = (side // 2) * 0.5 + (variant // 2) * 0.25
-    e = 0.002
-    return (x0 + e, y0 + e, x0 + 0.25 - e, y0 + 0.25 - e)
-
-
-def bezier(a, b, c, n):
-    t = np.linspace(0, 1, n)[:, None]
-    return (1 - t) ** 2 * a + 2 * (1 - t) * t * b + t * t * c
-
-
-# --- Криптомерия якусуги -----------------------------------------------------
-
-def yakusugi(lod, seed=0x5091):
-    rng = np.random.default_rng(seed)
-    m = Mesh()
-    H, R0 = 28.0, 0.9
-    sides = [24, 12, 6][lod]
-    crown0 = 0.38 * H
-
-    def crown_r(y):
-        t = np.clip((y - crown0) / (H - crown0), 0, 1)
-        return 0.6 + 4.6 * (1 - t) ** 0.85 * min(1.0, 0.4 + 2.5 * t)
-
-    def wind(q):
-        return np.clip((q[1] - crown0 * 0.5) / H, 0, 1) * 0.6 + np.hypot(q[0], q[2]) / 12.0
-
-    # Ствол: изгиб и сужение, наплыв у корней, продольные желоба.
-    ys = np.concatenate([np.linspace(0, 3, 8 if lod < 2 else 3), np.linspace(3.8, H, [26, 14, 6][lod])])
-    lean = rng.normal(0, 0.25, 2)
-    axis = np.stack([lean[0] * (ys / H) ** 1.5 + 0.15 * np.sin(ys * 0.31), ys, lean[1] * (ys / H) ** 1.5 + 0.12 * np.cos(ys * 0.27)], 1)
-    radii = R0 * (1 - ys / H * 0.97) ** 0.8 + R0 * 0.9 * np.exp(-ys / 1.3)
-    phase = rng.uniform(0, 6.28)
-
-    def flute(t, th):
-        if lod == 2:
-            return 1.0
-        y = t * H
-        return 1.0 + (0.10 * math.sin(7 * th + phase + 0.3 * y) + 0.05 * math.sin(13 * th - 0.5 * y)) * (1.2 - y / H)
-
-    tube(m, axis, radii, sides, BARK_SUGI, lambda q: 0.0, 1.0, flute, u_tiles=max(2, round(2 * math.pi * R0 / 1.2)))
-
-    # Корни-наплывы: изогнутые трубки от ствола в землю.
-    if lod < 2:
-        for k in range(7 if lod == 0 else 5):
-            th = 2 * math.pi * (k + rng.uniform(-0.2, 0.2)) / (7 if lod == 0 else 5)
-            d = np.array([math.cos(th), 0, math.sin(th)])
-            start = np.array([0, rng.uniform(0.9, 1.5), 0]) + d * R0 * 0.55
-            mid = d * rng.uniform(1.3, 1.7) + np.array([0, 0.15, 0])
-            end = d * rng.uniform(2.0, 2.8) + np.array([0, -0.9, 0])
-            pts = bezier(start, mid, end, 10 if lod == 0 else 6)
-            rr = np.linspace(R0 * 0.6, 0.12, len(pts))
-            tube(m, pts, rr, 8 if lod == 0 else 5, BARK_SUGI, lambda q: 0.0, 0.85)
-
-    # Ветви ярусами по золотому углу, хвоя пучками на внешних 2/3.
-    nbr = [64, 34, 22][lod]
-    for b in range(nbr):
-        t = b / (nbr - 1)
-        y = crown0 + (H - crown0 - 0.8) * t ** 0.9
-        th = b * 2.39996 + rng.uniform(-0.2, 0.2)
-        d = np.array([math.cos(th), 0, math.sin(th)])
-        L = crown_r(y) * rng.uniform(0.8, 1.1)
-        tilt = math.radians(rng.uniform(10, 32))
-        base = np.array([np.interp(y, ys, axis[:, 0]), y, np.interp(y, ys, axis[:, 2])])
-        tip = base + d * L * math.cos(tilt) + np.array([0, L * math.sin(tilt), 0])
-        mid = (base + tip) / 2 + np.array([0, -0.15 * L, 0])
-        if lod < 2:
-            pts = bezier(base, mid, tip, 5)
-            rb = np.interp(y, ys, radii) * 0.22
-            tube(m, pts, np.linspace(rb, 0.03, 5), 5 if lod == 0 else 4, BARK_SUGI, wind, 0.8)
-        # Пучки хвои: на вершине ветви звезда из карточек, вдоль ветви — по одной.
-        tufts = [5, 3, 2][lod]
-        for k in range(tufts):
-            s = 1.0 - k * (0.75 / max(tufts - 1, 1))
-            c = bezier(base, mid, tip, 11)[int(round(s * 10))]
-            size = (1.4 + 0.6 * L / 5.0) * [1.0, 1.3, 2.0][lod] * rng.uniform(0.85, 1.15)
-            ao = 0.55 + 0.45 * min(1.0, np.hypot(c[0], c[2]) / max(crown_r(y), 0.5))
-            out = np.array([c[0], 0, c[2]])
-            out = out / (np.linalg.norm(out) + 1e-6)
-            nrm = out * 0.75 + np.array([0, 0.65, 0])
-            fwd = (tip - base) / np.linalg.norm(tip - base)
-            for j in range([3, 2, 2][lod]):
-                rot = j * math.pi / [3, 2, 2][lod] + rng.uniform(0, 0.5)
-                u, w = frame(fwd)
-                side = u * math.cos(rot) + w * math.sin(rot)
-                card(m, c, fwd * size * 0.7, side * size * 0.5, nrm, atlas_rect(0, rng.integers(4)), NEEDLES, wind(c), ao)
-    # Вершина — пучок.
-    top = np.array([axis[-1, 0], H + 0.3, axis[-1, 2]])
-    for j in range(3):
-        rot = j * math.pi / 3
-        card(m, top, np.array([math.cos(rot), 0, math.sin(rot)]) * 1.0, np.array([0, 1.2, 0]), np.array([0, 1.0, 0]), atlas_rect(0, j), NEEDLES, 1.0, 1.0)
-    return m
-
-
-# --- Широколиственное дерево -------------------------------------------------
-
-def broadleaf(lod, seed=0xB20A):
-    rng = np.random.default_rng(seed)
-    m = Mesh()
-    R0 = 0.38
-    crown_c = np.array([0.0, 10.5, 0.0])
-    crown_r = np.array([6.0, 4.5, 6.0])
-
-    def wind(q):
-        return np.clip((q[1] - 4.0) / 12.0, 0, 1) * 0.7 + np.hypot(q[0], q[2]) / 14.0
-
-    ys = np.linspace(0, 5.0, [10, 6, 3][lod])
-    axis = np.stack([0.1 * np.sin(ys), ys, 0.1 * np.cos(ys * 0.7)], 1)
-    radii = R0 * (1 - ys / 9.0) + R0 * 0.6 * np.exp(-ys / 0.8)
-    tube(m, axis, radii, [16, 10, 6][lod], BARK_BROAD, lambda q: 0.0, 1.0, u_tiles=2)
-    tips = []
-    limbs = [4, 4, 3][lod]
-    for k in range(limbs):
-        th = 2 * math.pi * k / limbs + rng.uniform(-0.3, 0.3)
-        d = np.array([math.cos(th), 0, math.sin(th)])
-        base = axis[-1] + np.array([0, -0.3, 0])
-        end = crown_c + d * rng.uniform(2.5, 4.0) + np.array([0, rng.uniform(-0.5, 1.5), 0])
-        mid = base + (end - base) * 0.5 + d * 0.8
-        pts = bezier(base, mid, end, [7, 5, 3][lod])
-        tube(m, pts, np.linspace(R0 * 0.55, 0.08, len(pts)), [8, 6, 4][lod], BARK_BROAD, wind, 0.85)
-        if lod < 2:
-            for j in range(3):
-                th2 = th + rng.uniform(-1.2, 1.2)
-                d2 = np.array([math.cos(th2), 0, math.sin(th2)])
-                b2 = pts[len(pts) // 2 + j % 2]
-                e2 = b2 + d2 * rng.uniform(2.0, 3.5) + np.array([0, rng.uniform(0.5, 2.5), 0])
-                tube(m, bezier(b2, (b2 + e2) / 2 + np.array([0, 0.4, 0]), e2, 4), np.linspace(0.08, 0.02, 4), 4, BARK_BROAD, wind, 0.8)
-                tips.append(e2)
-        tips.append(end)
-    # Карточки листвы по оболочке эллипсоида кроны, гуще снаружи.
-    n_cards = [150, 60, 28][lod]
-    size = [1.3, 1.9, 2.8][lod]
-    for k in range(n_cards):
-        z = rng.uniform(-0.6, 1.0)
-        th = rng.uniform(0, 2 * math.pi)
-        r = math.sqrt(max(0.0, 1 - z * z))
-        dirv = np.array([r * math.cos(th), z, r * math.sin(th)])
-        depth = rng.uniform(0.7, 1.0)
-        c = crown_c + dirv * crown_r * depth
-        nrm = dirv * 0.8 + np.array([0, 0.4, 0])
-        u, w = frame(nrm)
-        rot = rng.uniform(0, math.pi)
-        right = (u * math.cos(rot) + w * math.sin(rot)) * size * rng.uniform(0.8, 1.2)
-        up = np.cross(nrm / np.linalg.norm(nrm), right / np.linalg.norm(right)) * np.linalg.norm(right)
-        card(m, c, right, up, nrm, atlas_rect(1, rng.integers(4)), LEAVES, wind(c), 0.5 + 0.5 * depth)
-    return m
 
 
 # --- Подлесок -----------------------------------------------------------------
@@ -525,7 +319,13 @@ def write_glb(path, lods):
         n = np.asarray(m.n, np.float32)
         uv = np.asarray(m.uv, np.float32)
         c = np.asarray(m.c, np.uint8)
-        idx = np.asarray(m.i, np.uint32)
+        idx = np.asarray(m.i, np.uint32).reshape(-1, 3)
+        # Обход треугольника — против часовой стрелки со стороны его нормалей
+        # (лицевая сторона в Metal): иначе `plant_fs` перевернёт нормаль.
+        g = np.cross(p[idx[:, 1]] - p[idx[:, 0]], p[idx[:, 2]] - p[idx[:, 0]])
+        flip = (g * n[idx].sum(1)).sum(1) < 0
+        idx[flip] = idx[flip][:, [0, 2, 1]]
+        idx = idx.reshape(-1)
         acc = {}
         for name, arr, typ, comp, norm in (
             ("POSITION", p, "VEC3", 5126, False),
@@ -567,8 +367,10 @@ def write_glb(path, lods):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     build_atlas().save(OUT / "foliage.png", optimize=True)
-    for name, fn in (("yakusugi", yakusugi), ("broadleaf", broadleaf), ("boulder", boulder),
-                     ("fern", fern), ("sasa", sasa), ("mushroom", mushroom)):
+    species = dict(trees.SPECIES)
+    species.update(ground.SPECIES)
+    species.update(boulder=boulder, fern=fern, sasa=sasa, mushroom=mushroom)
+    for name, fn in species.items():
         lods = [fn(l) for l in range(3)]
         write_glb(OUT / f"{name}.glb", lods)
         print(f"{name}: треугольников по LOD {[m.tris() for m in lods]}")

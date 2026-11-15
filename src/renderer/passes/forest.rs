@@ -132,6 +132,7 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(ctx.r.shadows.map.gpuResourceID(), 1);
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 2);
         table.setTexture_atIndex(t.albedo.gpuResourceID(), 3);
+        table.setTexture_atIndex(f.bark_normal.gpuResourceID(), 4);
     }
     enc.pushDebugGroup(&label("forest: plants (indirect)"));
     enc.setRenderPipelineState(&ctx.r.pipelines.plant);

@@ -10,19 +10,37 @@
 
 constant float FOREST_CELL_M = 6.0;
 constant int FOREST_GRID = 160;               // клеток по стороне: радиус ~480 м
-constant uint FOREST_LISTS = 18;              // 5 видов × 3 LOD + тени двух деревьев + грибы с CPU
-constant uint CAMERA_LISTS = 15;
-constant uint COUNTS_WORDS = 32;               // счётчики, затем indirect-аргументы
+// Виды на GPU (`plants::SPECIES`): 0–2 криптомерии (две обычные, древняя),
+// 3–5 лиственные, 6 валун, 7 папоротник, 8 якудзаса, 9 кустарник,
+// 10 упавший ствол, 11 полый пень, 12 вывороченное дерево, 13 лесной сор,
+// 14 подушка мха; 15 — гриб, только из списка предметов с CPU.
+constant uint GPU_SPECIES = 15;
+constant uint TREE_MESHES = 6;
+constant uint CAMERA_LISTS = GPU_SPECIES * 3;                 // вид × LOD
+constant uint PROPS_LIST = CAMERA_LISTS + TREE_MESHES;        // 51
+constant uint FOREST_LISTS = PROPS_LIST + 1;                  // 52
+constant uint COUNTS_WORDS = 64;               // счётчики, затем indirect-аргументы
 constant uint FOREST_CAP = 16384;             // экземпляров в списке
-constant uint SPECIES_YAKUSUGI = 0;
-constant uint SPECIES_BROADLEAF = 1;
-constant uint SPECIES_BOULDER = 2;
-constant uint SPECIES_FERN = 3;
-constant uint SPECIES_SASA = 4;
+constant uint SPECIES_SUGI = 0;
+constant uint SPECIES_SUGI_OLD = 2;
+constant uint SPECIES_BROAD = 3;
+constant uint SPECIES_BOULDER = 6;
+constant uint SPECIES_FERN = 7;
+constant uint SPECIES_SASA = 8;
+constant uint SPECIES_SHRUB = 9;
+constant uint SPECIES_LOG = 10;
+constant uint SPECIES_STUMP = 11;
+constant uint SPECIES_WINDFALL = 12;
+constant uint SPECIES_DEBRIS = 13;
+constant uint SPECIES_MOSS = 14;
+constant uint SPECIES_MUSHROOM = 15;
 // Высота вида при масштабе 1, м (сфера отсечения).
-constant float SPECIES_H[5] = {29.0, 17.0, 2.2, 1.0, 1.4};
-// Подлесок: подклетки 3 м до UNDER_DIST, LOD на 15 и 35 м.
+constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4};
+// Подлесок: подклетки 2 м до UNDER_DIST (кусты — до SHRUB_DIST), LOD на 15 и 35 м.
 constant float UNDER_DIST = 70.0;
+constant float SHRUB_DIST = 100.0;
+// Мелочь под ногами: подклетки 1,5 м до CLUTTER_DIST, LOD на 8 и 16 м.
+constant float CLUTTER_DIST = 26.0;
 constant float LOD_DIST[2] = {45.0, 150.0};
 constant float SHADOW_DIST = 160.0;
 
@@ -37,6 +55,16 @@ inline uint hash3(int x, int z, uint salt) {
 }
 inline float rnd(uint h, uint k) {
     return float(hash3(int(h), int(k), 0x51u) & 0xffffffu) / 16777216.0;
+}
+
+// Гладкий шум пятен 0…1 с ячейкой `cell` м: куртины папоротника и кустов.
+static float patch_noise(float2 p, float cell, uint salt) {
+    float2 q = p / cell;
+    int2 i = int2(floor(q));
+    float2 f = q - float2(i);
+    f = f * f * (3.0 - 2.0 * f);
+    auto v = [&](int a, int b) { return rnd(hash3(i.x + a, i.y + b, salt), 1); };
+    return mix(mix(v(0, 0), v(1, 0), f.x), mix(v(0, 1), v(1, 1), f.x), f.y);
 }
 
 // Высота рельефа под точкой: билинейно по полю острова или зоны 1 м.
@@ -80,8 +108,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         return;
     }
     int2 cell = int2(floor(frame.camera_pos.xz / FOREST_CELL_M)) - FOREST_GRID / 2 + int2(gid);
-    // Два кандидата в клетке: дерево и валун.
-    for (uint kind = 0; kind < 2; ++kind) {
+    // Три кандидата в клетке: дерево, валун, валежник (ствол или пень).
+    for (uint kind = 0; kind < 3; ++kind) {
         uint h = hash3(cell.x, cell.y, 0xF0E5u + kind);
         float2 p = (float2(cell) + 0.12 + 0.76 * float2(rnd(h, 1), rnd(h, 2))) * FOREST_CELL_M;
         if (any(p < 0.0) || any(p > frame.map_size_m)) {
@@ -130,10 +158,21 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             if (rnd(h, 3) > density || slope > 0.9) {
                 continue;
             }
-            species = rnd(h, 4) < cedar ? SPECIES_YAKUSUGI : SPECIES_BROADLEAF;
-            // Редкие великаны в естественном кедровом лесу (масштаб от 0,7).
-            bool giant = species == SPECIES_YAKUSUGI && srange.x >= 0.7 && rnd(h, 6) < 0.04;
-            scale = giant ? 1.6 : mix(srange.x, srange.y, rnd(h, 5));
+            // Вариант сетки — по хэшу; древние якусуги — в естественном
+            // кедровом лесу (масштаб сообщества от 0,7).
+            bool sugi = rnd(h, 4) < cedar;
+            bool giant = sugi && srange.x >= 0.7 && rnd(h, 6) < 0.06;
+            uint variant = min(uint(rnd(h, 10) * 3.0), 2u);
+            species = sugi ? (giant ? SPECIES_SUGI_OLD : SPECIES_SUGI + min(variant, 1u)) : SPECIES_BROAD + variant;
+            scale = giant ? mix(0.9, 1.25, rnd(h, 5)) : mix(srange.x, srange.y, rnd(h, 5));
+        } else if (kind == 2) {
+            // Валежник: в лесу, пни — чаще в кедровом (вырубки эпохи Эдо).
+            if (rnd(h, 3) > forest * (0.05 + 0.12 * cedar) || slope > 0.8) {
+                continue;
+            }
+            float r4 = rnd(h, 4);
+            species = r4 < 0.3 + 0.3 * cedar ? SPECIES_STUMP : (r4 < 0.75 ? SPECIES_LOG : SPECIES_WINDFALL);
+            scale = 0.7 + 0.5 * rnd(h, 5);
         } else {
             // Валуны: редко в лесу, чаще на голом и в руслах.
             if (rnd(h, 3) > boulders || slope > 1.2) {
@@ -144,8 +183,8 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         }
         // Не на тропах, дорогах и в руслах.
         FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
-        float clear = kind == 0 ? 2.5 * scale : 1.0;
-        if (fd.trail < clear || fd.road < clear + 1.5 || (kind == 0 && fd.river < 2.0)) {
+        float clear = kind == 0 ? 2.5 * scale : (kind == 2 ? (species == SPECIES_WINDFALL ? 15.0 : 4.0) * scale : 1.0);
+        if (fd.trail < clear || fd.road < clear + 1.5 || (kind != 1 && fd.river < 2.0)) {
             continue;
         }
         float H = SPECIES_H[species] * scale;
@@ -165,7 +204,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
                 out[(CAMERA_LISTS + species) * FOREST_CAP + k] = inst;
             }
         }
-        float lim = species == SPECIES_BOULDER ? 180.0 : 480.0;
+        float lim = kind == 0 ? 480.0 : (kind == 1 ? 180.0 : 120.0);
         bool visible = dist - H * 0.6 < lim;
         for (int i = 0; i < 6 && visible; ++i) {
             visible = dot(view.planes[i].xyz, center) + view.planes[i].w >= -H * 0.6;
@@ -180,33 +219,45 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             out[list * FOREST_CAP + k] = inst;
         }
     }
-    // Подлесок (02.4): 4 подклетки по 3 м в клетках у камеры — папоротники во
-    // влажных ложбинах леса, якудзаса в высокогорье и на лугах.
+    // Подлесок (02.4): подклетки 2 м в клетках у камеры. Папоротники —
+    // куртинами во влажных ложбинах и у ручьёв, кусты — пятнами, гуще на
+    // опушках у троп; якудзаса — в высокогорье и на лугах.
     float2 cc = (float2(cell) + 0.5) * FOREST_CELL_M;
-    if (distance(cc, frame.camera_pos.xz) > UNDER_DIST + 6.0) {
+    if (distance(cc, frame.camera_pos.xz) > SHRUB_DIST + 6.0) {
         return;
     }
     constexpr sampler ls2(filter::linear, address::clamp_to_edge);
-    for (uint sub = 0; sub < 4; ++sub) {
-        uint h = hash3(cell.x * 2 + int(sub & 1), cell.y * 2 + int(sub >> 1), 0x0DE2u);
-        float2 p = (float2(cell) + 0.5 * float2(sub & 1, sub >> 1) + 0.05 + 0.4 * float2(rnd(h, 1), rnd(h, 2)))
-                 * FOREST_CELL_M;
+    for (uint sub = 0; sub < 9; ++sub) {
+        int2 sc = int2(sub % 3, sub / 3);
+        uint h = hash3(cell.x * 3 + sc.x, cell.y * 3 + sc.y, 0x0DE2u);
+        float2 p = (float2(cell) + (float2(sc) + 0.1 + 0.8 * float2(rnd(h, 1), rnd(h, 2))) / 3.0) * FOREST_CELL_M;
         float dxz = distance(p, frame.camera_pos.xz);
-        if (dxz > UNDER_DIST || any(p < 0.0) || any(p > frame.map_size_m)) {
+        if (dxz > SHRUB_DIST || any(p < 0.0) || any(p > frame.map_size_m)) {
             continue;
         }
         float cn = float(cover.get_width());
         float4 cv = cover.sample(ls2, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
         float mn = float(macro.get_width());
         float4 mc = macro.sample(ls2, (p / frame.map_size_m * (mn - 1.0) + 0.5) / mn, level(0));
+        FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
+        float forest = cv.x + cv.y;
         float hollow = saturate((0.5 - mc.g) * 2.5);
-        float fern_p = (cv.x + cv.y) * (0.25 + 0.5 * mc.b + 0.35 * hollow);
-        float sasa_p = cv.z * 0.75 + (cv.x + cv.y) * 0.04;
+        float brook = 1.0 - smoothstep(1.0, 14.0, fd.river);
+        float edge = smoothstep(1.5, 3.0, fd.trail) * (1.0 - smoothstep(4.0, 12.0, fd.trail));
+        float fern_patch = smoothstep(0.35, 0.75, patch_noise(p, 14.0, 0xFE11u));
+        float shrub_patch = smoothstep(0.45, 0.8, patch_noise(p, 22.0, 0x5B11u));
+        float fern_p = forest * (0.15 + 0.5 * mc.b + 0.35 * hollow + 0.5 * brook) * (0.25 + 1.2 * fern_patch);
+        float shrub_p = forest * (0.04 + 0.25 * edge) * (0.3 + 1.4 * shrub_patch);
+        float sasa_p = cv.z * 0.6 + forest * 0.03;
         float r = rnd(h, 3);
         uint species;
-        if (r < fern_p) {
+        if (r < shrub_p) {
+            species = SPECIES_SHRUB;
+        } else if (dxz > UNDER_DIST) {
+            continue;
+        } else if (r < shrub_p + fern_p) {
             species = SPECIES_FERN;
-        } else if (r < fern_p + sasa_p) {
+        } else if (r < shrub_p + fern_p + sasa_p) {
             species = SPECIES_SASA;
         } else {
             continue;
@@ -215,11 +266,10 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         if (y < 2.0) {
             continue;
         }
-        FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
         if (fd.trail < 1.0 || fd.road < 2.0 || fd.river < 0.5) {
             continue;
         }
-        float scale = 0.7 + 0.6 * rnd(h, 5);
+        float scale = species == SPECIES_SHRUB ? 0.6 + 0.6 * rnd(h, 5) : 0.7 + 0.6 * rnd(h, 5);
         float H = SPECIES_H[species] * scale;
         float3 base = float3(p.x, y - 0.05, p.y);
         float3 center = base + float3(0, H * 0.5, 0);
@@ -237,7 +287,71 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         inst.tint = rnd(h, 8);
         inst.phase = rnd(h, 9) * 6.2831853;
         inst._pad = 0.0;
-        uint lod = dxz < 15.0 ? 0 : (dxz < 35.0 ? 1 : 2);
+        float l0 = species == SPECIES_SHRUB ? 25.0 : 15.0;
+        uint lod = dxz < l0 ? 0 : (dxz < l0 * 2.4 ? 1 : 2);
+        uint list = species * 3 + lod;
+        uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
+        if (k < FOREST_CAP) {
+            out[list * FOREST_CAP + k] = inst;
+        }
+    }
+    // Мелочь под ногами (02.4, итерация 4): сор и подушки мха в подклетках
+    // 1,5 м у камеры — в лесу и на тропах по краю; мох — во влажном.
+    if (distance(cc, frame.camera_pos.xz) > CLUTTER_DIST + 6.0) {
+        return;
+    }
+    for (uint sub = 0; sub < 16; ++sub) {
+        int2 sc = int2(sub % 4, sub / 4);
+        uint h = hash3(cell.x * 4 + sc.x, cell.y * 4 + sc.y, 0xC1A7u);
+        float2 p = (float2(cell) + (float2(sc) + 0.1 + 0.8 * float2(rnd(h, 1), rnd(h, 2))) / 4.0) * FOREST_CELL_M;
+        float dxz = distance(p, frame.camera_pos.xz);
+        if (dxz > CLUTTER_DIST || any(p < 0.0) || any(p > frame.map_size_m)) {
+            continue;
+        }
+        float cn = float(cover.get_width());
+        float4 cv = cover.sample(ls2, (p / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
+        float mn = float(macro.get_width());
+        float4 mc = macro.sample(ls2, (p / frame.map_size_m * (mn - 1.0) + 0.5) / mn, level(0));
+        float forest = cv.x + cv.y;
+        float r = rnd(h, 3);
+        float moss_p = forest * (0.08 + 0.35 * mc.b) * smoothstep(0.3, 0.7, patch_noise(p, 6.0, 0x3055u));
+        float debris_p = 0.12 + 0.35 * forest + 0.3 * cv.w;
+        uint species = r < moss_p ? SPECIES_MOSS : (r < moss_p + debris_p ? SPECIES_DEBRIS : 99u);
+        if (species == 99u) {
+            continue;
+        }
+        float y = ground_height(p, heights, zone_heights, zone, frame);
+        if (y < 2.0) {
+            continue;
+        }
+        FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
+        if (fd.road < 1.5 || fd.river < 0.3 || (species == SPECIES_MOSS && fd.trail < 0.8)) {
+            continue;
+        }
+        // Сетки сора и мха плоские: на склоне круче ~20° концы повисли бы
+        // в воздухе — там их нет; основание чуть утоплено.
+        float gx = ground_height(p + float2(0.7, 0), heights, zone_heights, zone, frame) - y;
+        float gz = ground_height(p + float2(0, 0.7), heights, zone_heights, zone, frame) - y;
+        if (length(float2(gx, gz)) / 0.7 > 0.36) {
+            continue;
+        }
+        float scale = 0.6 + 0.6 * rnd(h, 5);
+        float3 base = float3(p.x, y - 0.03, p.y);
+        bool visible = true;
+        for (int i = 0; i < 6 && visible; ++i) {
+            visible = dot(view.planes[i].xyz, base) + view.planes[i].w >= -1.5 * scale;
+        }
+        if (!visible) {
+            continue;
+        }
+        PlantInstance inst;
+        inst.position = packed_float3(base);
+        inst.scale = scale;
+        inst.yaw = rnd(h, 7) * 6.2831853;
+        inst.tint = rnd(h, 8);
+        inst.phase = rnd(h, 9) * 6.2831853;
+        inst._pad = 0.0;
+        uint lod = dxz < 8.0 ? 0 : (dxz < 16.0 ? 1 : 2);
         uint list = species * 3 + lod;
         uint k = atomic_fetch_add_explicit(&counts[list], 1, memory_order_relaxed);
         if (k < FOREST_CAP) {
@@ -254,8 +368,8 @@ kernel void forest_finish(device uint* counts [[buffer(9)]],
     if (i >= FOREST_LISTS) {
         return;
     }
-    uint species = i < CAMERA_LISTS ? i / 3 : (i == 17 ? 5u : i - CAMERA_LISTS);
-    uint lod = i < CAMERA_LISTS ? i % 3 : (i == 17 ? 0u : 1u);
+    uint species = i < CAMERA_LISTS ? i / 3 : (i == PROPS_LIST ? SPECIES_MUSHROOM : i - CAMERA_LISTS);
+    uint lod = i < CAMERA_LISTS ? i % 3 : (i == PROPS_LIST ? 0u : 1u);
     uint4 r = lods[species * 3 + lod];
     device uint* a = counts + COUNTS_WORDS + i * 5;
     a[0] = r.y;
@@ -276,6 +390,7 @@ struct PlantOut {
     float3 attr;      // материал, ветер, затенение
     float tint;
     float kind;       // вид гриба (05.1)
+    float moss;       // мох на коре и почве (атрибут A)
 };
 
 // Мир точки сетки растения: поворот, масштаб, ветер (по силе из атрибута).
@@ -283,6 +398,15 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
                           thread float3& n) {
     float c = cos(inst.yaw), s = sin(inst.yaw);
     float3 p = float3(v.position);
+    // Своя форма у каждого экземпляра (02.4, итерация 4): вытянутость,
+    // ширина, сплюснутость по одной оси и наклон растут с высотой точки —
+    // основание с корнями и бугром почвы остаётся на земле.
+    uint hs = as_type<uint>(inst.phase);
+    float4 rv = float4(hs & 0xffu, (hs >> 8) & 0xffu, (hs >> 16) & 0xffu, hs >> 24) / 255.0;
+    float up = saturate(p.y / 3.0);
+    p.y *= mix(1.0, 0.85 + 0.35 * rv.x, up);
+    p.xz *= mix(float2(1.0), float2(0.8 + 0.4 * rv.y, 0.8 + 0.4 * rv.z), up);
+    p.xz += (rv.wy - 0.5) * 0.12 * max(p.y - 1.0, 0.0);
     float3 q = float3(c * p.x - s * p.z, p.y, s * p.x + c * p.z) * inst.scale;
     float3 nn = float3(v.normal);
     n = float3(c * nn.x - s * nn.z, nn.y, s * nn.x + c * nn.z);
@@ -313,6 +437,7 @@ vertex PlantOut plant_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.attr = float3(float(v.attr.x), float(v.attr.y) / 255.0, float(v.attr.z) / 255.0);
     o.tint = inst.tint;
     o.kind = inst._pad;
+    o.moss = float(v.attr.w) / 255.0;
     return o;
 }
 
@@ -336,14 +461,27 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                          texture2d_array<float> albedo_tex [[texture(0)]],
                          depth2d_array<float> shadow_map [[texture(1)]],
                          texture3d<float> aerial [[texture(2)]],
-                         texture2d_array<float> mat_albedo [[texture(3)]]) {
+                         texture2d_array<float> mat_albedo [[texture(3)]],
+                         texture2d_array<float> bark_normal [[texture(4)]]) {
     float mat = round(in.attr.x);
     float3 n = normalize(in.normal);
+    constexpr sampler ms(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
     float3 albedo;
     // 2 хвоя, 3 листья, 5 папоротник, 6 якудзаса — листва; 4 — камень.
     bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
     float3 glow = 0.0;
-    if (mat > 6.5) {
+    if (mat > 7.5) {
+        // Почва бугра у корней и корневой тарелки (02.4): подстилка леса и мох
+        // в мировых координатах, как на рельефе, — бугор сливается с землёй.
+        float3 lp = in.rel + frame.cam_lo.xyz;
+        float3 litter = mat_albedo.sample(ms, lp.xz / 3.0, 4).rgb;
+        float3 mossc = mat_albedo.sample(ms, lp.xz / 2.0, 3).rgb;
+        float side = 1.0 - saturate(abs(n.x) > abs(n.z) ? abs(n.x) : abs(n.z));
+        float3 soil = mat_albedo.sample(ms, (abs(n.x) > abs(n.z) ? lp.zy : lp.xy) / 2.5, 2).rgb;
+        albedo = mix(soil, litter, saturate(side * 1.5));
+        float mm = smoothstep(0.35, 0.65, in.moss + (dot(mossc, float3(0.33)) - 0.25) * 0.8);
+        albedo = mix(albedo, mossc, mm);
+    } else if (mat > 6.5) {
         // Гриб (05.1): цвет шляпки и ножки по виду; светящийся мицен — свечение
         // шляпки и пластинок (видно только ночью: экспозиция дня его гасит).
         const float3 caps[5] = {float3(0.62, 0.66, 0.50), float3(0.30, 0.20, 0.12),
@@ -380,10 +518,23 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
             discard_fragment();
         }
         albedo = a.rgb;
-        if (mat < 0.5) {
-            albedo *= float3(0.62, 0.40, 0.30);  // кора якусуги — красно-бурая
-        } else if (mat < 1.5) {
-            albedo *= 0.35;                      // серая кора лиственных, не белая
+        if (mat < 1.5) {
+            // Кора: карта нормалей (Bark012/Bark007, OpenGL) в базисе по
+            // производным позиции и uv — касательных в вершинах нет.
+            float3 dp1 = dfdx(in.rel), dp2 = dfdy(in.rel);
+            float2 du1 = dfdx(in.uv), du2 = dfdy(in.uv);
+            float3 p2 = cross(dp2, n), p1 = cross(n, dp1);
+            float3 T = p2 * du1.x + p1 * du2.x;
+            float3 B = p2 * du1.y + p1 * du2.y;
+            float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
+            float3 tn = bark_normal.sample(ms, in.uv, uint(mat)).xyz * 2.0 - 1.0;
+            n = normalize(T * inv * tn.x + B * inv * tn.y + n * tn.z);
+            albedo *= mat < 0.5 ? float3(0.70, 0.42, 0.30)  // кора якусуги — красно-бурая
+                                : float3(0.24, 0.22, 0.19); // серо-бурая кора лиственных
+            // Мох: у основания, на верхних сторонах ветвей и на валежнике.
+            float3 mossc = mat_albedo.sample(ms, in.uv * 1.3, 3).rgb;
+            float mm = smoothstep(0.4, 0.7, in.moss + (dot(mossc, float3(0.33)) - 0.25) * 0.9 + n.y * 0.15);
+            albedo = mix(albedo, mossc, mm);
         }
         if (leaf) {
             albedo *= 0.55 + 0.3 * in.tint;

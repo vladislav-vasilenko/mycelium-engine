@@ -12,13 +12,12 @@ use zune_jpeg::zune_core::options::DecoderOptions;
 use crate::layout::PlantVertex;
 
 /// Виды в порядке номеров на GPU (`SPECIES_*` в `forest.metal`).
-pub const SPECIES: [&str; 6] = [
-    "yakusugi",
-    "broadleaf",
-    "boulder",
-    "fern",
-    "sasa",
-    "mushroom",
+/// 0–5 деревья (три криптомерии, три лиственных), 6 валун, 7 папоротник,
+/// 8 якудзаса, 9 кустарник, 10 упавший ствол, 11 полый пень, 12 вывороченное
+/// дерево, 13 лесной сор, 14 подушка мха; 15 гриб — только с CPU.
+pub const SPECIES: [&str; 16] = [
+    "sugi_a", "sugi_b", "sugi_old", "broad_a", "broad_b", "broad_c", "boulder", "fern", "sasa",
+    "shrub", "log", "stump", "windfall", "debris", "moss_cushion", "mushroom",
 ];
 pub const LODS: usize = 3;
 /// Сторона слоя массива текстур растений.
@@ -40,6 +39,8 @@ pub struct PlantAssets {
     pub lods: [[LodRange; LODS]; SPECIES.len()],
     /// RGBA8 sRGB, `TEXTURE_LAYERS` × `TEXTURE_SIZE`².
     pub albedo: Vec<u8>,
+    /// Нормали коры (OpenGL, RGBA8 линейные): 0 якусуги, 1 лиственные.
+    pub bark_normal: Vec<u8>,
 }
 
 pub fn models_dir() -> PathBuf {
@@ -152,6 +153,7 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         indices: Vec::new(),
         lods: [[LodRange::default(); LODS]; SPECIES.len()],
         albedo: Vec::with_capacity(TEXTURE_LAYERS * TEXTURE_SIZE * TEXTURE_SIZE * 4),
+        bark_normal: Vec::with_capacity(2 * TEXTURE_SIZE * TEXTURE_SIZE * 4),
     };
     for (s, name) in SPECIES.iter().enumerate() {
         a.lods[s] = load_glb(&models.join(format!("{name}.glb")), &mut a)?;
@@ -160,6 +162,10 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         .extend(jpeg_rgba(&ambientcg.join("Bark012/Color.jpg"))?);
     a.albedo
         .extend(jpeg_rgba(&ambientcg.join("Bark007/Color.jpg"))?);
+    for bark in ["Bark012", "Bark007"] {
+        a.bark_normal
+            .extend(jpeg_rgba(&ambientcg.join(bark).join("NormalGL.jpg"))?);
+    }
     let (atlas, w, h) = png_rgba(&models.join("foliage.png"))?;
     if (w, h) != (TEXTURE_SIZE, TEXTURE_SIZE) {
         return Err("foliage.png: нужен 1024 × 1024".into());
@@ -186,6 +192,6 @@ mod tests {
         }
         let max = a.vertices.len() as u32;
         assert!(a.indices.iter().all(|&i| i < max));
-        assert!(a.vertices.iter().all(|v| v.attr[0] <= 7));
+        assert!(a.vertices.iter().all(|v| v.attr[0] <= 8));
     }
 }

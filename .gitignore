@@ -8,3 +8,6 @@ assets/source/geo/cache/
 assets/source/geo/gsi/
 .venv-geo/
 assets/source/sky/
+
+# Сканы Poly Haven (02.11): исходники восстанавливает tools/plants/fetch_polyhaven.py
+assets/source/polyhaven/*/

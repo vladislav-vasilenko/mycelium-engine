@@ -42,6 +42,8 @@ pub struct Args {
     pub puddles: Option<f32>,
     /// Демо-сплав по реке (03.2).
     pub raft: bool,
+    /// Сплав сразу под водой (проверка подводного вида).
+    pub dive: bool,
     /// Небо 04.1: дата, местное время в часах, скорость хода, фиксированная экспозиция.
     pub date: Option<(i32, u32, u32)>,
     pub time_h: Option<f64>,
@@ -94,6 +96,7 @@ impl Args {
                 "--weather" => args.weather = it.next(),
                 "--puddles" => args.puddles = it.next().and_then(|v| v.parse().ok()),
                 "--raft" => args.raft = true,
+                "--dive" => args.dive = true,
                 "--date" => {
                     let v: Vec<u32> = it
                         .next()

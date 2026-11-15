@@ -302,8 +302,8 @@ impl Renderer {
     }
 
     /// Уровень воды рек (03.2): на каждый отрезок объектов карты (a, b), м.
-    pub fn set_river_levels(&mut self, levels: &[[f32; 2]]) {
-        let bytes = levels.len().max(1) * 8;
+    pub fn set_river_levels(&mut self, levels: &[[f32; 4]]) {
+        let bytes = levels.len().max(1) * 16;
         if self
             .river_levels
             .as_ref()

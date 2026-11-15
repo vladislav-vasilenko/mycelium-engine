@@ -154,6 +154,7 @@ impl FramePass for ShadowsPass {
                 }
             }
             super::forest::draw_rain_occluders(ctx, &enc);
+            super::scene::draw_river_rain(ctx, &enc);
             enc.endEncoding();
         }
     }

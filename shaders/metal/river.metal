@@ -12,8 +12,6 @@
 // Уровень воды демо: глубина гидрологии × 3 (тот же множитель — в
 // `app::raft::LEVEL_SCALE`).
 constant float LEVEL_SCALE = 3.0;
-// Наименьшая глубина демо, м (ручьи по гидрологии — сантиметры).
-constant float LEVEL_MIN_M = 3.9;
 
 struct RiverOut {
     float4 position [[position]];
@@ -25,13 +23,10 @@ struct RiverOut {
     float depth;      // глубина, м
 };
 
-vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
-                         constant FrameUniforms& frame [[buffer(1)]],
-                         device const FeatureSegment* segs [[buffer(2)]],
-                         device const float* heights [[buffer(6)]],
-                         device const float* zone_heights [[buffer(7)]],
-                         constant TerrainZone& zone [[buffer(8)]],
-                         device const float2* levels [[buffer(5)]]) {
+static RiverOut river_vertex(uint vid, uint iid, constant FrameUniforms& frame,
+                             device const FeatureSegment* segs, device const float* heights,
+                             device const float* zone_heights, constant TerrainZone& zone,
+                             device const float4* levels) {
     RiverOut o;
     FeatureSegment s = segs[iid];
     float dcam = distance(0.5 * (s.a + s.b), frame.camera_pos.xz);
@@ -49,7 +44,9 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     // Лента шире на подъём воды над дном (откос ~0,4): край воды задаёт
     // пересечение с берегом (растворение по глубине под пикселем), а не
     // прямой срез ленты.
-    float hw = s.half_width + s._pad.x + max(s._pad.y * LEVEL_SCALE, LEVEL_MIN_M) * 2.5;
+    // Глубина демо — с CPU (`Hydrology::demo_depth`: на крутых ручьях мала).
+    float depth = max(levels[iid].z, 0.1);
+    float hw = s.half_width + s._pad.x + depth * 2.5;
     bool has_prev = iid > 0 && segs[iid - 1].kind == 1u && all(abs(segs[iid - 1].b - a) < 0.01);
     bool has_next = segs[iid + 1].kind == 1u && all(abs(segs[iid + 1].a - b) < 0.01);
     uint corner = vid % 6u;
@@ -79,14 +76,13 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     float hb = ground_height(b, heights, zone_heights, zone, frame);
     // Течение — от высокого конца к низкому.
     float2 flow = hb > ha ? -dir : dir;
-    float depth = max(s._pad.y * LEVEL_SCALE, LEVEL_MIN_M);
     // Поверхность — над дном оси: запас 12 см, рельеф на GPU (сглаживание,
     // шум участка детализации, упрощение вдали) выше поля высот на сантиметры.
     // Рельеф между концами может выпирать над прямой (ложе врезано
     // ступенями): уровень — не ниже середины отрезка.
     // Уровень воды — профиль с CPU (`Hydrology::levels`): плёсы ровные и
     // горизонтальные, перепады — водопады и сливы.
-    float2 lv = levels[iid];
+    float4 lv = levels[iid];
     // Не ниже рельефа GPU + глубина: дно профиля — поле высот CPU, а рельеф
     // на GPU (детализация зоны, шум) у русла выше на десятки сантиметров —
     // вода выходила тонкой плёнкой и уходила под кочки. Над ямами профиль
@@ -113,15 +109,42 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     // границам отрезков.
     float sl = abs(lv.x - lv.y) / max(len, 0.5);
     if (v < 0.5 && has_prev) {
-        float2 pl = levels[iid - 1];
+        float4 pl = levels[iid - 1];
         sl = 0.5 * (sl + abs(pl.x - pl.y) / max(length(a - segs[iid - 1].a), 0.5));
     } else if (v > 0.5 && has_next) {
-        float2 nl = levels[iid + 1];
+        float4 nl = levels[iid + 1];
         sl = 0.5 * (sl + abs(nl.x - nl.y) / max(length(segs[iid + 1].b - b), 0.5));
     }
     o.slope = sl;
     o.depth = depth;
     return o;
+}
+
+vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                         constant FrameUniforms& frame [[buffer(1)]],
+                         device const FeatureSegment* segs [[buffer(2)]],
+                         device const float* heights [[buffer(6)]],
+                         device const float* zone_heights [[buffer(7)]],
+                         constant TerrainZone& zone [[buffer(8)]],
+                         device const float4* levels [[buffer(5)]]) {
+    return river_vertex(vid, iid, frame, segs, heights, zone_heights, zone, levels);
+}
+
+// Поверхность реки в карте укрытия от дождя (04.3): капли бьются о воду
+// (брызги на реке), а дно под ней — «под крышей» (без луж под рекой).
+vertex float4 river_rain_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                            constant FrameUniforms& frame [[buffer(1)]],
+                            device const FeatureSegment* segs [[buffer(2)]],
+                            device const float* heights [[buffer(6)]],
+                            device const float* zone_heights [[buffer(7)]],
+                            constant TerrainZone& zone [[buffer(8)]],
+                            device const float4* levels [[buffer(5)]],
+                            constant float4x4& rain_vp [[buffer(12)]]) {
+    RiverOut o = river_vertex(vid, iid, frame, segs, heights, zone_heights, zone, levels);
+    if (o.position.z < -1.0) {
+        return o.position;
+    }
+    return rain_vp * float4(camera_relative(frame, o.world), 1.0);
 }
 
 fragment float4 river_fs(RiverOut in [[stage_in]],
@@ -134,6 +157,26 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
                          constant TerrainZone& zone [[buffer(8)]]) {
     constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
     float t = frame.time;
+    if (frame.underwater_m > 0.0 && frame.camera_pos.y < in.world.y) {
+        // Поверхность снизу (как у моря, `water.metal`): в окне Снелла
+        // (~48,6° от вертикали) — преломлённое небо, дальше — полное
+        // внутреннее отражение толщи.
+        float3 I = normalize(in.world - frame.camera_pos.xyz);
+        float2 rp = (detail.sample(s, (in.world.xz - floor(frame.camera_pos.xz / 256.0) * 256.0) / 2.0
+                                   + float2(0.03, 0.02) * t).rg - 0.5) * 0.25;
+        float3 Nd = -normalize(float3(rp.x, 1.0, rp.y));
+        float3 Rf = refract(I, Nd, 1.33);
+        float light = underwater_light(skyf);
+        float3 c;
+        if (dot(Rf, Rf) < 1e-6) {
+            c = UW_COLOR * 0.6 * light;
+        } else {
+            float F = 0.02 + 0.98 * pow(1.0 - saturate(dot(-I, Nd)), 5.0);
+            c = sky_ambient_term(skyf, Rf) * (1.0 - F) + UW_COLOR * light * F;
+        }
+        c = underwater_fog(c, length(in.world - frame.camera_pos.xyz), frame.underwater_m, light);
+        return float4(c * frame.pre_exposure, 1.0);
+    }
     float slope = saturate(in.slope);
     // Скорость: перекат и скат — быстро, плёс — медленно.
     float speed = clamp(0.4 + sqrt(slope) * 6.0, 0.4, 5.0);
@@ -232,7 +275,9 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     // Взвесь не только гасит, но и рассеивает свет: мутная вода светлая,
     // голубовато-бирюзовая (доля мутности в ослаблении ~0,7).
     scatter = mix(scatter, float3(0.035, 0.085, 0.095) * (sun * 0.4 * saturate(L.y) + sky_up * sky_in) * 2.6, 0.45);
-    float3 water = refl * fres + scatter * (1.0 - T) * (1.0 - fres);
+    // Толща в ущелье затенена склонами и кронами (видимость неба ниже, чем
+    // у моря): рассеяние ×0,6 — вода не светлее леса вокруг.
+    float3 water = refl * fres + scatter * 0.6 * (1.0 - T) * (1.0 - fres);
     float opacity = saturate(1.0 - dot(T, float3(0.33)) * (1.0 - fres));
     // Край ленты растворяется — без резкой границы на берегу.
     // Край: вода растворяется к береговой линии (глубина под пикселем → 0)

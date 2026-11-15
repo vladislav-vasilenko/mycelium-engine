@@ -881,6 +881,9 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
     }
     if (frame.underwater_m <= 0.0) {
         color = apply_aerial(aerial, frame, in.rel, color);
+    } else {
+        // Под водой реки или моря: дымка толщи (растения в разливе).
+        color = underwater_fog(color, length(in.rel), frame.underwater_m, underwater_light(skyf));
     }
     return float4(color * frame.pre_exposure, 1.0);
 }

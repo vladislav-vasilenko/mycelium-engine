@@ -73,7 +73,7 @@ pub struct App {
     /// Демо-сплав по реке (`--raft`).
     raft: Option<raft::Raft>,
     /// Уровень воды рек на концах отрезков (03.2), обновляется с разливом.
-    river_levels: Vec<[f32; 2]>,
+    river_levels: Vec<[f32; 4]>,
     /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
     grade: bool,
     taa_frame: u32,
@@ -225,7 +225,10 @@ impl App {
         }
         // Демо-сплав (03.2): от ближайшей реки вниз по течению.
         let raft = if args.raft {
-            let r = raft::Raft::new(&world, &hydrology, sim.curr.position);
+            let r = raft::Raft::new(&world, &hydrology, sim.curr.position).map(|mut r| {
+                r.dive = args.dive;
+                r
+            });
             if r.is_none() {
                 eprintln!("сплав: реки рядом нет");
             }

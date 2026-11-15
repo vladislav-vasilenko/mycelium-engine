@@ -20,6 +20,8 @@ pub struct Raft {
     s: f32,
     y: f32,
     t: f32,
+    /// Нырок (клавиша Z): глаза на 1,5 м под водой.
+    pub dive: bool,
 }
 
 impl Raft {
@@ -86,12 +88,13 @@ impl Raft {
             s: best.1,
             y: start.y,
             t: 0.0,
+            dive: false,
         })
     }
 
     /// Точка и уровень воды на расстоянии `s` вдоль пути (`levels` —
     /// `Hydrology::levels`, тот же профиль, что рисует реку).
-    fn at(&self, s: f32, levels: &[[f32; 2]]) -> (Vec2, f32) {
+    fn at(&self, s: f32, levels: &[[f32; 4]]) -> (Vec2, f32) {
         let lv = |e: &(Vec2, usize, usize)| levels.get(e.1).map_or(0.0, |l| l[e.2]);
         let mut acc = 0.0;
         for w in self.path.windows(2) {
@@ -110,7 +113,7 @@ impl Raft {
     }
 
     /// Шаг сплава на `dt` реальных секунд; возвращает камеру.
-    pub fn step(&mut self, world: &World, dt: f32, levels: &[[f32; 2]]) -> CameraState {
+    pub fn step(&mut self, world: &World, dt: f32, levels: &[[f32; 4]]) -> CameraState {
         self.t += dt;
         let ground = |p: Vec2| world.sample_ground(p.x, p.y).map_or(0.0, |g| g.height);
         let (p, water0) = self.at(self.s, levels);
@@ -125,7 +128,8 @@ impl Raft {
         } else {
             ground(p) + 0.5
         };
-        let target = water + EYE_M + (self.t * 1.7).sin() * 0.06;
+        let eye = if self.dive { -1.5 } else { EYE_M };
+        let target = water + eye + (self.t * 1.7).sin() * 0.06;
         self.y += (target - self.y) * (1.0 - (-dt * 4.0).exp());
         let (look, water_look) = self.at(self.s + 14.0, levels);
         let eye = Vec3::new(p.x, self.y, p.y);

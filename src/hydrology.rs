@@ -265,14 +265,25 @@ impl Hydrology {
     /// заполняются до кромки следующего порога (плёсы), перепады дна больше
     /// глубины остаются скатами; затем сглаживание с теми же ограничениями
     /// (не ниже дна + половина глубины, не в гору). `scale` — множитель глубины.
-    pub fn levels(&self, segment_count: usize, scale: f32) -> Vec<[f32; 2]> {
-        let mut out = vec![[0.0; 2]; segment_count];
+    /// Глубина демо участка, м: гидрология × `scale`, не меньше
+    /// `LEVEL_MIN_M` на равнинных реках; на крутых ручьях подъём падает (на
+    /// уклоне от 12 % — десятая часть): 4 м воды поперёк склона висели над
+    /// откосом.
+    pub fn demo_depth(r: &Reach, scale: f32) -> f32 {
+        let k = (1.0 - (r.slope - 0.03) * 10.0).clamp(0.1, 1.0);
+        (r.depth * scale).max(LEVEL_MIN_M * k)
+    }
+
+    /// Возвращает на отрезок `[уровень a, уровень b, глубина демо, 0]`.
+    pub fn levels(&self, segment_count: usize, scale: f32) -> Vec<[f32; 4]> {
+        let mut out = vec![[0.0; 4]; segment_count];
         for r in &self.reaches {
             let segs: Vec<usize> = r.segs.clone().filter(|&i| i < self.bed.len()).collect();
             if segs.is_empty() {
                 continue;
             }
-            let d = (r.depth * scale).max(LEVEL_MIN_M) + 0.12;
+            let dd = Self::demo_depth(r, scale);
+            let d = dd + 0.12;
             // Точки линии: a каждого отрезка и b последнего.
             let mut bed: Vec<f32> = segs.iter().map(|&i| self.bed[i][0]).collect();
             bed.push(self.bed[segs[segs.len() - 1]][1]);
@@ -317,10 +328,43 @@ impl Hydrology {
                 *x = x.max(crate::world::generator::SEA_LEVEL + 0.05);
             }
             for (j, &i) in segs.iter().enumerate() {
-                out[i] = [w[j], w[j + 1]];
+                out[i] = [w[j], w[j + 1], dd, 0.0];
             }
         }
         out
+    }
+
+    /// Уровень воды реки над точкой `p` (м) — по профилю `levels`
+    /// (`Hydrology::levels`), если точка в полосе разлива реки (полуширина +
+    /// подъём × 2,5, как у ленты в `river.metal`) и рельеф под ней ниже уровня.
+    pub fn level_at(
+        &self,
+        set: &FeatureSet,
+        levels: &[[f32; 4]],
+        p: Vec2,
+        ground: f32,
+    ) -> Option<f32> {
+        let mut best: Option<(f32, f32)> = None;
+        for r in &self.reaches {
+            for i in r.segs.clone() {
+                let (Some(s), Some(lv)) = (set.segments.get(i), levels.get(i)) else {
+                    continue;
+                };
+                let reach = lv[2] * 2.5;
+                let (a, b) = (Vec2::from(s.a), Vec2::from(s.b));
+                let ab = b - a;
+                let t = ((p - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+                let d = p.distance(a + ab * t);
+                if d > s.half_width + reach {
+                    continue;
+                }
+                let w = lv[0] + (lv[1] - lv[0]) * t;
+                if w > ground && best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, w));
+                }
+            }
+        }
+        best.map(|(_, w)| w)
     }
 
     /// Участок, ближайший к точке (подпись в заголовке), и расстояние, м.

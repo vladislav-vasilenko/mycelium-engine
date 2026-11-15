@@ -513,3 +513,39 @@ fn draw_water(ctx: &PassCtx, enc: &RenderEncoder) {
     }
     enc.popDebugGroup();
 }
+
+/// Поверхность рек в карте укрытия от дождя (03.2): капли бьются о воду, дно
+/// под рекой — без луж. Вызывается из прохода теней (`shadows.rs`).
+pub(in crate::renderer) fn draw_river_rain(ctx: &PassCtx, enc: &RenderEncoder) {
+    let (Some(t), Some(c), Some(levels)) = (
+        ctx.r.terrain.as_ref(),
+        ctx.r.clusters.as_ref(),
+        ctx.r.river_levels.as_ref(),
+    ) else {
+        return;
+    };
+    let n = t.feat_segments.length() / std::mem::size_of::<crate::layout::FeatureSegment>();
+    let table = ctx.slot.table(Table::RiverRain);
+    unsafe {
+        table.setAddress_atIndex(ctx.upload_addr, 1);
+        table.setAddress_atIndex(t.feat_segments.gpuAddress(), 2);
+        table.setAddress_atIndex(levels.gpuAddress(), 5);
+        table.setAddress_atIndex(c.heights.gpuAddress(), 6);
+        table.setAddress_atIndex(c.zone_heights.gpuAddress(), 7);
+        table.setAddress_atIndex(c.zone_info.gpuAddress(), 8);
+        table.setAddress_atIndex(
+            ctx.upload_addr + (crate::renderer::frame::SHADOW_OFFSET + 304) as u64,
+            12,
+        );
+    }
+    enc.setRenderPipelineState(&ctx.r.pipelines.river_rain);
+    enc.setArgumentTable_atStages(table, MTLRenderStages::Vertex);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+            MTLPrimitiveType::Triangle,
+            0,
+            6,
+            n,
+        );
+    }
+}

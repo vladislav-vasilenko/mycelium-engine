@@ -107,6 +107,20 @@ impl App {
             }
             _ => 0.0,
         };
+        // Под водой реки (03.2): глаза ниже уровня разлива над точкой.
+        let underwater_m = match self.world.features.as_ref() {
+            Some(f) if !selftest && !self.river_levels.is_empty() => {
+                let p = glam::Vec2::new(camera.position.x, camera.position.z);
+                let g = self
+                    .world
+                    .sample_ground(p.x, p.y)
+                    .map_or(f32::MIN, |g| g.height);
+                self.hydrology
+                    .level_at(f, &self.river_levels, p, g)
+                    .map_or(underwater_m, |w| underwater_m.max(w - camera.position.y))
+            }
+            _ => underwater_m,
+        };
         let Some((w, h)) = self.renderer.as_ref().and_then(|r| r.size()) else {
             if let Some(r) = self.renderer.as_mut() {
                 r.collect_completed();

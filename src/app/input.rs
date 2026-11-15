@@ -71,6 +71,12 @@ impl App {
                 self.game.inspect(&cam);
             }
             KeyCode::KeyJ => self.game.journal_open = !self.game.journal_open,
+            // Сплав (03.2): нырнуть / всплыть.
+            KeyCode::KeyZ if self.raft.is_some() => {
+                if let Some(r) = self.raft.as_mut() {
+                    r.dive = !r.dive;
+                }
+            }
             // Кинематографичная обработка (04.5): вкл./выкл. для сравнения.
             KeyCode::KeyK => {
                 self.grade = !self.grade;

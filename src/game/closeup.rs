@@ -1,5 +1,6 @@
 //! Макро-осмотр гриба (05.2): F на грибе — герой приседает, камера плавно
-//! опускается к шляпке на ~30 см, угол обзора сужается до макро; мышь
+//! опускается до глаз сидящего на корточках (0,6 м над землёй, 0,45 м от
+//! гриба), угол обзора сужается до макро; мышь
 //! слегка поворачивает взгляд вокруг гриба. Запись в журнал — когда
 //! присел. Повторное F — встать.
 
@@ -12,6 +13,10 @@ use crate::world::{Ground, World};
 /// Время приседания и подъёма, с.
 const DOWN_S: f32 = 0.9;
 const UP_S: f32 = 0.6;
+/// Глаза сидящего на корточках: над землёй и от гриба по горизонтали, м.
+/// Крупный план даёт узкий угол обзора, а не близость камеры.
+const CROUCH_EYE_M: f32 = 0.6;
+const CROUCH_BACK_M: f32 = 0.45;
 /// Угол обзора стоя и в макро, градусы.
 pub const FOV_DEG: f32 = 70.0;
 pub const MACRO_FOV_DEG: f32 = 30.0;
@@ -100,13 +105,13 @@ impl Game {
         if to.length_squared() < 1e-4 {
             to = Vec2::new(-cam.yaw.sin(), -cam.yaw.cos());
         }
-        let back = to.normalize() * 0.30 * s;
+        let back = to.normalize() * CROUCH_BACK_M;
         let ex = m.position.x - back.x;
         let ez = m.position.z - back.y;
         let ground = world
             .sample_ground(ex, ez)
             .map_or(m.position.y, |g| g.height);
-        let eye = Vec3::new(ex, (ground + 0.09).max(center.y + 0.05 * s), ez);
+        let eye = Vec3::new(ex, (ground + CROUCH_EYE_M).max(center.y + 0.2 * s), ez);
         let d = (center - eye).normalize();
         let yaw0 = (-d.x).atan2(-d.z);
         let pitch0 = d.y.asin();

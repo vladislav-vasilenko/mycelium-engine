@@ -83,7 +83,7 @@ def moss_cushion(lod, seed=0x3055):
                 h = A * (1 - u * u) - 0.05 * u
                 d = np.array([math.cos(th), 0, math.sin(th)])
                 n = d * (2 * A * u / R) + np.array([0, 1.0, 0])
-                row.append(m.vert(c + d * r + np.array([0, h, 0]), n, (0, 0), SOIL, 0.1, 0.8 + 0.2 * (1 - u), 1.0))
+                row.append(m.vert(c + d * r + np.array([0, h, 0]), n, (0, 0), SOIL, 0.0, 0.45 + 0.2 * (1 - u), 1.0))
             ids.append(row)
         for a, bb in zip(ids, ids[1:]):
             for s in range(sides):

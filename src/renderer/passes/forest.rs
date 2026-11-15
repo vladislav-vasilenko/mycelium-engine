@@ -89,6 +89,16 @@ impl FramePass for ForestPass {
     }
 }
 
+/// Поле высот для драпировки растений по рельефу (02.10): буферы 6–8.
+fn bind_ground(ctx: &PassCtx, table: &objc2::runtime::ProtocolObject<dyn MTL4ArgumentTable>) {
+    let c = ctx.r.clusters.as_ref().unwrap();
+    unsafe {
+        table.setAddress_atIndex(c.heights.gpuAddress(), 6);
+        table.setAddress_atIndex(c.zone_heights.gpuAddress(), 7);
+        table.setAddress_atIndex(c.zone_info.gpuAddress(), 8);
+    }
+}
+
 fn list_addr(ctx: &PassCtx, list: usize) -> u64 {
     let f = ctx.r.forest.as_ref().unwrap();
     f.instances[ctx.slot_index].gpuAddress()
@@ -134,6 +144,7 @@ pub(in crate::renderer) fn draw_scene(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(t.albedo.gpuResourceID(), 3);
         table.setTexture_atIndex(f.bark_normal.gpuResourceID(), 4);
     }
+    bind_ground(ctx, table);
     enc.pushDebugGroup(&label("forest: plants (indirect)"));
     enc.setRenderPipelineState(&ctx.r.pipelines.plant);
     enc.setCullMode(MTLCullMode::None);
@@ -156,6 +167,7 @@ pub(in crate::renderer) fn draw_shadow(ctx: &PassCtx, enc: &RenderEncoder, k: us
         table.setAddress_atIndex(ctx.upload_addr + (SHADOW_OFFSET + k * 64) as u64, 5);
         table.setTexture_atIndex(f.albedo.gpuResourceID(), 0);
     }
+    bind_ground(ctx, table);
     enc.setRenderPipelineState(&ctx.r.pipelines.plant_shadow);
     for list in CAMERA_LISTS..PROPS_LIST {
         draw_list(ctx, enc, table, list);

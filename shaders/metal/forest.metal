@@ -328,11 +328,11 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         if (fd.road < 1.5 || fd.river < 0.3 || (species == SPECIES_MOSS && fd.trail < 0.8)) {
             continue;
         }
-        // Сетки сора и мха плоские: на склоне круче ~20° концы повисли бы
-        // в воздухе — там их нет; основание чуть утоплено.
+        // Сор и мох ложатся по рельефу (драпировка в `plant_world`); на
+        // осыпях круче ~35° их нет.
         float gx = ground_height(p + float2(0.7, 0), heights, zone_heights, zone, frame) - y;
         float gz = ground_height(p + float2(0, 0.7), heights, zone_heights, zone, frame) - y;
-        if (length(float2(gx, gz)) / 0.7 > 0.36) {
+        if (length(float2(gx, gz)) / 0.7 > 0.7) {
             continue;
         }
         float scale = 0.6 + 0.6 * rnd(h, 5);
@@ -394,8 +394,15 @@ struct PlantOut {
 };
 
 // Мир точки сетки растения: поворот, масштаб, ветер (по силе из атрибута).
+// Поле высот для «драпировки» растений по рельефу (02.10).
+struct PlantGround {
+    device const float* heights;
+    device const float* zone_heights;
+    constant TerrainZone& zone;
+};
+
 static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUniforms& frame,
-                          thread float3& n) {
+                          PlantGround g, thread float3& n) {
     float c = cos(inst.yaw), s = sin(inst.yaw);
     float3 p = float3(v.position);
     // Своя форма у каждого экземпляра (02.4, итерация 4): вытянутость,
@@ -413,23 +420,50 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     float w = float(v.attr.y) / 255.0;
     float t = frame.time;
     float2 dir = normalize(float2(0.8, 0.6));
-    float sway = (sin(t * 0.9 + inst.phase) * 0.6 + sin(t * 2.3 + inst.phase * 1.7) * 0.25) * w * w;
-    float flutter = sin(t * 7.0 + dot(q, float3(1.3, 0.7, 1.1))) * 0.05 * w;
+    // Порывы (02.10): сила ветра медленно меняется во времени и по месту —
+    // бывают паузы; соседние растения качаются не в такт.
+    float2 bp = float2(inst.position.x, inst.position.z);
+    float gust = mix(0.15, 1.0, saturate(0.5 + 0.6 * sin(t * 0.21 + bp.x * 0.013) * cos(t * 0.13 + bp.y * 0.011)));
+    float sway = (sin(t * 0.9 + inst.phase) * 0.6 + sin(t * 2.3 + inst.phase * 1.7) * 0.25) * w * w * gust;
+    // Дрожание вдоль нормали — только листве: у трубок ветвей нормали
+    // радиальные, и ветви «дышали» бы (02.10).
+    float mat = float(v.attr.x);
+    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
+    float fph = dot(q, float3(1.3, 0.7, 1.1)) + inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
+    float flutter = leafy ? sin(t * (5.0 + 3.0 * fract(inst.phase)) + fph) * 0.035 * w * gust * gust : 0.0;
     // Раскачка растёт с высотой точки: верх кроны качается, папоротник — едва.
     q.xz += dir * sway * inst.scale * 0.9 * saturate(q.y / 8.0);
     q += n * flutter;
-    return float3(inst.position) + q;
+    float3 world = float3(inst.position) + q;
+    // Драпировка (02.10): нижние ~0,6 м сетки — сор, листья, мох, бугор у
+    // корней, основание ствола — повторяют рельеф под каждой вершиной, а не
+    // плоскость основания; нормаль доворачивается по склону.
+    float wd = 1.0 - smoothstep(0.1, 0.7, q.y);
+    if (wd > 0.0) {
+        float3 base = float3(inst.position);
+        float sink = max(base.y - ground_height(base.xz, g.heights, g.zone_heights, g.zone, frame), -0.08);
+        float h0 = ground_height(world.xz, g.heights, g.zone_heights, g.zone, frame);
+        float hx = ground_height(world.xz + float2(0.5, 0), g.heights, g.zone_heights, g.zone, frame);
+        float hz = ground_height(world.xz + float2(0, 0.5), g.heights, g.zone_heights, g.zone, frame);
+        world.y = mix(world.y, h0 + sink + q.y, wd);
+        float2 grad = float2(hx - h0, hz - h0) / 0.5;
+        n = normalize(n + float3(-grad.x, 0.0, -grad.y) * max(n.y, 0.0) * wd);
+    }
+    return world;
 }
 
 vertex PlantOut plant_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
                          device const PlantVertex* verts [[buffer(0)]],
                          constant FrameUniforms& frame [[buffer(1)]],
-                         device const PlantInstance* insts [[buffer(2)]]) {
+                         device const PlantInstance* insts [[buffer(2)]],
+                         device const float* heights [[buffer(6)]],
+                         device const float* zone_heights [[buffer(7)]],
+                         constant TerrainZone& zone [[buffer(8)]]) {
     PlantVertex v = verts[vid];
     PlantInstance inst = insts[iid];
     PlantOut o;
     float3 n;
-    o.world = plant_world(v, inst, frame, n);
+    o.world = plant_world(v, inst, frame, PlantGround{heights, zone_heights, zone}, n);
     o.rel = camera_relative(frame, o.world);
     o.position = frame.view_proj_rel * float4(o.rel, 1.0);
     o.normal = n;
@@ -574,10 +608,13 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
                                       device const PlantVertex* verts [[buffer(0)]],
                                       constant FrameUniforms& frame [[buffer(1)]],
                                       device const PlantInstance* insts [[buffer(2)]],
-                                      constant float4x4& cascade_vp [[buffer(5)]]) {
+                                      constant float4x4& cascade_vp [[buffer(5)]],
+                                      device const float* heights [[buffer(6)]],
+                                      device const float* zone_heights [[buffer(7)]],
+                                      constant TerrainZone& zone [[buffer(8)]]) {
     PlantVertex v = verts[vid];
     float3 n;
-    float3 world = plant_world(v, insts[iid], frame, n);
+    float3 world = plant_world(v, insts[iid], frame, PlantGround{heights, zone_heights, zone}, n);
     PlantShadowOut o;
     o.position = cascade_vp * float4(camera_relative(frame, world), 1.0);
     o.uv = float2(v.uv);

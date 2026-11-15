@@ -296,8 +296,7 @@ impl Renderer {
         if width == 0 || height == 0 {
             // Свёрнутое окно: цели оставляем, вывод пропускается.
             if let Some(t) = self.targets.take() {
-                let [h0, h1] = t.history;
-                self.retire(vec![t.hdr, t.depth, h0, h1], None);
+                self.retire(t.textures(), None);
             }
             return;
         }
@@ -307,15 +306,12 @@ impl Renderer {
         self.layer
             .setDrawableSize(objc2_foundation::NSSize::new(width as f64, height as f64));
         let fresh = Targets::new(&self.device, width, height);
-        self.residency.addAllocation(as_allocation(&*fresh.hdr));
-        self.residency.addAllocation(as_allocation(&*fresh.depth));
-        for h in &fresh.history {
-            self.residency.addAllocation(as_allocation(&**h));
+        for t in fresh.textures() {
+            self.residency.addAllocation(as_allocation(&*t));
         }
         self.residency.commit();
         if let Some(old) = self.targets.replace(fresh) {
-            let [h0, h1] = old.history;
-            self.retire(vec![old.hdr, old.depth, h0, h1], None);
+            self.retire(old.textures(), None);
         }
     }
 

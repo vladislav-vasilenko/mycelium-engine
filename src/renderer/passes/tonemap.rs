@@ -31,6 +31,13 @@ impl FramePass for TonemapPass {
             table.setAddress_atIndex(ctx.upload_addr, 1);
             table.setAddress_atIndex(ctx.r.sky.state.gpuAddress(), 2);
             table.setTexture_atIndex(ctx.targets.hdr.gpuResourceID(), 0);
+            // Без bloom на его месте сам кадр: смесь в тонмаппинге ничего не меняет.
+            let bloom = if ctx.input.bloom {
+                &ctx.targets.bloom_up[0]
+            } else {
+                &ctx.targets.hdr
+            };
+            table.setTexture_atIndex(bloom.gpuResourceID(), 1);
         }
         enc.setRenderPipelineState(&ctx.r.pipelines.tonemap);
         enc.setArgumentTable_atStages(table, MTLRenderStages::Vertex | MTLRenderStages::Fragment);

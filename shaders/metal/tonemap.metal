@@ -25,13 +25,19 @@ inline float3 aces(float3 x) {
 fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
                            constant FrameUniforms& frame [[buffer(1)]],
                            device const float4* exposure_state [[buffer(2)]],
-                           texture2d<float> hdr [[texture(0)]]) {
+                           texture2d<float> hdr [[texture(0)]],
+                           texture2d<float> bloom [[texture(1)]]) {
     constexpr sampler s(filter::nearest, address::clamp_to_edge);
     // exposure > 0 — фиксированная; иначе — автоэкспозиция неба (04.1).
     // HDR уже умножен на предэкспозицию кадра: делим её обратно.
     float e = frame.exposure > 0.0 ? frame.exposure
                                    : exposure_state[0].x / max(frame.pre_exposure, 1e-9);
-    float3 c = hdr.sample(s, in.uv).rgb * e;
+    // Bloom (04.5): цепочка суммирует 6 уровней — делим на их число и
+    // подмешиваем 4 % (рассеяние в оптике); без bloom здесь тот же кадр.
+    constexpr sampler bs(filter::linear, address::clamp_to_edge);
+    float3 scene = hdr.sample(s, in.uv).rgb;
+    float3 glow = bloom.sample(bs, in.uv).rgb;
+    float3 c = mix(scene, glow * (bloom.get_width() == hdr.get_width() ? 1.0 : 1.0 / 6.0), 0.04) * e;
     // Сумеречное зрение (эффект Пуркинье): при низкой яркости сцены работают
     // палочки — цвета блёкнут и уходят в синеву. Средняя яркость — из замера.
     if (frame.exposure <= 0.0) {

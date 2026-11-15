@@ -609,7 +609,7 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float ao = in.attr.z;
     float3 sky = sky_ambient_term(skyf, n) * ao;
     // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
-    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.14 * float3(0.75, 0.85, 0.6);
+    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.24 * float3(0.75, 0.85, 0.6);
     float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {
         // Просвет листвы против солнца.
@@ -654,7 +654,7 @@ fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
     if (leafy && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
         discard_fragment();
     }
-    // Листва пропускает часть света (02.10): 40 % текселей карточки не
+    // Листва пропускает часть света (02.10): 55 % текселей карточки не
     // затеняют — после PCF тень кроны пятнистая и неполная, а не чёткий
     // силуэт веточки.
     if (leafy) {
@@ -662,7 +662,7 @@ fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
         uint h = (px.x * 0x8da6b343u) ^ (px.y * 0xd8163841u);
         h ^= h >> 13;
         h *= 0x7feb352du;
-        if (float(h >> 8) / 16777216.0 < 0.4) {
+        if (float(h >> 8) / 16777216.0 < 0.55) {
             discard_fragment();
         }
     }

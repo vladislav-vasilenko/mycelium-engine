@@ -170,9 +170,9 @@ impl App {
             p.z_axis.x -= j.x;
             p.z_axis.y -= j.y;
             let vp0 = proj0 * rot;
-            let prev = self.taa_prev.filter(|(_, c, size)| {
-                *size == (w, h) && c.distance(camera.position) < 5.0
-            });
+            let prev = self
+                .taa_prev
+                .filter(|(_, c, size)| *size == (w, h) && c.distance(camera.position) < 5.0);
             let u = crate::layout::TaaUniforms {
                 inv_view_proj_rel: vp0.inverse().to_cols_array_2d(),
                 prev_view_proj_rel: prev.map_or(vp0, |(m, ..)| m).to_cols_array_2d(),
@@ -308,7 +308,17 @@ impl App {
             }
             renderer::CullFrame { views }
         });
-        let shadows = cascades.map(|(s, _)| s);
+        // Поворот диска мягких теней меняется каждый кадр, TAA усредняет шум
+        // (04.5); без TAA — 0, диск неподвижен.
+        let shadow_seed = if taa.is_some() {
+            (self.taa_frame % 64) as f32 + 1.0
+        } else {
+            0.0
+        };
+        let shadows = cascades.map(|(mut s, _)| {
+            s.uniforms.params[3] = shadow_seed;
+            s
+        });
         let instances = match self.scene {
             SceneMode::Cubes => scene::instances().to_vec(),
             SceneMode::Terrain => marker_posts(&self.world),
@@ -346,6 +356,9 @@ impl App {
             props: &props,
             ui: &ui_verts,
             taa,
+            bloom: !selftest
+                && self.scene == SceneMode::Terrain
+                && self.view_mode == TerrainView::Lit,
             sky: sky.as_ref().map(|s| s.inputs),
         });
         if readback && outcome != FrameOutcome::Presented {

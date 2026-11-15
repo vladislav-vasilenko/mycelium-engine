@@ -52,6 +52,8 @@ const RES_CULL: ResourceId = ResourceId(10);
 const RES_FOREST: ResourceId = ResourceId(11);
 /// История временного сглаживания (04.5).
 const RES_TAA: ResourceId = ResourceId(12);
+/// Цепочка bloom (04.5).
+const RES_BLOOM: ResourceId = ResourceId(13);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -94,6 +96,8 @@ pub struct FrameInput<'a> {
     pub ui: &'a [crate::layout::UiVertex],
     /// Временное сглаживание (04.5): параметры перепроекции; `None` — выключено.
     pub taa: Option<crate::layout::TaaUniforms>,
+    /// Bloom (04.5): цепочка считается и подмешивается в тонмаппинге.
+    pub bloom: bool,
 }
 
 /// Вода в кадре (03.1).
@@ -134,9 +138,10 @@ pub(super) enum Table {
     PlantShadow,
     Ui,
     Taa,
+    Bloom,
 }
 
-const TABLE_NAMES: [&str; 20] = [
+const TABLE_NAMES: [&str; 21] = [
     "pattern",
     "scene",
     "readback",
@@ -157,6 +162,7 @@ const TABLE_NAMES: [&str; 20] = [
     "plant shadow",
     "ui",
     "taa",
+    "bloom",
 ];
 
 /// Слот кадра: свой аллокатор, командный буфер, таблицы аргументов и upload.
@@ -164,7 +170,7 @@ const TABLE_NAMES: [&str; 20] = [
 pub(super) struct FrameSlot {
     pub allocator: Obj<dyn MTL4CommandAllocator>,
     pub cmd: Obj<dyn MTL4CommandBuffer>,
-    tables: [Obj<dyn MTL4ArgumentTable>; 20],
+    tables: [Obj<dyn MTL4ArgumentTable>; 21],
     pub upload: Obj<dyn MTLBuffer>,
     /// Видимые кластеры рельефа кадра (u32), `MAX_VISIBLE_CLUSTERS`.
     pub visible: Obj<dyn MTLBuffer>,
@@ -206,7 +212,7 @@ impl FrameSlot {
             cmd,
             tables: tables
                 .try_into()
-                .unwrap_or_else(|_| unreachable!("20 таблиц")),
+                .unwrap_or_else(|_| unreachable!("21 таблиц")),
             upload,
             visible,
             signal_value: 0,
@@ -289,7 +295,10 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
         name: "taa",
         kind: PassKind::Compute,
         reads: vec![(RES_HDR, Stages::DISPATCH), (RES_DEPTH, Stages::DISPATCH)],
-        writes: vec![(RES_HDR, Stages::BLIT), (RES_TAA, Stages::DISPATCH | Stages::BLIT)],
+        writes: vec![
+            (RES_HDR, Stages::BLIT),
+            (RES_TAA, Stages::DISPATCH | Stages::BLIT),
+        ],
     });
     // Руки поверх сцены: пишут HDR и очищают глубину после копий readback.
     passes.push(PassDecl {
@@ -297,6 +306,13 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
         kind: PassKind::Render,
         reads: vec![(RES_SKY, Stages::FRAGMENT)],
         writes: vec![(RES_HDR, Stages::FRAGMENT), (RES_DEPTH, Stages::FRAGMENT)],
+    });
+    // Bloom (04.5) по готовому кадру с руками.
+    passes.push(PassDecl {
+        name: "bloom",
+        kind: PassKind::Compute,
+        reads: vec![(RES_HDR, Stages::DISPATCH)],
+        writes: vec![(RES_BLOOM, Stages::DISPATCH)],
     });
     // Замер экспозиции по готовому кадру (с руками) перед тонмаппингом.
     passes.push(PassDecl {
@@ -311,6 +327,7 @@ pub(super) fn frame_passes(readback: bool) -> Vec<PassDecl> {
         reads: vec![
             (RES_HDR, Stages::FRAGMENT),
             (RES_EXPOSURE, Stages::FRAGMENT),
+            (RES_BLOOM, Stages::FRAGMENT),
         ],
         writes: vec![(RES_DRAWABLE, Stages::FRAGMENT)],
     });

@@ -13,7 +13,14 @@ pub(super) struct Targets {
     pub depth: Obj<dyn MTLTexture>,
     /// История временного сглаживания (04.5): кадр пишет одну, читает другую.
     pub history: [Obj<dyn MTLTexture>; 2],
+    /// Bloom (04.5): цепочка вниз от половины кадра (`BLOOM_LEVELS` уровней)
+    /// и цепочка вверх (на уровень меньше); итог — `bloom_up[0]`.
+    pub bloom_down: Vec<Obj<dyn MTLTexture>>,
+    pub bloom_up: Vec<Obj<dyn MTLTexture>>,
 }
+
+/// Уровней цепочки bloom: от 1/2 до 1/64 кадра.
+pub const BLOOM_LEVELS: usize = 6;
 
 impl Targets {
     pub fn new(device: &ProtocolObject<dyn MTLDevice>, width: u32, height: u32) -> Targets {
@@ -43,12 +50,35 @@ impl Targets {
                 &format!("TAA history {k}"),
             )
         });
+        let level = |k: usize, kind: &str| {
+            private_texture(
+                device,
+                shaders::HDR_FORMAT,
+                (width >> (k + 1)).max(1),
+                (height >> (k + 1)).max(1),
+                MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+                &format!("bloom {kind} {k}"),
+            )
+        };
+        let bloom_down = (0..BLOOM_LEVELS).map(|k| level(k, "down")).collect();
+        let bloom_up = (0..BLOOM_LEVELS - 1).map(|k| level(k, "up")).collect();
         Targets {
             width,
             height,
             hdr,
             depth,
             history,
+            bloom_down,
+            bloom_up,
         }
+    }
+
+    /// Все текстуры целей (для резидентности и освобождения).
+    pub fn textures(&self) -> Vec<Obj<dyn MTLTexture>> {
+        let mut v = vec![self.hdr.clone(), self.depth.clone()];
+        v.extend(self.history.iter().cloned());
+        v.extend(self.bloom_down.iter().cloned());
+        v.extend(self.bloom_up.iter().cloned());
+        v
     }
 }

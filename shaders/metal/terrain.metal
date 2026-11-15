@@ -766,7 +766,11 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float F = 0.04 + 0.96 * pow(1.0 - saturate(dot(H, V)), 5.0);
     float spec = D * G * F / (4.0 * nv + 1e-4);
     // Тень от светила (04.2): каскады вокруг камеры и карта всего острова.
-    float shadow = shadow_factor(shadows, shadow_map, in.rel, normalize(in.normal), L);
+    // Карта теней рисует кластеры, а видна детальная заплатка (02.10) — она
+    // отличается на сантиметры-дециметры, и на скользящем свету треугольники
+    // кластеров затеняли её ромбами. Точку заплатки сдвигаем к свету на 25 см.
+    float3 srel = in.rel + (in.cluster == PATCH_CLUSTER ? L * 0.25 : float3(0.0));
+    float shadow = shadow_factor(shadows, shadow_map, srel, normalize(in.normal), L);
     // Мелкие складки, которые карта теней (21 м на тексель вдали) не ловит,
     // гасят и часть прямого света (02.9).
     float3 sun = sky_sun_term(skyf) * shadow * mix(1.0, sky_vis * (1.0 - 0.4 * hollow), 0.6);
@@ -781,7 +785,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // Блик — физический: BRDF × освещённость (π · «солнце»).
     // Отражённый свет (02.10, до GI этапа 11): освещённые склоны и кроны
     // подсвечивают тень — сильнее там, где неба видно мало.
-    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.16 * (1.0 - 0.5 * sky_vis) * mix(float3(1.0), float3(0.6, 0.75, 0.45), canopy_shade);
+    float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.30 * (1.0 - 0.5 * sky_vis) * mix(float3(1.0), float3(0.6, 0.75, 0.45), canopy_shade);
     float3 color = albedo * (sun * nl * sun_flecks + sky_c + bounce) + SKY_PI * sun * spec * sun_flecks;
     // Вода в русле до 03.2: тёмная толща, отражение неба по Френелю, блик солнца.
     if (stream > 0.0) {

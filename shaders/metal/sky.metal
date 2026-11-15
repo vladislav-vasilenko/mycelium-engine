@@ -352,19 +352,28 @@ fragment float4 sky_fs(SkyOut in [[stage_in]],
     return float4(col * frame.pre_exposure, 1.0);
 }
 
-// --- Экспозиция по кадру: логарифмическое среднее яркости HDR с плавной ------
-// адаптацией (глаз и камера меряют то, что видят, а не освещённость земли).
+// --- Экспозиция по кадру (04.5): гистограмма log₂ яркости (64 корзины от
+// 2⁻³⁶ до 2⁴), среднее между 50-м и 95-м процентилями (тени и блики не
+// тянут), центр кадра весомее; плавная адаптация.
 constant uint METER_THREADS = 256;
 constant uint2 METER_GRID = uint2(64, 36);
+constant uint HIST_BINS = 64;
+constant float HIST_LO = -36.0;
+constant float HIST_HI = 4.0;
 
 kernel void exposure_meter(texture2d<float> hdr [[texture(0)]],
                            constant FrameUniforms& frame [[buffer(1)]],
                            constant SkyInputs& sky [[buffer(2)]],
                            device float4* state [[buffer(4)]],
                            uint tid [[thread_index_in_threadgroup]]) {
-    threadgroup float3 acc[METER_THREADS];
+    threadgroup atomic_uint hist[HIST_BINS];
+    threadgroup float2 acc[METER_THREADS];
+    if (tid < HIST_BINS) {
+        atomic_store_explicit(&hist[tid], 0u, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     constexpr sampler s(filter::linear, address::clamp_to_edge);
-    float3 sum = 0.0;
+    float2 sum = 0.0;
     uint n = METER_GRID.x * METER_GRID.y;
     for (uint i = tid; i < n; i += METER_THREADS) {
         float2 uv = (float2(i % METER_GRID.x, i / METER_GRID.x) + 0.5) / float2(METER_GRID);
@@ -373,27 +382,43 @@ kernel void exposure_meter(texture2d<float> hdr [[texture(0)]],
         // Центр кадра весит больше (центрально-взвешенный замер).
         float2 d = uv - 0.5;
         float w = 1.0 + 2.0 * exp(-dot(d, d) * 12.0);
-        sum += float3(log(max(l, 1e-9)) * w, w, l * w);
+        float t = saturate((log2(max(l, 1e-12)) - HIST_LO) / (HIST_HI - HIST_LO));
+        uint bin = min(uint(t * float(HIST_BINS)), HIST_BINS - 1);
+        atomic_fetch_add_explicit(&hist[bin], uint(w * 16.0), memory_order_relaxed);
+        sum += float2(l * w, w);
     }
     acc[tid] = sum;
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid != 0) {
         return;
     }
-    float3 total = 0.0;
+    float2 total = 0.0;
     for (uint t = 0; t < METER_THREADS; ++t) {
         total += acc[t];
     }
-    float avg = exp(total.x / total.y);
-    // Ключ 0,22 днём — средний кадр в полутон; ночью ключ падает до 0,03:
-    // глаз адаптируется к темноте не полностью, ночь остаётся ночью.
+    // Среднее log₂ по корзинам между процентилями 50 и 95.
+    float all = 0.0;
+    for (uint b = 0; b < HIST_BINS; ++b) {
+        all += float(atomic_load_explicit(&hist[b], memory_order_relaxed));
+    }
+    float lo = 0.50 * all, hi = 0.95 * all;
+    float run = 0.0, lsum = 0.0, lw = 0.0;
+    for (uint b = 0; b < HIST_BINS; ++b) {
+        float cnt = float(atomic_load_explicit(&hist[b], memory_order_relaxed));
+        float take = max(min(run + cnt, hi) - max(run, lo), 0.0);
+        float center = HIST_LO + (float(b) + 0.5) / float(HIST_BINS) * (HIST_HI - HIST_LO);
+        lsum += center * take;
+        lw += take;
+        run += cnt;
+    }
+    float avg = exp2(lsum / max(lw, 1e-6));
+    // Ключ 0,18 днём — средний кадр (по светлой половине) в полутон; ночью
+    // ключ падает до 0,03: глаз адаптируется к темноте не полностью.
     float day = smoothstep(log(1e-6), log(3e-3), log(avg));
-    float key = mix(0.03, 0.22, day);
-    // Защита светов: тёмный лес с солнечными полянами — логарифмическое
-    // среднее тянет экспозицию вверх и выжигает освещённое. Среднее яркости
-    // (его тянут светлые места) после экспозиции — не больше 0,3.
-    float mean = total.z / total.y;
-    float target = clamp(min(key / avg, 0.3 / max(mean, 1e-9)), 0.5, 1e5);
+    float key = mix(0.03, 0.18, day);
+    // Защита светов: среднее яркости после экспозиции — не больше 0,35.
+    float mean = total.x / total.y;
+    float target = clamp(min(key / avg, 0.35 / max(mean, 1e-9)), 0.5, 1e5);
     float cur = state[0].x > 0.0 ? state[0].x : target;
     float k = 1.0 - exp(-sky.params.y / 0.8);
     cur = exp(mix(log(cur), log(target), k));

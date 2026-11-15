@@ -270,8 +270,15 @@ inline float shadow_factor(constant ShadowUniforms& sh, depth2d_array<float> map
     // Метры глубины света на единицу NDC — из матрицы каскада (ортографической).
     float3 zrow = float3(sh.vp_rel[c][0][2], sh.vp_rel[c][1][2], sh.vp_rel[c][2][2]);
     float m_per_ndc = 1.0 / max(abs(dot(zrow, to_light)), 1e-6);
-    // Диск без случайного поворота: без TAA (04.5) шум поворота виден мозаикой.
-    const float2x2 rot = float2x2(float2(1.0, 0.0), float2(0.0, 1.0));
+    // Поворот диска: с TAA (params.w > 0 — номер кадра) — случайный по
+    // экрану и новый каждый кадр, TAA усредняет шум в гладкую полутень; без
+    // TAA — неподвижный (иначе шум виден мозаикой).
+    float ang = 0.0;
+    if (sh.params.w > 0.0) {
+        float2 sp = floor(uv * size * 4.0);
+        ang = fract(sin(dot(sp, float2(12.9898, 78.233)) + sh.params.w * 0.618) * 43758.5453) * 6.2831853;
+    }
+    float2x2 rot = float2x2(float2(cos(ang), sin(ang)), float2(-sin(ang), cos(ang)));
     // Куда растёт глубина к свету: смещение `p` сдвинуто к свету — сравним
     // с несмещённой точкой (раскладка глубины карты не зашита в формулы).
     float4 clip0 = sh.vp_rel[c] * float4(rel, 1.0);

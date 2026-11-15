@@ -63,6 +63,9 @@ pub struct Pipelines {
     pub cull_finish: Obj<dyn MTLComputePipelineState>,
     /// Временное сглаживание (04.5).
     pub taa_resolve: Obj<dyn MTLComputePipelineState>,
+    /// Bloom (04.5): цепочки вниз и вверх.
+    pub bloom_down: Obj<dyn MTLComputePipelineState>,
+    pub bloom_up: Obj<dyn MTLComputePipelineState>,
     /// LUT воздушной перспективы (04.2).
     pub sky_aerial: Obj<dyn MTLComputePipelineState>,
     pub sky_ambient: Obj<dyn MTLComputePipelineState>,
@@ -320,6 +323,7 @@ pub fn build_pipelines(
     let cull_lib = compile_library(device, dir, "cull.metal", over)?;
     let forest_lib = compile_library(device, dir, "forest.metal", over)?;
     let taa_lib = compile_library(device, dir, "taa.metal", over)?;
+    let bloom_lib = compile_library(device, dir, "bloom.metal", over)?;
     let ui_lib = compile_library(device, dir, "ui.metal", over)?;
     Ok(Pipelines {
         pattern: compute_pipeline(compiler, &pattern_lib, "pattern.metal", "pattern_main")?,
@@ -408,6 +412,8 @@ pub fn build_pipelines(
         cull_clusters: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_clusters")?,
         cull_finish: compute_pipeline(compiler, &cull_lib, "cull.metal", "cull_finish")?,
         taa_resolve: compute_pipeline(compiler, &taa_lib, "taa.metal", "taa_resolve")?,
+        bloom_down: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_down")?,
+        bloom_up: compute_pipeline(compiler, &bloom_lib, "bloom.metal", "bloom_up")?,
         sky_ambient: compute_pipeline(compiler, &sky_lib, "sky.metal", "sky_ambient")?,
         exposure_meter: compute_pipeline(compiler, &sky_lib, "sky.metal", "exposure_meter")?,
         terrain_shadow: depth_only_pipeline(

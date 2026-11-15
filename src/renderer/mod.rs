@@ -32,6 +32,8 @@ mod timers;
 
 /// Наибольшее число рыб у камеры (03.2).
 pub const FISH_MAX: usize = 32;
+/// Наибольшее число водопадов с водяной пылью у камеры (03.5).
+pub const FALLS_MAX: usize = 12;
 mod ui;
 mod upscale;
 mod water;
@@ -97,6 +99,9 @@ pub struct Renderer {
     /// Рыба (03.2): точки прыжков (x, уровень воды, z, угол течения) и их число.
     fish: Obj<dyn MTLBuffer>,
     fish_count: usize,
+    /// Водопады (03.5): подножие + ширина, верх — по два float4; их число.
+    falls: Obj<dyn MTLBuffer>,
+    falls_count: usize,
     /// Уровень воды рек на концах каждого отрезка объектов карты (03.2), float2.
     river_levels: Option<Obj<dyn MTLBuffer>>,
     /// Временной апскейлер MetalFX под текущие цели (только при масштабе < 1).
@@ -251,6 +256,8 @@ impl Renderer {
 
         let fish = resources::shared_buffer(&device, FISH_MAX * 16, "river fish");
         residency.addAllocation(as_allocation(&*fish));
+        let falls = resources::shared_buffer(&device, FALLS_MAX * 32, "waterfalls");
+        residency.addAllocation(as_allocation(&*falls));
         let timers = timers::GpuTimers::new(&device);
         Ok(Renderer {
             info,
@@ -269,6 +276,8 @@ impl Renderer {
             render_scale: 1.0,
             fish,
             fish_count: 0,
+            falls,
+            falls_count: 0,
             river_levels: None,
             upscaler: None,
             pattern_tex,
@@ -322,6 +331,13 @@ impl Renderer {
         if let Some(b) = &self.river_levels {
             resources::upload_bytes(b, 0, bytemuck::cast_slice(levels));
         }
+    }
+
+    /// Водопады (03.5): до `FALLS_MAX` — [подножие xyz, ширина], [верх xyz, 0].
+    pub fn set_falls(&mut self, falls: &[[f32; 4]]) {
+        let n = (falls.len() / 2).min(FALLS_MAX);
+        resources::upload_bytes(&self.falls, 0, bytemuck::cast_slice(&falls[..n * 2]));
+        self.falls_count = n;
     }
 
     /// Рыба (03.2): до `FISH_MAX` точек прыжков (x, уровень воды, z, угол течения).

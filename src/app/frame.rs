@@ -328,10 +328,33 @@ impl App {
                 }
                 r.set_river_spread(&spread);
                 // Уровень воды (03.2): плёсы ровные, перепады — водопады.
-                self.river_levels = self
-                    .hydrology
-                    .levels(f.segments.len(), super::raft::LEVEL_SCALE);
+                // Реальная глубина ручьёв; широкий разлив — только в сплаве.
+                let (scale, min_m) = if self.raft.is_some() {
+                    (super::raft::LEVEL_SCALE, crate::hydrology::LEVEL_MIN_M)
+                } else {
+                    (1.0, crate::hydrology::REAL_MIN_M)
+                };
+                self.river_levels = self.hydrology.levels(f.segments.len(), scale, min_m);
                 r.set_river_levels(&self.river_levels);
+                // Водопады (03.5): ближайшие к камере — водяная пыль.
+                let cam = self.sim.curr.position;
+                let mut falls = self.hydrology.falls(f, &self.river_levels);
+                falls.sort_by(|a, b| a.0.distance(cam).total_cmp(&b.0.distance(cam)));
+                let packed: Vec<[f32; 4]> = falls
+                    .iter()
+                    .take(crate::renderer::FALLS_MAX)
+                    .flat_map(|(b, t, w)| [[b.x, b.y, b.z, *w], [t.x, t.y, t.z, 0.0]])
+                    .collect();
+                r.set_falls(&packed);
+                if std::env::var_os("ECHO_FALLS_LOG").is_some() {
+                    eprintln!(
+                        "водопады: всего {}, ближайший {:?}",
+                        falls.len(),
+                        falls
+                            .first()
+                            .map(|(b, t, _)| (*b, t.y - b.y, b.distance(cam)))
+                    );
+                }
                 // Рыба (03.2): точки прыжков на реках в 60 м от камеры —
                 // равномерно по найденным отрезкам.
                 let cam = self.sim.curr.position;

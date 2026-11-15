@@ -79,6 +79,8 @@ pub struct Pipelines {
     pub fish: Obj<dyn MTLRenderPipelineState>,
     /// Поверхность реки в карте укрытия от дождя (03.2).
     pub river_rain: Obj<dyn MTLRenderPipelineState>,
+    /// Водяная пыль водопадов (03.5).
+    pub mist: Obj<dyn MTLRenderPipelineState>,
     /// Bloom (04.5): цепочки вниз и вверх.
     pub bloom_down: Obj<dyn MTLComputePipelineState>,
     pub bloom_up: Obj<dyn MTLComputePipelineState>,
@@ -526,6 +528,16 @@ pub fn build_pipelines(
             "river.metal",
             "river",
             ("river_vs", "river_fs"),
+            HDR_FORMAT,
+            Blend::Alpha,
+            Motion::Masked,
+        )?,
+        mist: render_pipeline(
+            compiler,
+            &river_lib,
+            "river.metal",
+            "waterfall mist",
+            ("mist_vs", "mist_fs"),
             HDR_FORMAT,
             Blend::Alpha,
             Motion::Masked,

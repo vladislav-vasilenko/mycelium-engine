@@ -9,7 +9,7 @@
 //! Глубина — по Маннингу для прямоугольного русла с каменистым дном; подъём
 //! сверх меженной глубины расширяет полосу реки (разлив на берег).
 
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 use crate::world::features::{FeatureSet, KIND_RIVER};
 
@@ -104,9 +104,12 @@ pub struct Reach {
     pub into: Option<usize>,
 }
 
-/// Наименьшая глубина воды демо, м (`LEVEL_MIN_M` в `river.metal`): ручьи по
-/// гидрологии — сантиметры; демо: ×3 от прежних 0,3 м и ещё +3 м по просьбе.
+/// Наименьшая глубина воды в демо-сплаве (`--raft`), м: ручьи по гидрологии —
+/// сантиметры; для сплава — ×3 от 0,3 м и ещё +3 м (по просьбе пользователя).
 pub const LEVEL_MIN_M: f32 = 3.9;
+/// Наименьшая видимая глубина в обычной игре, м: горные ручьи Якусимы мелкие
+/// и прозрачные (демо-подъём заливал долины — замечание пользователя).
+pub const REAL_MIN_M: f32 = 0.15;
 /// Наибольший подпор плёса над обычной глубиной, м.
 pub const POOL_MAX_M: f32 = 1.0;
 
@@ -269,20 +272,22 @@ impl Hydrology {
     /// `LEVEL_MIN_M` на равнинных реках; на крутых ручьях подъём падает (на
     /// уклоне от 12 % — десятая часть): 4 м воды поперёк склона висели над
     /// откосом.
-    pub fn demo_depth(r: &Reach, scale: f32) -> f32 {
+    pub fn demo_depth(r: &Reach, scale: f32, min_m: f32) -> f32 {
         let k = (1.0 - (r.slope - 0.03) * 10.0).clamp(0.1, 1.0);
-        (r.depth * scale).max(LEVEL_MIN_M * k)
+        (r.depth * scale).max((min_m * k).max(REAL_MIN_M.min(min_m)))
     }
 
     /// Возвращает на отрезок `[уровень a, уровень b, глубина демо, 0]`.
-    pub fn levels(&self, segment_count: usize, scale: f32) -> Vec<[f32; 4]> {
+    /// `scale` и `min_m` — множитель и наименьшая глубина: в обычной игре
+    /// (1, `REAL_MIN_M`), в демо-сплаве (`LEVEL_SCALE`, `LEVEL_MIN_M`).
+    pub fn levels(&self, segment_count: usize, scale: f32, min_m: f32) -> Vec<[f32; 4]> {
         let mut out = vec![[0.0; 4]; segment_count];
         for r in &self.reaches {
             let segs: Vec<usize> = r.segs.clone().filter(|&i| i < self.bed.len()).collect();
             if segs.is_empty() {
                 continue;
             }
-            let dd = Self::demo_depth(r, scale);
+            let dd = Self::demo_depth(r, scale, min_m);
             let d = dd + 0.12;
             // Точки линии: a каждого отрезка и b последнего.
             let mut bed: Vec<f32> = segs.iter().map(|&i| self.bed[i][0]).collect();
@@ -329,6 +334,55 @@ impl Hydrology {
             }
             for (j, &i) in segs.iter().enumerate() {
                 out[i] = [w[j], w[j + 1], dd, 0.0];
+            }
+        }
+        out
+    }
+
+    /// Водопады и каскады (03.5): участки рек, где поверхность воды падает
+    /// круче `FALL_SLOPE` подряд на `FALL_MIN_DROP_M` и больше. Возвращает
+    /// (подножие xyz, верх xyz, ширина, м).
+    pub fn falls(&self, set: &FeatureSet, levels: &[[f32; 4]]) -> Vec<(Vec3, Vec3, f32)> {
+        const FALL_SLOPE: f32 = 0.3;
+        const FALL_MIN_DROP_M: f32 = 4.0;
+        let mut out = Vec::new();
+        for r in &self.reaches {
+            let segs: Vec<usize> = r.segs.clone().filter(|&i| i < levels.len()).collect();
+            if segs.len() < 2 {
+                continue;
+            }
+            let mut pts: Vec<(Vec2, f32)> = segs
+                .iter()
+                .map(|&i| (Vec2::from(set.segments[i].a), levels[i][0]))
+                .collect();
+            let last = segs[segs.len() - 1];
+            pts.push((Vec2::from(set.segments[last].b), levels[last][1]));
+            if pts[0].1 < pts[pts.len() - 1].1 {
+                pts.reverse();
+            }
+            let width = set.segments[segs[0]].half_width * 2.0 + 1.0;
+            let mut k = 0;
+            while k + 1 < pts.len() {
+                let steep = |k: usize| {
+                    let d = pts[k].0.distance(pts[k + 1].0).max(0.5);
+                    (pts[k].1 - pts[k + 1].1) / d > FALL_SLOPE
+                };
+                if !steep(k) {
+                    k += 1;
+                    continue;
+                }
+                let start = k;
+                while k + 1 < pts.len() && steep(k) {
+                    k += 1;
+                }
+                let (top, bottom) = (pts[start], pts[k]);
+                if top.1 - bottom.1 >= FALL_MIN_DROP_M {
+                    out.push((
+                        Vec3::new(bottom.0.x, bottom.1, bottom.0.y),
+                        Vec3::new(top.0.x, top.1, top.0.y),
+                        width,
+                    ));
+                }
             }
         }
         out
@@ -493,7 +547,7 @@ mod tests {
         h.bed[3][0] -= 0.6;
         h.bed[4][1] += 20.0;
         h.bed[5][0] += 20.0;
-        let lv = h.levels(set.segments.len(), 1.0);
+        let lv = h.levels(set.segments.len(), 1.0, LEVEL_MIN_M);
         for i in 0..6 {
             assert!(
                 lv[i][0] >= h.bed[i][0] - 1e-3 && lv[i][1] >= h.bed[i][1] - 1e-3,

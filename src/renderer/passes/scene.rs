@@ -127,6 +127,7 @@ fn draw_river(ctx: &PassCtx, enc: &RenderEncoder) {
         table.setTexture_atIndex(t.detail.gpuResourceID(), 0);
         table.setTexture_atIndex(ctx.r.sky.aerial.gpuResourceID(), 1);
         table.setAddress_atIndex(ctx.r.fish.gpuAddress(), 4);
+        table.setAddress_atIndex(ctx.r.falls.gpuAddress(), 9);
     }
     let Some(levels) = ctx.r.river_levels.as_ref() else {
         return;
@@ -160,6 +161,18 @@ fn draw_river(ctx: &PassCtx, enc: &RenderEncoder) {
             6,
             n,
         );
+    }
+    // Водяная пыль водопадов (03.5) — после воды, без записи глубины.
+    if ctx.r.falls_count > 0 {
+        enc.setRenderPipelineState(&ctx.r.pipelines.mist);
+        unsafe {
+            enc.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                MTLPrimitiveType::Triangle,
+                0,
+                6,
+                ctx.r.falls_count * 48,
+            );
+        }
     }
     enc.setDepthStencilState(Some(&ctx.r.depth_state));
     enc.popDebugGroup();

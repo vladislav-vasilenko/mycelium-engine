@@ -284,6 +284,28 @@ impl App {
             if e.is_none() {
                 eprintln!("побег: маршрут по тропам не найден");
             }
+            // Финал — самый высокий каскад в 150 м от точки Хирю-отоси (OSM).
+            let mut e = e;
+            if let (Some(e), Some(f)) = (e.as_mut(), world.features.as_ref()) {
+                let lv = hydrology.levels(f.segments.len(), 1.0, crate::hydrology::REAL_MIN_M);
+                if let Some((b, t, _)) = hydrology
+                    .falls(f, &lv)
+                    .into_iter()
+                    .filter(|(b, _, _)| glam::Vec2::new(b.x, b.z).distance(HIRYU_OTOSHI) < 150.0)
+                    .max_by(|a, b| (a.1.y - a.0.y).total_cmp(&(b.1.y - b.0.y)))
+                {
+                    eprintln!(
+                        "побег: водопад Хирю-отоси — перепад {:.1} м, подножие {:.0} {:.0} {:.0}, верх {:.0} {:.0}",
+                        t.y - b.y,
+                        b.x,
+                        b.y,
+                        b.z,
+                        t.x,
+                        t.z
+                    );
+                    e.goal = b;
+                }
+            }
             let mut e = e;
             if let (Some(e), Some(t)) = (
                 e.as_mut(),

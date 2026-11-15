@@ -255,7 +255,8 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     float clumps = foam_n(ph0, 0.8, 1.2).r * w0 + foam_n(ph1, 0.8, 1.2).r * (1.0 - w0);
     float big = foam_n(ph0, 4.0, 0.8).g * w0 + foam_n(ph1, 4.0, 0.8).g * (1.0 - w0);
     float edge = smoothstep(0.55, 1.0, abs(in.across));
-    float cover = saturate(smoothstep(0.04, 0.45, slope) * 0.75 + smoothstep(0.45, 0.9, slope) * 0.3 + 0.05 * edge);
+    // Каскад (уклон воды > 0,25, 03.5) — почти сплошная белая вода.
+    float cover = saturate(smoothstep(0.04, 0.35, slope) * 0.75 + smoothstep(0.25, 0.5, slope) * 0.5 + 0.05 * edge);
     // Покрытие неравномерно: крупный шум делит русло на струи и окна воды.
     cover *= 0.55 + 0.9 * big;
     float fv = lines * 0.55 + clumps * 0.45;
@@ -402,4 +403,77 @@ fragment float4 fish_fs(FishOut in [[stage_in]], bool front [[front_facing]],
         c = body * 0.35 * (sky + sun * saturate(dot(n, -frame.light_dir.xyz))) + float3(0.7, 0.72, 0.75) * sky * 0.12;
     }
     return float4(c * frame.pre_exposure, 1.0);
+}
+
+// --- Водяная пыль водопадов (03.5): у подножия каждого водопада облака
+// брызг поднимаются, растут и тают по кругу. Водопады — с CPU
+// (`Renderer::set_falls`): два float4 — подножие xyz + ширина, верх xyz + 0.
+constant uint MIST_PUFFS = 48;
+
+struct MistOut {
+    float4 position [[position]];
+    float2 uv;
+    float alpha;
+    float3 rel;
+};
+
+vertex MistOut mist_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
+                       constant FrameUniforms& frame [[buffer(1)]],
+                       device const float4* falls [[buffer(9)]]) {
+    MistOut o;
+    uint f = iid / MIST_PUFFS, k = iid % MIST_PUFFS;
+    float4 b = falls[f * 2];
+    float4 t = falls[f * 2 + 1];
+    float h0 = fish_hash(iid * 3u + 11u), h1 = fish_hash(iid * 7u + 5u), h2 = fish_hash(iid * 13u + 1u);
+    float ph = fract(frame.time * (0.08 + 0.06 * h0) + h1);
+    float drop = max(t.y - b.y, 1.0);
+    // Часть облаков — вдоль падающей струи (выше по склону), часть — у подножия.
+    float along = k < MIST_PUFFS / 3 ? h2 : 0.0;
+    float3 base = mix(b.xyz, t.xyz, along * 0.8);
+    float a = h0 * 6.2831853;
+    float r = (0.3 + 0.7 * sqrt(h2)) * (b.w * 0.6 + 2.0);
+    float3 c = base + float3(cos(a) * r, ph * (1.5 + drop * 0.12), sin(a) * r);
+    float size = (0.8 + 2.2 * ph) * (0.6 + b.w * 0.1) * clamp(0.5 + drop / 12.0, 0.6, 2.2);
+    // Брызги: четверть частиц — капли, летящие по дуге от подножия.
+    bool drop_p = k >= MIST_PUFFS * 3 / 4;
+    if (drop_p) {
+        float life = 1.2;
+        float tt = fract(frame.time / life + h1) * life;
+        float sp = 3.0 + 4.0 * h2 * clamp(drop / 10.0, 0.5, 2.0);
+        float3 v = float3(cos(a) * sp * 0.6, sp, sin(a) * sp * 0.6);
+        c = b.xyz + float3(cos(a), 0.0, sin(a)) * (b.w * 0.3) + v * tt - float3(0.0, 4.9 * tt * tt, 0.0);
+        size = 0.05 + 0.04 * h0;
+        ph = tt / life;
+    }
+    float3 to_cam = normalize(frame.camera_pos.xyz - c);
+    float3 right = normalize(cross(float3(0, 1, 0), to_cam) + 1e-4);
+    float3 up = cross(to_cam, right);
+    uint corner = vid % 6u;
+    float2 q = float2(corner == 1u || corner == 2u || corner == 4u ? 1.0 : -1.0,
+                      corner == 2u || corner == 4u || corner == 5u ? 1.0 : -1.0);
+    float3 p = c + (right * q.x + up * q.y) * size;
+    o.rel = camera_relative(frame, p);
+    o.position = frame.view_proj_rel * float4(o.rel, 1.0);
+    o.uv = q;
+    // Появляется и тает; дальше 250 м не рисуется.
+    float fade = smoothstep(0.0, 0.15, ph) * (1.0 - smoothstep(0.5, 1.0, ph));
+    float amount = clamp(drop / 14.0, 0.35, 1.0);
+    o.alpha = (drop_p ? 0.7 * (1.0 - ph) : fade * 0.1 * amount) * (1.0 - smoothstep(150.0, 250.0, length(o.rel)));
+    return o;
+}
+
+fragment float4 mist_fs(MistOut in [[stage_in]],
+                        constant FrameUniforms& frame [[buffer(1)]],
+                        device const SkyFrame& skyf [[buffer(3)]],
+                        texture3d<float> aerial [[texture(1)]]) {
+    float d = length(in.uv);
+    float a = in.alpha * (1.0 - smoothstep(0.2, 1.0, d));
+    if (a < 0.002) {
+        discard_fragment();
+    }
+    float3 c = float3(0.85, 0.9, 0.95) * (sky_ambient_term(skyf, float3(0, 1, 0))
+                                         + sky_sun_term(skyf) * saturate(-frame.light_dir.y) * 0.4)
+             + spot_light(frame, in.rel, normalize(-in.rel)) * 0.5;
+    c = apply_aerial(aerial, frame, in.rel, c);
+    return float4(c * a * frame.pre_exposure, a);
 }

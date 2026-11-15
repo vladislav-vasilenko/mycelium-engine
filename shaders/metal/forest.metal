@@ -353,7 +353,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             // Под пологом (02.13, сессия 1) — низкий ковёр пятнами: в пятнах
             // сомкнутый, между ними — опад и мох.
             float floor_patch = smoothstep(0.3, 0.6, patch_noise(p, 7.0, 0x6B3Au));
-            float dens = (cv.z * 1.0 + max(1.0 - forest - cv.w, 0.0) * 0.95 + forest * (0.15 + 0.75 * floor_patch))
+            float dens = (cv.z * 1.0 + max(1.0 - forest - cv.w, 0.0) * 0.95 + forest * (0.35 + 0.6 * floor_patch))
                        * (1.0 - 0.9 * cv.w);
             dens *= 0.65 + 0.7 * patch_noise(p, 8.0, 0x6B1Eu);
             float brook_g = 0.0;
@@ -576,6 +576,9 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     n = float3(c * nn.x - s * nn.z, nn.y, s * nn.x + c * nn.z);
     float w = float(v.attr.y) / 255.0;
     float t = frame.time;
+    // Точка покоя (до ветра): по ней — драпировка по рельефу, иначе на
+    // склоне качающееся растение ходит вверх-вниз.
+    float3 q_rest = q;
     float2 dir = normalize(float2(0.8, 0.6));
     // Порывы (02.10): сила ветра медленно меняется во времени и по месту —
     // бывают паузы; соседние растения качаются не в такт.
@@ -589,9 +592,34 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 8.5 && mat < 9.5)
                  || (mat > 15.5 && w > 0.02);
     float fph = dot(q, float3(1.3, 0.7, 1.1)) + inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
-    float flutter = leafy ? sin(t * (5.0 + 3.0 * fract(inst.phase)) + fph) * 0.035 * w * gust * gust : 0.0;
+    // Травинки не дрожат (02.13): узкие полоски от дрожания «пульсировали».
+    // Низкие растения (папоротник, саса, сканы трав и кустов) — без фазы по
+    // вершине: иначе карточка коробится («сжимается и растягивается»).
+    bool blade = mat > 8.5 && mat < 9.5;
+    bool low = blade || (mat > 4.5 && mat < 6.5) || mat > 15.5;
+    if (low) {
+        fph = inst.phase * 3.0 + dot(bp, float2(0.37, 0.23));
+    }
+    float flutter = leafy && !blade
+                  ? sin(t * (5.0 + 3.0 * fract(inst.phase)) + fph) * 0.035 * w * gust * gust
+                    * (low ? 0.4 * saturate(q.y / 0.8) : 1.0)
+                  : 0.0;
     // Раскачка растёт с высотой точки: верх кроны качается, папоротник — едва.
-    q.xz += dir * sway * inst.scale * 0.9 * saturate(q.y / 8.0);
+    // Трава — мягкая волна по месту (у соседних пучков почти в фазе), а не
+    // своя частота у каждого пучка.
+    if (low) {
+        // Изгиб, а не сдвиг: верх уходит вбок по квадрату высоты и
+        // опускается так, что длина стебля сохраняется. Волна — по месту.
+        float wave = sin(t * 1.3 - dot(bp, dir) * 0.35) * 0.6 + sin(t * 0.7 - dot(bp, dir) * 0.15) * 0.4;
+        float lean = (blade ? 0.35 + 0.65 * wave : 0.6 * wave + 0.4 * sway) * w * w * gust;
+        float hy = max(q.y, 0.0);
+        float hn = saturate(hy / max(inst.scale * (blade ? 0.5 : 1.0), 0.05));
+        float off = lean * (blade ? 0.12 : 0.08) * hn * hn;
+        q.xz += dir * off;
+        q.y -= 0.5 * off * off / max(hy, 0.05);
+    } else {
+        q.xz += dir * sway * inst.scale * 0.9 * saturate(q.y / 8.0);
+    }
     q += n * flutter;
     float3 world = float3(inst.position) + q;
     // Драпировка (02.10): нижние ~0,6 м сетки — сор, листья, мох, бугор у
@@ -601,9 +629,10 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     if (wd > 0.0) {
         float3 base = float3(inst.position);
         float sink = max(base.y - plant_ground_h(g, base.xz, frame), -0.08);
-        float h0 = plant_ground_h(g, world.xz, frame);
-        float hx = plant_ground_h(g, world.xz + float2(0.5, 0), frame);
-        float hz = plant_ground_h(g, world.xz + float2(0, 0.5), frame);
+        float2 rest = float3(inst.position).xz + q_rest.xz;
+        float h0 = plant_ground_h(g, rest, frame);
+        float hx = plant_ground_h(g, rest + float2(0.5, 0), frame);
+        float hz = plant_ground_h(g, rest + float2(0, 0.5), frame);
         world.y = mix(world.y, h0 + sink + q.y, wd);
         float2 grad = float2(hx - h0, hz - h0) / 0.5;
         n = normalize(n + float3(-grad.x, 0.0, -grad.y) * max(n.y, 0.0) * wd);
@@ -625,6 +654,14 @@ vertex PlantOut plant_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.world = plant_world(v, inst, frame, PlantGround{heights, zone_heights, zone}, n);
     o.rel = camera_relative(frame, o.world);
     o.position = frame.view_proj_rel * float4(o.rel, 1.0);
+    if (v.attr.x == 9) {
+        // Травинки (02.13): нормаль пучка — полусфера от его центра, почти
+        // вверх; пучок освещается мягкой массой, а не бликующими полосками.
+        float2 r = o.world.xz - float2(inst.position.x, inst.position.z);
+        float rl = length(r);
+        float2 rd = rl > 1e-4 ? r / rl : float2(0.0);
+        n = normalize(float3(rd.x * 0.45, 1.0, rd.y * 0.45) + n * 0.15);
+    }
     o.normal = n;
     o.uv = float2(v.uv);
     o.attr = float3(float(v.attr.x), float(v.attr.y) / 255.0, float(v.attr.z) / 255.0);
@@ -669,12 +706,22 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
                 || (mat > 15.5 && in.attr.y > 0.02);
     float3 glow = 0.0;
     if (mat > 8.5 && mat < 9.5) {
-        // Травинки (02.11): от тёмного основания к светлому кончику; часть
-        // пучков подсохла (tint).
+        // Травинки (02.11, 02.13): от тёмного основания к светлому кончику.
+        // Цвет — крупными пятнами по месту (зелёные, оливковые, сухие куртины
+        // 3–12 м), пучок лишь чуть отличается от соседей; у основания —
+        // цвет травяного слоя рельефа (PH_sparse_grass), трава врастает в землю.
         float t = saturate(in.uv.y);
-        float3 green = mix(float3(0.05, 0.08, 0.025), float3(0.20, 0.27, 0.07), t);
-        float3 dry = mix(float3(0.10, 0.09, 0.04), float3(0.42, 0.36, 0.17), t);
-        albedo = mix(green, dry, smoothstep(0.55, 1.0, in.tint) * 0.8);
+        float3 lp = in.rel + frame.cam_lo.xyz;
+        float big = patch_noise(lp.xz, 12.0, 0x6C01u);
+        float mid = patch_noise(lp.xz, 3.5, 0x6C02u);
+        float dryk = saturate(smoothstep(0.6, 0.95, big) * 0.6 + (mid - 0.5) * 0.35 + (in.tint - 0.5) * 0.2);
+        float olive = smoothstep(0.3, 0.7, mid);
+        float3 green = mix(float3(0.17, 0.25, 0.06), float3(0.21, 0.24, 0.09), olive);
+        float3 dry = float3(0.40, 0.34, 0.17);
+        float3 tip = mix(green, dry, dryk) * (0.9 + 0.2 * in.tint);
+        float3 ground = mat_albedo.sample(ms, lp.xz / 2.0, 5).rgb;
+        ground = mix(float3(dot(ground, float3(0.3, 0.5, 0.2))), ground, 0.55) * float3(0.78, 0.76, 0.66);
+        albedo = mix(ground * 0.85, tip, smoothstep(0.0, 0.5, t));
     } else if (mat > 15.5) {
         // Фотоскан (02.11): свой цвет и нормаль (слой = материал − 16), базис
         // нормали — по производным, как у коры (AD-66).
@@ -769,7 +816,8 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
             albedo = mix(albedo, albedo * float3(1.1, 1.05, 0.75), in.tint * 0.4);
         }
     }
-    if (!front) {
+    // У травинок нормаль пучка общая для обеих сторон (полусфера вверх).
+    if (!front && !(mat > 8.5 && mat < 9.5)) {
         n = -n;
     }
     float3 L = -frame.light_dir.xyz;
@@ -778,6 +826,10 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float shadow = shadow_factor(shadows, shadow_map, in.rel, n, L);
     float3 sun = sky_sun_term(skyf) * shadow;
     float ao = in.attr.z;
+    if (mat > 8.5 && mat < 9.5) {
+        // Затенение в толще травы: низ пучка тёмный, кончики открыты небу.
+        ao *= mix(0.55, 1.0, pow(saturate(in.uv.y), 0.7));
+    }
     float3 sky = sky_ambient_term(skyf, n) * ao;
     // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
     float3 bounce = sky_sun_term(skyf) * max(L.y, 0.0) * 0.24 * float3(0.75, 0.85, 0.6);
@@ -796,6 +848,10 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
         float rao = rt_ao_tex.sample(aos, in.position.xy / (2.0 * float2(rt_ao_tex.get_width(), rt_ao_tex.get_height()))).x;
         sky *= rao;
         bounce *= rao;
+    }
+    if (mat > 8.5 && mat < 9.5) {
+        // Солнце в толще травы тоже гаснет к земле (без отдельной тени).
+        sun *= mix(0.7, 1.0, saturate(in.uv.y));
     }
     float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {

@@ -68,7 +68,8 @@ pub const LODS: usize = 3;
 /// Сторона слоя массива текстур растений.
 pub const TEXTURE_SIZE: usize = 1024;
 /// Слои: 0 кора якусуги, 1 кора лиственного, 2 атлас листвы и подлеска.
-pub const TEXTURE_LAYERS: usize = 3;
+/// Кора якусуги, кора лиственных, атлас листвы, фото травинок, фото кустиков травы (02.13).
+pub const TEXTURE_LAYERS: usize = 5;
 
 /// LOD вида в общих буферах: (первый индекс, число индексов, базовая вершина).
 #[derive(Clone, Copy, Debug, Default)]
@@ -240,6 +241,14 @@ pub fn load(models: &Path, ambientcg: &Path) -> Result<PlantAssets, String> {
         return Err("foliage.png: нужен 1024 × 1024".into());
     }
     a.albedo.extend(atlas);
+    // Фототекстуры травы Poly Haven (02.13, `grass_photo.py`): слои 3 и 4.
+    for name in ["grass_strips.png", "grass_tufts.png"] {
+        let (px, w, h) = png_rgba(&models.join(name))?;
+        if (w, h) != (TEXTURE_SIZE, TEXTURE_SIZE) {
+            return Err(format!("{name}: нужен 1024 × 1024"));
+        }
+        a.albedo.extend(px);
+    }
     a.albedo
         .resize(TEXTURE_LAYERS * TEXTURE_SIZE * TEXTURE_SIZE * 4, 0);
     Ok(a)

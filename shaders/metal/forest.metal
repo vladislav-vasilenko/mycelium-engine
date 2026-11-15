@@ -42,7 +42,7 @@ constant uint SPECIES_BLADES = 38;          // 38–40 — пучки трави
 constant uint SPECIES_MUSHROOM = 41;
 // Густая трава: шаг 0,35 м до GRASS_DIST.
 constant float GRASS_DIST = 45.0;
-constant int GRASS_SUB = 17;
+constant int GRASS_SUB = 24;
 // Высота вида при масштабе 1, м (сфера отсечения).
 constant float SPECIES_H[GPU_SPECIES] = {29.0, 25.0, 24.0, 17.0, 17.0, 15.0, 2.2, 1.0, 1.4, 2.4, 1.0, 2.0, 15.0, 0.3, 0.4, 0.3,
                                          2.2, 2.2, 2.2, 1.0, 1.0, 1.0, 2.4, 2.4, 1.0, 2.0, 0.3, 0.3, 0.3,
@@ -329,7 +329,7 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             out[list * FOREST_CAP + k] = inst;
         }
     }
-    // Густая трава (02.11): пучки травинок на сетке 0,35 м в клетках у
+    // Густая трава (02.11, 02.13): фото-пучки на сетке 0,25 м в клетках у
     // камеры — сплошь на лугах, у троп и на открытом, умеренно под пологом,
     // редко на полотне тропы; пятнами по шуму.
     if (distance(cc, frame.camera_pos.xz) > GRASS_DIST + 6.0) {
@@ -705,23 +705,34 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     bool leaf = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5) || (mat > 8.5 && mat < 9.5)
                 || (mat > 15.5 && in.attr.y > 0.02);
     float3 glow = 0.0;
+    // Доля высоты травы (0 — земля, 1 — верх): в канале затенения 0,55 → 1.
+    float blade_t = saturate((in.attr.z - 0.55) / 0.45);
     if (mat > 8.5 && mat < 9.5) {
-        // Травинки (02.11, 02.13): от тёмного основания к светлому кончику.
-        // Цвет — крупными пятнами по месту (зелёные, оливковые, сухие куртины
-        // 3–12 м), пучок лишь чуть отличается от соседей; у основания —
-        // цвет травяного слоя рельефа (PH_sparse_grass), трава врастает в землю.
-        float t = saturate(in.uv.y);
+        // Трава (02.13): фото Poly Haven — травинки (слой 3) и кустики
+        // (слой 4, u + 1), альфа заострена по производным. Цвет — пятнами по
+        // месту (зелёные, оливковые, сухие куртины 3–12 м); у основания —
+        // цвет травяного слоя рельефа: трава врастает в землю.
+        float t = blade_t;
+        bool tuft = in.uv.x >= 1.0;
+        float2 guv = float2(in.uv.x - (tuft ? 1.0 : 0.0), in.uv.y);
+        constexpr sampler gs(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
+        float4 ph = albedo_tex.sample(gs, guv, tuft ? 4u : 3u);
+        float aw = max(fwidth(ph.a), 1e-4);
+        if (saturate((ph.a - 0.5) / aw + 0.5) < 0.5) {
+            discard_fragment();
+        }
         float3 lp = in.rel + frame.cam_lo.xyz;
         float big = patch_noise(lp.xz, 12.0, 0x6C01u);
         float mid = patch_noise(lp.xz, 3.5, 0x6C02u);
         float dryk = saturate(smoothstep(0.6, 0.95, big) * 0.6 + (mid - 0.5) * 0.35 + (in.tint - 0.5) * 0.2);
         float olive = smoothstep(0.3, 0.7, mid);
-        float3 green = mix(float3(0.17, 0.25, 0.06), float3(0.21, 0.24, 0.09), olive);
-        float3 dry = float3(0.40, 0.34, 0.17);
-        float3 tip = mix(green, dry, dryk) * (0.9 + 0.2 * in.tint);
+        float3 photo = ph.rgb * mix(float3(1.0), float3(1.05, 0.95, 0.8), olive) * (0.85 + 0.25 * in.tint);
+        float3 dry = dot(ph.rgb, float3(0.3, 0.55, 0.15)) * float3(1.05, 0.9, 0.55);
+        // Фото и так содержит сухие травинки — их не осветляем.
+        float3 tip = min(mix(photo, dry, dryk * 0.6), float3(0.45, 0.42, 0.3));
         float3 ground = mat_albedo.sample(ms, lp.xz / 2.0, 5).rgb;
         ground = mix(float3(dot(ground, float3(0.3, 0.5, 0.2))), ground, 0.55) * float3(0.78, 0.76, 0.66);
-        albedo = mix(ground * 0.85, tip, smoothstep(0.0, 0.5, t));
+        albedo = mix(ground * 0.85, tip, smoothstep(0.0, 0.35, t));
     } else if (mat > 15.5) {
         // Фотоскан (02.11): свой цвет и нормаль (слой = материал − 16), базис
         // нормали — по производным, как у коры (AD-66).
@@ -828,7 +839,7 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     float ao = in.attr.z;
     if (mat > 8.5 && mat < 9.5) {
         // Затенение в толще травы: низ пучка тёмный, кончики открыты небу.
-        ao *= mix(0.55, 1.0, pow(saturate(in.uv.y), 0.7));
+        ao = mix(0.55, 1.0, pow(blade_t, 0.7));
     }
     float3 sky = sky_ambient_term(skyf, n) * ao;
     // Отражённый свет от освещённой земли и крон (как у рельефа, 02.10).
@@ -851,7 +862,7 @@ fragment float4 plant_fs(PlantOut in [[stage_in]], bool front [[front_facing]],
     }
     if (mat > 8.5 && mat < 9.5) {
         // Солнце в толще травы тоже гаснет к земле (без отдельной тени).
-        sun *= mix(0.7, 1.0, saturate(in.uv.y));
+        sun *= mix(0.7, 1.0, blade_t);
     }
     float3 color = albedo * (sun * nl + sky + bounce * ao) + glow;
     if (leaf) {

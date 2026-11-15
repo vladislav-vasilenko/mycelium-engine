@@ -7,7 +7,9 @@
 LOD 1 и 2 — упрощения на случай дальних подклеток.
 """
 
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 
@@ -118,41 +120,88 @@ def trail_roots(lod, seed=0x7207):
     return m
 
 
+_RECTS = None
+
+
+def grass_rects():
+    """Рамки элементов фотоатласов травы (`grass_photo.py`)."""
+    global _RECTS
+    if _RECTS is None:
+        path = Path(__file__).resolve().parents[2] / "assets/models/plants/grass_rects.json"
+        r = json.loads(path.read_text())
+        r["tufts"] = [t for t in r["tufts"] if t[2] - t[0] > 0.06]
+        # Короткие обломки сухих стеблей — не травинки.
+        r["strips"] = [t for t in r["strips"] if t[3] - t[1] > 0.45]
+        _RECTS = r
+    return _RECTS
+
+
+def _photo_quad(m, base, yaw, h, rect, tilt, layer_shift):
+    """Вертикальная карточка-фото: основание на земле, доля высоты — в канале
+    затенения (0,55 → 1), ветер растёт к верху; u + 1 — атлас кустиков."""
+    x0, y0, x1, y1 = rect
+    w = h * (x1 - x0) / max(y1 - y0, 1e-3) * 0.5
+    right = np.array([math.cos(yaw), 0.0, math.sin(yaw)]) * w
+    fwd = np.array([-math.sin(yaw), 0.0, math.cos(yaw)])
+    up = np.array([0.0, h, 0.0]) + fwd * h * tilt
+    n = fwd * 0.3 + np.array([0, 1.0, 0])
+    v = [m.vert(base - right, n, (x0 + layer_shift, y1), BLADE, 0.0, 0.55),
+         m.vert(base + right, n, (x1 + layer_shift, y1), BLADE, 0.0, 0.55),
+         m.vert(base + right + up, n, (x1 + layer_shift, y0), BLADE, 0.9, 1.0),
+         m.vert(base - right + up, n, (x0 + layer_shift, y0), BLADE, 0.9, 1.0)]
+    m.tri(v[0], v[1], v[2])
+    m.tri(v[0], v[2], v[3])
+
+
+def _photo_strip(m, rng, base, h, rect, segs, lean, az):
+    """Изогнутая травинка с фото одиночной травинки (атлас `strips`)."""
+    x0, y0, x1, y1 = rect
+    w = h * (x1 - x0) / max(y1 - y0, 1e-3) * 0.5
+    out = np.array([math.cos(az), 0.0, math.sin(az)])
+    side = np.array([-out[2], 0.0, out[0]])
+    prev = None
+    for s_ in range(segs + 1):
+        t = s_ / segs
+        p = base + out * lean * h * t * t + np.array([0, h * t * (1 - 0.25 * lean * t), 0])
+        n = np.cross(side, out * (2 * lean * h * t) + np.array([0, h, 0]))
+        n = n / (np.linalg.norm(n) + 1e-9) + np.array([0, 0.5, 0])
+        v = y1 + (y0 - y1) * t
+        a = m.vert(p - side * w, n, (x0, v), BLADE, 0.9 * t, 0.55 + 0.45 * t)
+        c = m.vert(p + side * w, n, (x1, v), BLADE, 0.9 * t, 0.55 + 0.45 * t)
+        if prev:
+            m.tri(prev[0], prev[1], c)
+            m.tri(prev[0], c, a)
+        prev = (a, c)
+
+
 def grass_blades(lod, seed=0x6A55, kind="medium"):
-    """Пучок травинок (02.11): изогнутые сужающиеся полоски геометрией, без
-    альфы. uv.y — доля высоты (цвет от основания к кончику — в шейдере,
-    материал 9), ветер растёт к кончику. ~100 треугольников на LOD 0."""
+    """Пучок травы из фототекстур Poly Haven (02.13): кустики-карточки
+    (`grass_bermuda_01`) и изогнутые травинки (`grass_medium_02`) с альфой,
+    материал 9. Ярусы: низкая густая — кустики, средняя — кустики и травинки,
+    высокая — длинные травинки и стебли."""
     rng = np.random.default_rng(seed)
+    R = grass_rects()
     m = Mesh()
-    # Ярусы (02.11): низкая густая, средняя, высокая редкая.
-    n0, hmin, hmax, wmul, radius = {"short": (40, 0.08, 0.2, 0.8, 0.22),
-                                     "medium": (30, 0.2, 0.45, 1.0, 0.25),
-                                     "tall": (12, 0.5, 0.9, 1.4, 0.18)}[kind]
-    blades, segs = [n0, max(n0 * 6 // 10, 6), max(n0 // 3, 4)][lod], [4, 3, 2][lod]
-    for b in range(blades):
-        # Широкий пучок: соседние смыкаются в ковёр.
+    n_tuft, n_strip, hmin, hmax, radius = {"short": ([16, 9, 4], [0, 0, 0], 0.1, 0.22, 0.24),
+                                           "medium": ([10, 6, 3], [10, 5, 2], 0.18, 0.4, 0.26),
+                                           "tall": ([4, 2, 1], [10, 6, 3], 0.45, 0.85, 0.2)}[kind]
+    segs = [4, 3, 2][lod]
+    for _ in range(n_tuft[lod]):
+        r = radius * math.sqrt(rng.uniform())
+        th = rng.uniform(0, 6.28)
+        base = np.array([r * math.cos(th), -0.01, r * math.sin(th)])
+        pool = R["stems"] if kind == "tall" else R["tufts"]
+        rect = pool[rng.integers(len(pool))]
+        h = rng.uniform(hmin, hmax) * (1.4 if kind == "tall" else 1.0)
+        _photo_quad(m, base, rng.uniform(0, math.pi), h, rect, rng.uniform(-0.15, 0.15), 1.0)
+    for _ in range(n_strip[lod]):
         r = radius * math.sqrt(rng.uniform())
         th = rng.uniform(0, 6.28)
         base = np.array([r * math.cos(th), 0.0, r * math.sin(th)])
-        h = rng.uniform(hmin, hmax) * (1.0 - 0.4 * r / radius)
-        lean = rng.uniform(0.2, 0.6)
+        rect = R["strips"][rng.integers(len(R["strips"]))]
+        h = rng.uniform(hmin, hmax)
         az = math.atan2(base[2], base[0]) + rng.uniform(-0.8, 0.8) if r > 0.03 else rng.uniform(0, 6.28)
-        out = np.array([math.cos(az), 0.0, math.sin(az)])
-        side = np.array([-out[2], 0.0, out[0]])
-        w0 = rng.uniform(0.007, 0.012) * wmul * [1.0, 1.5, 2.2][lod]
-        prev = None
-        for s in range(segs + 1):
-            t = s / segs
-            p = base + out * lean * h * t * t + np.array([0, h * t * (1 - 0.25 * lean * t), 0])
-            w = w0 * (1.0 - t * 0.92)
-            n = np.cross(side, out * (2 * lean * h * t) + np.array([0, h, 0]))
-            n = n / (np.linalg.norm(n) + 1e-9) + np.array([0, 0.5, 0])
-            a = m.vert(p - side * w, n, (0.0, t), BLADE, 0.9 * t, 0.55 + 0.45 * t)
-            c = m.vert(p + side * w, n, (1.0, t), BLADE, 0.9 * t, 0.55 + 0.45 * t)
-            if prev:
-                m.tri(prev[0], prev[1], c)
-                m.tri(prev[0], c, a)
-            prev = (a, c)
+        _photo_strip(m, rng, base, h, rect, segs, rng.uniform(0.2, 0.6), az)
     return m
 
 

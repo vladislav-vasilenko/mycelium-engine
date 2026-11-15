@@ -1,6 +1,7 @@
 #include "common.h"
 #include "features.h"
 #include "sky.h"
+#include "terrain_patch.h"
 
 // Лес (02.4 + 02.8). Расстановка и отсечение — на GPU каждый кадр: сетка
 // клеток FOREST_CELL_M вокруг камеры, в клетке — кандидат на детерминированном
@@ -401,6 +402,15 @@ struct PlantGround {
     constant TerrainZone& zone;
 };
 
+// Земля под точкой для драпировки: в детальной заплатке у камеры — её
+// поверхность (бикубика + кочки), иначе — билинейно по полю.
+static float plant_ground_h(PlantGround g, float2 p, constant FrameUniforms& frame) {
+    if (patch_active(frame, g.zone) && patch_edge_dist(p, frame) > 0.0) {
+        return patch_height(PatchZone{g.zone_heights, g.zone}, p, frame);
+    }
+    return ground_height(p, g.heights, g.zone_heights, g.zone, frame);
+}
+
 static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUniforms& frame,
                           PlantGround g, thread float3& n) {
     float c = cos(inst.yaw), s = sin(inst.yaw);
@@ -441,10 +451,10 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     float wd = 1.0 - smoothstep(0.1, 0.7, q.y);
     if (wd > 0.0) {
         float3 base = float3(inst.position);
-        float sink = max(base.y - ground_height(base.xz, g.heights, g.zone_heights, g.zone, frame), -0.08);
-        float h0 = ground_height(world.xz, g.heights, g.zone_heights, g.zone, frame);
-        float hx = ground_height(world.xz + float2(0.5, 0), g.heights, g.zone_heights, g.zone, frame);
-        float hz = ground_height(world.xz + float2(0, 0.5), g.heights, g.zone_heights, g.zone, frame);
+        float sink = max(base.y - plant_ground_h(g, base.xz, frame), -0.08);
+        float h0 = plant_ground_h(g, world.xz, frame);
+        float hx = plant_ground_h(g, world.xz + float2(0.5, 0), frame);
+        float hz = plant_ground_h(g, world.xz + float2(0, 0.5), frame);
         world.y = mix(world.y, h0 + sink + q.y, wd);
         float2 grad = float2(hx - h0, hz - h0) / 0.5;
         n = normalize(n + float3(-grad.x, 0.0, -grad.y) * max(n.y, 0.0) * wd);
@@ -627,7 +637,20 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
 fragment void plant_shadow_fs(PlantShadowOut in [[stage_in]],
                               texture2d_array<float> albedo_tex [[texture(0)]]) {
     float mat = round(in.mat);
-    if (((mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5)) && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
+    bool leafy = (mat > 1.5 && mat < 3.5) || (mat > 4.5 && mat < 6.5);
+    if (leafy && plant_albedo(albedo_tex, mat, in.uv).a < 0.5) {
         discard_fragment();
+    }
+    // Листва пропускает часть света (02.10): 40 % текселей карточки не
+    // затеняют — после PCF тень кроны пятнистая и неполная, а не чёткий
+    // силуэт веточки.
+    if (leafy) {
+        uint2 px = uint2(in.position.xy);
+        uint h = (px.x * 0x8da6b343u) ^ (px.y * 0xd8163841u);
+        h ^= h >> 13;
+        h *= 0x7feb352du;
+        if (float(h >> 8) / 16777216.0 < 0.4) {
+            discard_fragment();
+        }
     }
 }

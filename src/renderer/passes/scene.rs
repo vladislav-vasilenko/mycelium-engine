@@ -91,6 +91,9 @@ fn draw_terrain(ctx: &PassCtx, enc: &RenderEncoder) {
     if let Some(c) = &ctx.r.clusters {
         if ctx.input.cull.is_some() {
             draw_clusters(ctx, enc, terrain, c, None);
+            if ctx.input.forest {
+                draw_patch(ctx, enc);
+            }
             return;
         }
         if let Some(list) = ctx.input.clusters {
@@ -203,6 +206,22 @@ fn draw_clusters(
                 n,
             );
         },
+    }
+    enc.popDebugGroup();
+}
+
+/// Вершин детальной заплатки у камеры: 256² ячеек × 2 треугольника
+/// (`PATCH_VERTEX_COUNT` в `terrain_patch.h`).
+const PATCH_VERTEX_COUNT: usize = 256 * 256 * 6;
+
+/// Детальная заплатка рельефа у камеры (02.10, сессия 2) — та же таблица
+/// `terrain`, что у кластеров (её привязки уже стоят), свой вершинный шейдер.
+/// Вне игрового режима или вне зоны шейдер схлопывает все вершины.
+fn draw_patch(ctx: &PassCtx, enc: &RenderEncoder) {
+    enc.pushDebugGroup(&label("terrain: detail patch"));
+    enc.setRenderPipelineState(&ctx.r.pipelines.terrain_patch);
+    unsafe {
+        enc.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, 0, PATCH_VERTEX_COUNT);
     }
     enc.popDebugGroup();
 }

@@ -39,6 +39,8 @@ pub struct Pipelines {
     pub terrain: Obj<dyn MTLRenderPipelineState>,
     /// Кластерный рельеф (02.3): тот же фрагментный шейдер, вершины из поля высот.
     pub terrain_clusters: Obj<dyn MTLRenderPipelineState>,
+    /// Детальная заплатка у камеры (02.10): `terrain_patch_vs` + `terrain_fs`.
+    pub terrain_patch: Obj<dyn MTLRenderPipelineState>,
     /// Вода: dual-source смешивание `dst × пропускание + цвет`.
     pub water: Obj<dyn MTLRenderPipelineState>,
     pub wet_sand: Obj<dyn MTLComputePipelineState>,
@@ -352,6 +354,15 @@ pub fn build_pipelines(
             "terrain.metal",
             "terrain clusters",
             ("terrain_cluster_vs", "terrain_fs"),
+            HDR_FORMAT,
+            Blend::Opaque,
+        )?,
+        terrain_patch: render_pipeline(
+            compiler,
+            &terrain_lib,
+            "terrain.metal",
+            "terrain patch",
+            ("terrain_patch_vs", "terrain_fs"),
             HDR_FORMAT,
             Blend::Opaque,
         )?,

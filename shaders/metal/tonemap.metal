@@ -48,5 +48,13 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
     float3 mapped = mix(aces(c), hue, 0.65);
     float over = max(max(mapped.r, mapped.g), mapped.b);
     mapped = over > 1.0 ? mix(mapped / over, float3(1.0), saturate(over - 1.0)) : mapped;
-    return float4(saturate(mapped), 1.0);
+    // Дизеринг ±½ шага 8-битного вывода (02.10): плавный градиент неба без полос.
+    uint2 px = uint2(in.position.xy);
+    uint h = (px.x * 0x8da6b343u) ^ (px.y * 0xd8163841u) ^ uint(frame.time * 60.0) * 0x9e3779b9u;
+    h ^= h >> 13;
+    h *= 0x7feb352du;
+    float noise = (float(h >> 8) / 16777216.0 - 0.5) / 255.0;
+    // Дизеринг в гамме вывода: шаг 8 бит равномерен там, а не в линейном.
+    float3 srgb = pow(saturate(mapped), 1.0 / 2.2) + noise;
+    return float4(pow(saturate(srgb), 2.2), 1.0);
 }

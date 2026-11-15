@@ -1,6 +1,7 @@
 #include "common.h"
 #include "features.h"
 #include "sky.h"
+#include "terrain_patch.h"
 
 // Ландшафт LOD 0: все тайлы одним instanced draw. Номер экземпляра — номер
 // тайла, вершины тайла лежат подряд по TILE_SAMPLES² штук.
@@ -107,6 +108,28 @@ vertex float4 terrain_shadow_vs(uint vid [[vertex_id]],
     return cascade_vp * float4(camera_relative(frame, world), 1.0);
 }
 
+// Позиция, нормаль и слои мира в вершине рельефа (кластеры и заплатка).
+static void terrain_layers(thread TerrainVaryings& out, float3 world, float3 nrm,
+                           constant FrameUniforms& frame, texture2d<float> layer_weights,
+                           texture2d<float> layer_material, texture2d<float> layer_cover) {
+    out.world = world;
+    out.rel = camera_relative(frame, world);
+    out.position = frame.view_proj_rel * float4(out.rel, 1.0);
+    out.normal = nrm;
+    // Слои мира: тексель на узел сетки биомов, центр текселя — узел.
+    constexpr sampler ls(filter::linear, address::clamp_to_edge);
+    float2 uv = (world.xz / frame.map_size_m * float(layer_weights.get_width() - 1) + 0.5)
+                / float(layer_weights.get_width());
+    out.weights = layer_weights.sample(ls, uv, level(0));
+    float4 m = layer_material.sample(ls, uv, level(0));
+    // Субстрат — индекс: берём ближайший узел, как CPU.
+    uint w = layer_material.get_width();
+    uint2 near = uint2(clamp(world.xz / frame.map_size_m * float(w - 1) + 0.5, 0.0, float(w - 1)));
+    out.material = float4(round(layer_material.read(near).x * 255.0), m.y, m.z, m.w);
+    float cn = float(layer_cover.get_width());
+    out.cover = layer_cover.sample(ls, (world.xz / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
+}
+
 // Кластерный рельеф (02.3): экземпляр — видимый кластер, вершина — номер узла
 // поля высот. Позиция и нормаль — из поля (нормаль центральными разностями,
 // как HeightField::normal_at), веса и материал — из слоёв мира по XZ.
@@ -145,24 +168,47 @@ vertex TerrainVaryings terrain_cluster_vs(uint vid [[vertex_id]],
     uint node = cluster_vertices[c.vertex_offset + local];
     float3 nrm;
     float3 world = node_position(node, heights, zone_heights, zone, frame, nrm);
-    out.world = world;
-    out.rel = camera_relative(frame, world);
-    out.position = frame.view_proj_rel * float4(out.rel, 1.0);
-    out.normal = nrm;
-    // Слои мира: тексель на узел сетки биомов, центр текселя — узел.
-    constexpr sampler ls(filter::linear, address::clamp_to_edge);
-    float2 uv = (world.xz / frame.map_size_m * float(layer_weights.get_width() - 1) + 0.5)
-                / float(layer_weights.get_width());
-    out.weights = layer_weights.sample(ls, uv, level(0));
-    float4 m = layer_material.sample(ls, uv, level(0));
-    // Субстрат — индекс: берём ближайший узел, как CPU.
-    uint w = layer_material.get_width();
-    uint2 near = uint2(clamp(world.xz / frame.map_size_m * float(w - 1) + 0.5, 0.0, float(w - 1)));
-    out.material = float4(round(layer_material.read(near).x * 255.0), m.y, m.z, m.w);
-    float cn = float(layer_cover.get_width());
-    out.cover = layer_cover.sample(ls, (world.xz / frame.map_size_m * (cn - 1.0) + 0.5) / cn, level(0));
+    // Под детальной заплаткой (02.10) кластеры уходят под землю.
+    if (patch_active(frame, zone) && patch_edge_dist(world.xz, frame) > PATCH_HIDE_M) {
+        world.y -= PATCH_SINK_M;
+    }
+    terrain_layers(out, world, nrm, frame, layer_weights, layer_material, layer_cover);
     return out;
 }
+
+// Детальная заплатка у камеры (02.10, сессия 2): сетка PATCH_CELLS² по
+// PATCH_STEP_M, вершина — угол ячейки по номеру; вне игрового режима или
+// вне зоны все вершины схлопываются.
+vertex TerrainVaryings terrain_patch_vs(uint vid [[vertex_id]],
+                                        constant FrameUniforms& frame [[buffer(1)]],
+                                        texture2d<float> layer_weights [[texture(4)]],
+                                        texture2d<float> layer_material [[texture(5)]],
+                                        texture2d<float> layer_cover [[texture(6)]],
+                                        device const float* zone_heights [[buffer(10)]],
+                                        constant TerrainZone& zone [[buffer(11)]]) {
+    TerrainVaryings out;
+    out.cluster = PATCH_CLUSTER;
+    out.depth = 0;
+    if (!patch_active(frame, zone)) {
+        out.position = float4(0.0, 0.0, 0.0, 1.0);
+        out.world = 0.0;
+        out.rel = 0.0;
+        out.normal = float3(0, 1, 0);
+        out.weights = 0.0;
+        out.material = 0.0;
+        out.cover = 0.0;
+        return out;
+    }
+    uint cell = vid / 6;
+    const uint2 corner[6] = {uint2(0, 0), uint2(1, 1), uint2(1, 0), uint2(0, 0), uint2(0, 1), uint2(1, 1)};
+    uint2 ij = uint2(cell % uint(PATCH_CELLS), cell / uint(PATCH_CELLS)) + corner[vid % 6];
+    float2 p = patch_origin(frame) + float2(ij) * PATCH_STEP_M;
+    PatchZone g = {zone_heights, zone};
+    float3 world = float3(p.x, patch_height(g, p, frame), p.y);
+    terrain_layers(out, world, patch_normal(g, p, frame), frame, layer_weights, layer_material, layer_cover);
+    return out;
+}
+
 
 // Слои массивов: src/terrain_materials.rs, LAYERS.
 constant int MAT_ROCK = 0;

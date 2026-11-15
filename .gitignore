@@ -11,3 +11,8 @@ assets/source/sky/
 
 # Сканы Poly Haven (02.11): исходники восстанавливает tools/plants/fetch_polyhaven.py
 assets/source/polyhaven/*/
+# Деревья-сканы (02.11): тяжёлые, восстанавливает tools/blender/scan_lods.py -- --heavy
+assets/models/scans/fir_tree_01*
+assets/models/scans/fir_sapling*
+assets/models/scans/island_tree_02*
+assets/models/scans/tree_small_02*

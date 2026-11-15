@@ -1,0 +1,1610 @@
+{
+ "fern_02_b": {
+  "scan": "fern_02",
+  "role": "foliage",
+  "source_triangles": 2384,
+  "lod_triangles": [
+   2384,
+   1072,
+   375
+  ],
+  "size_m": [
+   0.99,
+   0.428,
+   0.894
+  ],
+  "materials": [
+   {
+    "name": "fern_02",
+    "alpha": "MASK",
+    "albedo": "fern_02/fern_02_diff_1k.jpg",
+    "normal": "fern_02/fern_02_nor_gl_1k.jpg",
+    "rough": "fern_02/fern_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "fern_02_c": {
+  "scan": "fern_02",
+  "role": "foliage",
+  "source_triangles": 2248,
+  "lod_triangles": [
+   2248,
+   1011,
+   353
+  ],
+  "size_m": [
+   0.874,
+   0.349,
+   0.765
+  ],
+  "materials": [
+   {
+    "name": "fern_02",
+    "alpha": "MASK",
+    "albedo": "fern_02/fern_02_diff_1k.jpg",
+    "normal": "fern_02/fern_02_nor_gl_1k.jpg",
+    "rough": "fern_02/fern_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "fern_02_a": {
+  "scan": "fern_02",
+  "role": "foliage",
+  "source_triangles": 784,
+  "lod_triangles": [
+   784,
+   351,
+   122
+  ],
+  "size_m": [
+   0.552,
+   0.287,
+   0.613
+  ],
+  "materials": [
+   {
+    "name": "fern_02",
+    "alpha": "MASK",
+    "albedo": "fern_02/fern_02_diff_1k.jpg",
+    "normal": "fern_02/fern_02_nor_gl_1k.jpg",
+    "rough": "fern_02/fern_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "fern_02_d": {
+  "scan": "fern_02",
+  "role": "foliage",
+  "source_triangles": 816,
+  "lod_triangles": [
+   816,
+   367,
+   128
+  ],
+  "size_m": [
+   0.573,
+   0.213,
+   0.593
+  ],
+  "materials": [
+   {
+    "name": "fern_02",
+    "alpha": "MASK",
+    "albedo": "fern_02/fern_02_diff_1k.jpg",
+    "normal": "fern_02/fern_02_nor_gl_1k.jpg",
+    "rough": "fern_02/fern_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock01": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 11000,
+  "lod_triangles": [
+   8000,
+   1999,
+   499
+  ],
+  "size_m": [
+   2.238,
+   1.473,
+   3.369
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock02": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 10996,
+  "lod_triangles": [
+   7999,
+   1999,
+   500
+  ],
+  "size_m": [
+   2.655,
+   1.262,
+   3.264
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock03": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 5000,
+  "lod_triangles": [
+   5000,
+   2000,
+   500
+  ],
+  "size_m": [
+   2.109,
+   1.1,
+   2.08
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock04": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 10589,
+  "lod_triangles": [
+   7999,
+   1999,
+   499
+  ],
+  "size_m": [
+   2.128,
+   1.768,
+   1.965
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock05": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 16548,
+  "lod_triangles": [
+   8000,
+   2000,
+   499
+  ],
+  "size_m": [
+   1.817,
+   1.205,
+   2.999
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_01_rock06": {
+  "scan": "rock_moss_set_01",
+  "role": "rock",
+  "source_triangles": 8994,
+  "lod_triangles": [
+   8000,
+   1999,
+   499
+  ],
+  "size_m": [
+   2.126,
+   1.262,
+   2.757
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_01",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+    "normal": "rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_01/rock_moss_set_01_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock08": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 8000,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   1.206,
+   0.529,
+   0.984
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock09": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 7894,
+  "lod_triangles": [
+   7894,
+   2000,
+   499
+  ],
+  "size_m": [
+   1.629,
+   0.61,
+   1.011
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock12": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 7999,
+  "lod_triangles": [
+   7999,
+   1999,
+   500
+  ],
+  "size_m": [
+   1.58,
+   0.736,
+   1.443
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock13": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 7928,
+  "lod_triangles": [
+   7928,
+   2000,
+   499
+  ],
+  "size_m": [
+   2.091,
+   1.256,
+   1.138
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock10": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 8000,
+  "lod_triangles": [
+   8000,
+   2000,
+   499
+  ],
+  "size_m": [
+   2.203,
+   0.768,
+   1.552
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock11": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 8000,
+  "lod_triangles": [
+   8000,
+   1999,
+   500
+  ],
+  "size_m": [
+   1.954,
+   1.311,
+   1.529
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "rock_moss_set_02_rock07": {
+  "scan": "rock_moss_set_02",
+  "role": "rock",
+  "source_triangles": 9826,
+  "lod_triangles": [
+   8000,
+   1999,
+   499
+  ],
+  "size_m": [
+   1.693,
+   0.745,
+   1.215
+  ],
+  "materials": [
+   {
+    "name": "rock_moss_set_02",
+    "alpha": "OPAQUE",
+    "albedo": "rock_moss_set_02/rock_moss_set_02_diff_1k.jpg",
+    "normal": "rock_moss_set_02/rock_moss_set_02_nor_gl_1k.jpg",
+    "rough": "rock_moss_set_02/rock_moss_set_02_rough_1k.jpg"
+   }
+  ]
+ },
+ "boulder_01": {
+  "scan": "boulder_01",
+  "role": "rock",
+  "source_triangles": 66122,
+  "lod_triangles": [
+   24709,
+   2000,
+   500
+  ],
+  "size_m": [
+   1.272,
+   1.004,
+   1.83
+  ],
+  "materials": [
+   {
+    "name": "boulder_01",
+    "alpha": "OPAQUE",
+    "albedo": "boulder_01/boulder_01_diff_1k.jpg",
+    "normal": "boulder_01/boulder_01_nor_gl_1k.jpg",
+    "rough": "boulder_01/boulder_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "stone_01": {
+  "scan": "stone_01",
+  "role": "rock",
+  "source_triangles": 53520,
+  "lod_triangles": [
+   7999,
+   1999,
+   499
+  ],
+  "size_m": [
+   0.147,
+   0.072,
+   0.089
+  ],
+  "materials": [
+   {
+    "name": "stone_01",
+    "alpha": "OPAQUE",
+    "albedo": "stone_01/stone_01_diff_1k.jpg",
+    "normal": "stone_01/stone_01_nor_gl_1k.jpg",
+    "rough": "stone_01/stone_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "rock_07": {
+  "scan": "rock_07",
+  "role": "rock",
+  "source_triangles": 14844,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.169,
+   0.144,
+   0.32
+  ],
+  "materials": [
+   {
+    "name": "rock_07",
+    "alpha": "OPAQUE",
+    "albedo": "rock_07/rock_07_diff_1k.jpg",
+    "normal": "rock_07/rock_07_nor_gl_1k.jpg",
+    "rough": "rock_07/rock_07_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_01": {
+  "scan": "root_cluster_01",
+  "role": "wood",
+  "source_triangles": 225261,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   4.123,
+   1.509,
+   2.683
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_01",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_01/root_cluster_01_diff_1k.jpg",
+    "normal": "root_cluster_01/root_cluster_01_nor_gl_1k.jpg",
+    "rough": "root_cluster_01/root_cluster_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_d": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 30754,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.313,
+   0.115,
+   0.977
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_f": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 37478,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.329,
+   0.139,
+   1.25
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_e": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 10635,
+  "lod_triangles": [
+   7999,
+   1999,
+   500
+  ],
+  "size_m": [
+   0.3,
+   0.059,
+   0.4
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_h": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 10216,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.275,
+   0.086,
+   0.448
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_c": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 5958,
+  "lod_triangles": [
+   5958,
+   2000,
+   499
+  ],
+  "size_m": [
+   0.236,
+   0.057,
+   0.389
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_g": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 12514,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.27,
+   0.058,
+   0.677
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_b": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 18147,
+  "lod_triangles": [
+   8000,
+   1999,
+   499
+  ],
+  "size_m": [
+   0.327,
+   0.089,
+   0.782
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "root_cluster_02_a": {
+  "scan": "root_cluster_02",
+  "role": "wood",
+  "source_triangles": 213939,
+  "lod_triangles": [
+   7999,
+   2000,
+   499
+  ],
+  "size_m": [
+   1.454,
+   0.193,
+   2.279
+  ],
+  "materials": [
+   {
+    "name": "root_cluster_02",
+    "alpha": "OPAQUE",
+    "albedo": "root_cluster_02/root_cluster_02_diff_1k.jpg",
+    "normal": "root_cluster_02/root_cluster_02_nor_gl_1k.jpg",
+    "rough": "root_cluster_02/root_cluster_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "single_root": {
+  "scan": "single_root",
+  "role": "wood",
+  "source_triangles": 61027,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.555,
+   0.178,
+   1.836
+  ],
+  "materials": [
+   {
+    "name": "single_root",
+    "alpha": "OPAQUE",
+    "albedo": "single_root/single_root_diff_1k.jpg",
+    "normal": "single_root/single_root_nor_gl_1k.jpg",
+    "rough": "single_root/single_root_arm_1k.jpg"
+   }
+  ]
+ },
+ "pine_roots_a": {
+  "scan": "pine_roots",
+  "role": "wood",
+  "source_triangles": 81625,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   1.739,
+   0.144,
+   0.826
+  ],
+  "materials": [
+   {
+    "name": "pine_roots_a",
+    "alpha": "OPAQUE",
+    "albedo": "pine_roots/pine_roots_a_diff_1k.jpg",
+    "normal": "pine_roots/pine_roots_a_nor_gl_1k.jpg",
+    "rough": "pine_roots/pine_roots_a_arm_1k.jpg"
+   },
+   {
+    "name": "pine_roots_b",
+    "alpha": "OPAQUE",
+    "albedo": "pine_roots/pine_roots_b_diff_1k.jpg",
+    "normal": "pine_roots/pine_roots_b_nor_gl_1k.jpg",
+    "rough": "pine_roots/pine_roots_b_arm_1k.jpg"
+   }
+  ]
+ },
+ "pine_roots_b": {
+  "scan": "pine_roots",
+  "role": "wood",
+  "source_triangles": 81068,
+  "lod_triangles": [
+   7999,
+   2000,
+   499
+  ],
+  "size_m": [
+   1.629,
+   0.148,
+   0.993
+  ],
+  "materials": [
+   {
+    "name": "pine_roots_a",
+    "alpha": "OPAQUE",
+    "albedo": "pine_roots/pine_roots_a_diff_1k.jpg",
+    "normal": "pine_roots/pine_roots_a_nor_gl_1k.jpg",
+    "rough": "pine_roots/pine_roots_a_arm_1k.jpg"
+   },
+   {
+    "name": "pine_roots_b",
+    "alpha": "OPAQUE",
+    "albedo": "pine_roots/pine_roots_b_diff_1k.jpg",
+    "normal": "pine_roots/pine_roots_b_nor_gl_1k.jpg",
+    "rough": "pine_roots/pine_roots_b_arm_1k.jpg"
+   }
+  ]
+ },
+ "tree_stump_01": {
+  "scan": "tree_stump_01",
+  "role": "wood",
+  "source_triangles": 41046,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   1.426,
+   0.573,
+   1.59
+  ],
+  "materials": [
+   {
+    "name": "tree_stump_01",
+    "alpha": "OPAQUE",
+    "albedo": "tree_stump_01/tree_stump_01_diff_1k.jpg",
+    "normal": "tree_stump_01/tree_stump_01_nor_gl_1k.jpg",
+    "rough": "tree_stump_01/tree_stump_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "tree_stump_02": {
+  "scan": "tree_stump_02",
+  "role": "wood",
+  "source_triangles": 62345,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   1.522,
+   0.522,
+   1.393
+  ],
+  "materials": [
+   {
+    "name": "tree_stump_02",
+    "alpha": "OPAQUE",
+    "albedo": "tree_stump_02/tree_stump_02_diff_1k.jpg",
+    "normal": "tree_stump_02/tree_stump_02_nor_gl_1k.jpg",
+    "rough": "tree_stump_02/tree_stump_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "dead_tree_trunk": {
+  "scan": "dead_tree_trunk",
+  "role": "wood",
+  "source_triangles": 101802,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   3.051,
+   0.29,
+   0.278
+  ],
+  "materials": [
+   {
+    "name": "dead_tree_trunk",
+    "alpha": "OPAQUE",
+    "albedo": "dead_tree_trunk/dead_tree_trunk_diff_1k.jpg",
+    "normal": "dead_tree_trunk/dead_tree_trunk_nor_gl_1k.jpg",
+    "rough": "dead_tree_trunk/dead_tree_trunk_arm_1k.jpg"
+   }
+  ]
+ },
+ "dead_tree_trunk_02": {
+  "scan": "dead_tree_trunk_02",
+  "role": "wood",
+  "source_triangles": 83128,
+  "lod_triangles": [
+   8000,
+   1999,
+   500
+  ],
+  "size_m": [
+   4.051,
+   1.055,
+   1.056
+  ],
+  "materials": [
+   {
+    "name": "dead_tree_trunk_02",
+    "alpha": "OPAQUE",
+    "albedo": "dead_tree_trunk_02/dead_tree_trunk_02_diff_1k.jpg",
+    "normal": "dead_tree_trunk_02/dead_tree_trunk_02_nor_gl_1k.jpg",
+    "rough": "dead_tree_trunk_02/dead_tree_trunk_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "dry_branches_medium_01_c": {
+  "scan": "dry_branches_medium_01",
+  "role": "wood",
+  "source_triangles": 5616,
+  "lod_triangles": [
+   5616,
+   1999,
+   499
+  ],
+  "size_m": [
+   0.131,
+   0.143,
+   0.777
+  ],
+  "materials": [
+   {
+    "name": "dry_branches_medium_01",
+    "alpha": "OPAQUE",
+    "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
+    "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
+    "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "dry_branches_medium_01_b": {
+  "scan": "dry_branches_medium_01",
+  "role": "wood",
+  "source_triangles": 5254,
+  "lod_triangles": [
+   5254,
+   1999,
+   500
+  ],
+  "size_m": [
+   0.151,
+   0.142,
+   1.039
+  ],
+  "materials": [
+   {
+    "name": "dry_branches_medium_01",
+    "alpha": "OPAQUE",
+    "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
+    "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
+    "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "dry_branches_medium_01_a": {
+  "scan": "dry_branches_medium_01",
+  "role": "wood",
+  "source_triangles": 5933,
+  "lod_triangles": [
+   5933,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.323,
+   0.341,
+   1.299
+  ],
+  "materials": [
+   {
+    "name": "dry_branches_medium_01",
+    "alpha": "OPAQUE",
+    "albedo": "dry_branches_medium_01/dry_branches_medium_01_diff_1k.jpg",
+    "normal": "dry_branches_medium_01/dry_branches_medium_01_nor_gl_1k.jpg",
+    "rough": "dry_branches_medium_01/dry_branches_medium_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "bark_debris_01_a": {
+  "scan": "bark_debris_01",
+  "role": "wood",
+  "source_triangles": 38488,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.187,
+   0.066,
+   0.399
+  ],
+  "materials": [
+   {
+    "name": "bark_debris_01",
+    "alpha": "OPAQUE",
+    "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
+    "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
+    "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "bark_debris_01_b": {
+  "scan": "bark_debris_01",
+  "role": "wood",
+  "source_triangles": 48622,
+  "lod_triangles": [
+   7999,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.204,
+   0.088,
+   0.465
+  ],
+  "materials": [
+   {
+    "name": "bark_debris_01",
+    "alpha": "OPAQUE",
+    "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
+    "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
+    "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "bark_debris_01_c": {
+  "scan": "bark_debris_01",
+  "role": "wood",
+  "source_triangles": 65062,
+  "lod_triangles": [
+   7999,
+   1999,
+   500
+  ],
+  "size_m": [
+   0.147,
+   0.098,
+   0.572
+  ],
+  "materials": [
+   {
+    "name": "bark_debris_01",
+    "alpha": "OPAQUE",
+    "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
+    "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
+    "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "bark_debris_01_d": {
+  "scan": "bark_debris_01",
+  "role": "wood",
+  "source_triangles": 41234,
+  "lod_triangles": [
+   8000,
+   2000,
+   500
+  ],
+  "size_m": [
+   0.138,
+   0.109,
+   0.606
+  ],
+  "materials": [
+   {
+    "name": "bark_debris_01",
+    "alpha": "OPAQUE",
+    "albedo": "bark_debris_01/bark_debris_01_diff_1k.jpg",
+    "normal": "bark_debris_01/bark_debris_01_nor_gl_1k.jpg",
+    "rough": "bark_debris_01/bark_debris_01_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_02_a": {
+  "scan": "shrub_02",
+  "role": "foliage",
+  "source_triangles": 7590,
+  "lod_triangles": [
+   6000,
+   2499,
+   874
+  ],
+  "size_m": [
+   1.312,
+   1.689,
+   1.641
+  ],
+  "materials": [
+   {
+    "name": "shrub_02",
+    "alpha": "MASK",
+    "albedo": "shrub_02/shrub_02_diff_1k.jpg",
+    "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
+    "rough": "shrub_02/shrub_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_02_b": {
+  "scan": "shrub_02",
+  "role": "foliage",
+  "source_triangles": 5242,
+  "lod_triangles": [
+   5242,
+   2358,
+   825
+  ],
+  "size_m": [
+   1.11,
+   1.506,
+   1.28
+  ],
+  "materials": [
+   {
+    "name": "shrub_02",
+    "alpha": "MASK",
+    "albedo": "shrub_02/shrub_02_diff_1k.jpg",
+    "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
+    "rough": "shrub_02/shrub_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_02_c": {
+  "scan": "shrub_02",
+  "role": "foliage",
+  "source_triangles": 9234,
+  "lod_triangles": [
+   6000,
+   2499,
+   874
+  ],
+  "size_m": [
+   1.767,
+   1.315,
+   2.285
+  ],
+  "materials": [
+   {
+    "name": "shrub_02",
+    "alpha": "MASK",
+    "albedo": "shrub_02/shrub_02_diff_1k.jpg",
+    "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
+    "rough": "shrub_02/shrub_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_02_d": {
+  "scan": "shrub_02",
+  "role": "foliage",
+  "source_triangles": 5188,
+  "lod_triangles": [
+   5188,
+   2333,
+   816
+  ],
+  "size_m": [
+   1.08,
+   1.229,
+   1.098
+  ],
+  "materials": [
+   {
+    "name": "shrub_02",
+    "alpha": "MASK",
+    "albedo": "shrub_02/shrub_02_diff_1k.jpg",
+    "normal": "shrub_02/shrub_02_nor_gl_1k.jpg",
+    "rough": "shrub_02/shrub_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_03_a": {
+  "scan": "shrub_03",
+  "role": "foliage",
+  "source_triangles": 2385,
+  "lod_triangles": [
+   2385,
+   1072,
+   375
+  ],
+  "size_m": [
+   0.201,
+   0.403,
+   0.151
+  ],
+  "materials": [
+   {
+    "name": "shrub_03",
+    "alpha": "MASK",
+    "albedo": "shrub_03/shrub_03_diff_1k.jpg",
+    "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
+    "rough": "shrub_03/shrub_03_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_03_b": {
+  "scan": "shrub_03",
+  "role": "foliage",
+  "source_triangles": 2134,
+  "lod_triangles": [
+   2134,
+   959,
+   334
+  ],
+  "size_m": [
+   0.184,
+   0.353,
+   0.123
+  ],
+  "materials": [
+   {
+    "name": "shrub_03",
+    "alpha": "MASK",
+    "albedo": "shrub_03/shrub_03_diff_1k.jpg",
+    "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
+    "rough": "shrub_03/shrub_03_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_03_c": {
+  "scan": "shrub_03",
+  "role": "foliage",
+  "source_triangles": 1790,
+  "lod_triangles": [
+   1790,
+   805,
+   281
+  ],
+  "size_m": [
+   0.096,
+   0.304,
+   0.113
+  ],
+  "materials": [
+   {
+    "name": "shrub_03",
+    "alpha": "MASK",
+    "albedo": "shrub_03/shrub_03_diff_1k.jpg",
+    "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
+    "rough": "shrub_03/shrub_03_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_03_d": {
+  "scan": "shrub_03",
+  "role": "foliage",
+  "source_triangles": 1978,
+  "lod_triangles": [
+   1978,
+   890,
+   311
+  ],
+  "size_m": [
+   0.113,
+   0.256,
+   0.089
+  ],
+  "materials": [
+   {
+    "name": "shrub_03",
+    "alpha": "MASK",
+    "albedo": "shrub_03/shrub_03_diff_1k.jpg",
+    "normal": "shrub_03/shrub_03_nor_gl_1k.jpg",
+    "rough": "shrub_03/shrub_03_arm_1k.jpg"
+   }
+  ]
+ },
+ "shrub_04": {
+  "scan": "shrub_04",
+  "role": "foliage",
+  "source_triangles": 27327,
+  "lod_triangles": [
+   6000,
+   2499,
+   873
+  ],
+  "size_m": [
+   0.584,
+   0.219,
+   0.146
+  ],
+  "materials": [
+   {
+    "name": "shrub_04",
+    "alpha": "MASK",
+    "albedo": "shrub_04/shrub_04_diff_1k.jpg",
+    "normal": "shrub_04/shrub_04_nor_gl_1k.jpg",
+    "rough": "shrub_04/shrub_04_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_sapling_a": {
+  "scan": "fir_sapling",
+  "role": "tree",
+  "source_triangles": 157402,
+  "lod_triangles": [
+   80000,
+   16000,
+   4000
+  ],
+  "size_m": [
+   0.861,
+   1.301,
+   0.822
+  ],
+  "materials": [
+   {
+    "name": "fir_sapling_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
+   },
+   {
+    "name": "fir_sapling_twigs",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
+   }
+  ]
+ },
+ "island_tree_02": {
+  "scan": "island_tree_02",
+  "role": "tree",
+  "source_triangles": 1072212,
+  "lod_triangles": [
+   80000,
+   16000,
+   4000
+  ],
+  "size_m": [
+   4.208,
+   3.407,
+   4.071
+  ],
+  "materials": [
+   {
+    "name": "island_tree_02",
+    "alpha": "OPAQUE",
+    "albedo": "island_tree_02/island_tree_02_diff_1k.jpg",
+    "normal": "island_tree_02/island_tree_02_nor_gl_1k.jpg",
+    "rough": "island_tree_02/island_tree_02_arm_1k.jpg"
+   },
+   {
+    "name": "island_tree_02_leaves",
+    "alpha": "BLEND",
+    "albedo": "island_tree_02/island_tree_02_leaves_diff_1k.jpg",
+    "normal": "island_tree_02/island_tree_02_leaves_nor_gl_1k.jpg",
+    "rough": "island_tree_02/island_tree_02_leaves_arm_1k.jpg"
+   },
+   {
+    "name": "island_tree_02_branches",
+    "alpha": "OPAQUE",
+    "albedo": "island_tree_02/island_tree_02_branches_diff_1k.jpg",
+    "normal": "island_tree_02/island_tree_02_branches_nor_gl_1k.jpg",
+    "rough": "island_tree_02/island_tree_02_branches_arm_1k.jpg"
+   }
+  ]
+ },
+ "tree_small_02": {
+  "scan": "tree_small_02",
+  "role": "tree",
+  "source_triangles": 2062487,
+  "lod_triangles": [
+   80000,
+   16443,
+   8755
+  ],
+  "size_m": [
+   2.917,
+   4.557,
+   4.292
+  ],
+  "materials": [
+   {
+    "name": "tree_small_02_branches",
+    "alpha": "OPAQUE",
+    "albedo": "tree_small_02/tree_small_02_branch_diff_1k.jpg",
+    "normal": "tree_small_02/tree_small_02_branch_nor_gl_1k.jpg",
+    "rough": "tree_small_02/tree_small_02_branch_arm_1k.jpg"
+   },
+   {
+    "name": "tree_small_02_leaves",
+    "alpha": "BLEND",
+    "albedo": "tree_small_02/tree_small_02_leaves_diff_1k.jpg",
+    "normal": "tree_small_02/tree_small_02_leaves_nor_gl_1k.jpg",
+    "rough": "tree_small_02/tree_small_02_leaves_arm_1k.jpg"
+   },
+   {
+    "name": "tree_small_02_trunk",
+    "alpha": "OPAQUE",
+    "albedo": "tree_small_02/tree_small_02_diff_1k.jpg",
+    "normal": "tree_small_02/tree_small_02_nor_gl_1k.jpg",
+    "rough": "tree_small_02/tree_small_02_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_tree_01_a": {
+  "scan": "fir_tree_01",
+  "role": "tree",
+  "source_triangles": 4176819,
+  "lod_triangles": [
+   80000,
+   16000,
+   7563
+  ],
+  "size_m": [
+   6.534,
+   18.925,
+   6.427
+  ],
+  "materials": [
+   {
+    "name": "fir_tree_01_bark",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_a",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_twig",
+    "alpha": "BLEND",
+    "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_dead_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_b",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_c",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_sapling_b": {
+  "scan": "fir_sapling",
+  "role": "tree",
+  "source_triangles": 150876,
+  "lod_triangles": [
+   79999,
+   16000,
+   4000
+  ],
+  "size_m": [
+   0.64,
+   0.952,
+   0.818
+  ],
+  "materials": [
+   {
+    "name": "fir_sapling_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
+   },
+   {
+    "name": "fir_sapling_twigs",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_sapling_c": {
+  "scan": "fir_sapling",
+  "role": "tree",
+  "source_triangles": 124743,
+  "lod_triangles": [
+   80000,
+   16000,
+   4000
+  ],
+  "size_m": [
+   0.622,
+   0.736,
+   0.634
+  ],
+  "materials": [
+   {
+    "name": "fir_sapling_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_branches_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_branches_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_branches_arm_1k.jpg"
+   },
+   {
+    "name": "fir_sapling_twigs",
+    "alpha": "OPAQUE",
+    "albedo": "fir_sapling/fir_sapling_twigs_diff_1k.jpg",
+    "normal": "fir_sapling/fir_sapling_twigs_nor_gl_1k.jpg",
+    "rough": "fir_sapling/fir_sapling_twigs_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_tree_01_b": {
+  "scan": "fir_tree_01",
+  "role": "tree",
+  "source_triangles": 2300624,
+  "lod_triangles": [
+   80000,
+   15999,
+   4030
+  ],
+  "size_m": [
+   5.613,
+   14.055,
+   6.057
+  ],
+  "materials": [
+   {
+    "name": "fir_tree_01_bark",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_a",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_twig",
+    "alpha": "BLEND",
+    "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_dead_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_b",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_c",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   }
+  ]
+ },
+ "fir_tree_01_c": {
+  "scan": "fir_tree_01",
+  "role": "tree",
+  "source_triangles": 505492,
+  "lod_triangles": [
+   80000,
+   16000,
+   4019
+  ],
+  "size_m": [
+   6.306,
+   14.521,
+   5.966
+  ],
+  "materials": [
+   {
+    "name": "fir_tree_01_bark",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_a",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_a_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_a_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_a_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_twig",
+    "alpha": "BLEND",
+    "albedo": "fir_tree_01/fir_tree_01_twig_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_twig_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_twig_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_dead_branches",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_b",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_trunk_b_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_trunk_b_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_trunk_b_arm_1k.jpg"
+   },
+   {
+    "name": "fir_tree_01_trunk_c",
+    "alpha": "OPAQUE",
+    "albedo": "fir_tree_01/fir_tree_01_bark_diff_1k.jpg",
+    "normal": "fir_tree_01/fir_tree_01_bark_nor_gl_1k.jpg",
+    "rough": "fir_tree_01/fir_tree_01_bark_arm_1k.jpg"
+   }
+  ]
+ }
+}

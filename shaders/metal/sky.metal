@@ -271,8 +271,9 @@ kernel void sky_ambient(texture2d<float> skyview [[texture(0)]],
     // Светило за облаком (сессия 4): плотность слоя по направлению на него;
     // сплошная облачность закрывает всегда. Бегущие тени облаков — свет
     // всей сцены то гаснет, то возвращается.
-    float sun_block = max(cloud_along(ldir, frame.camera_pos.xz, cloud, frame.time, frame.weather.w),
-                          smoothstep(0.85, 1.0, cloud));
+    // Пятна теней облаков считают рельеф и растения сами (`cloud_shadow`);
+    // здесь — только сплошная облачность.
+    float sun_block = smoothstep(0.85, 1.0, cloud);
     light *= 1.0 - 0.92 * sun_block;
     // Свет неба: ровный серый свод, когда облака закрыли большую часть неба.
     float sky_cover = smoothstep(0.45, 1.0, cloud);

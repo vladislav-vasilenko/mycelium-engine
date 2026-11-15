@@ -393,3 +393,15 @@ inline float cloud_along(float3 d, float2 cam_xz, float cover, float t, float wi
     float2 p = cam_xz + d.xz * (CLOUD_H / d.y);
     return cloud_density(p, cover, t, wind);
 }
+
+// Тень облаков на точке мира (04.3): плотность слоя там, где луч к светилу
+// пересекает высоту облаков; пятна бегут по склонам вместе с облаками.
+inline float cloud_shadow(constant FrameUniforms& f, float3 world, float3 to_light) {
+    float cover = f.weather.x;
+    if (cover < 0.02 || to_light.y < 0.02) {
+        return 1.0;
+    }
+    float2 xz = world.xz + to_light.xz / to_light.y * max(2200.0 - world.y, 0.0);
+    return 1.0 - 0.85 * cloud_density(xz, cover, f.time, f.weather.w);
+}
+

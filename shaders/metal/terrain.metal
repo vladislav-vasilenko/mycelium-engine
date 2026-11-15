@@ -827,6 +827,8 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // кластеров затеняли её ромбами. Точку заплатки сдвигаем к свету на 25 см.
     float3 srel = in.rel + (in.cluster == PATCH_CLUSTER ? L * 0.25 : float3(0.0));
     float shadow = shadow_factor(shadows, shadow_map, srel, normalize(in.normal), L);
+    // Тени облаков пятнами (04.3).
+    shadow *= cloud_shadow(frame, in.world, L);
     // Мелкие складки, которые карта теней (21 м на тексель вдали) не ловит,
     // гасят и часть прямого света (02.9).
     float3 sun = sky_sun_term(skyf) * shadow * mix(1.0, sky_vis * (1.0 - 0.4 * hollow), 0.6);

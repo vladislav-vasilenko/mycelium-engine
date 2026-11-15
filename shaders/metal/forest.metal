@@ -858,7 +858,7 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
     float3 L = -frame.light_dir.xyz;
     float3 V = normalize(-in.rel);
     float nl = leaf ? saturate(dot(n, L) * 0.6 + 0.4) : saturate(dot(n, L));
-    float shadow = shadow_factor(shadows, shadow_map, in.rel, n, L);
+    float shadow = shadow_factor(shadows, shadow_map, in.rel, n, L) * cloud_shadow(frame, in.world, L);
     float3 sun = sky_sun_term(skyf) * shadow;
     float ao = in.attr.z;
     if (mat > 8.5 && mat < 9.5) {

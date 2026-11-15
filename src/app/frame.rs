@@ -232,7 +232,8 @@ impl App {
             && self.scene == SceneMode::Terrain;
         let uniforms = FrameUniforms {
             view_proj: (proj * view).to_cols_array_2d(),
-            camera_pos: camera.position.extend(1.0).to_array(),
+            // w — кинематографичная обработка в тонмаппинге (04.5): 1 — вкл.
+            camera_pos: camera.position.extend(if self.grade { 1.0 } else { 0.0 }).to_array(),
             // К главному светилу — со знаком «от источника к сцене».
             light_dir: match &sky {
                 Some(s) => (-s.light_to).extend(0.0).to_array(),

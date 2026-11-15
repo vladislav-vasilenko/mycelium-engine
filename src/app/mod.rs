@@ -65,6 +65,8 @@ pub struct App {
     prev_world_time: f32,
     /// Погода (04.3).
     weather: crate::weather::Weather,
+    /// Кинематографичная обработка в тонмаппинге (04.5), клавиша K.
+    grade: bool,
     taa_frame: u32,
     scene: SceneMode,
     window: Option<Arc<Window>>,
@@ -179,6 +181,7 @@ impl App {
             taa_prev: None,
             prev_world_time: 0.0,
             weather,
+            grade: true,
             taa_frame: 0,
             scene,
             window: None,

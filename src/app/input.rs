@@ -71,6 +71,11 @@ impl App {
                 self.game.inspect(&cam);
             }
             KeyCode::KeyJ => self.game.journal_open = !self.game.journal_open,
+            // Кинематографичная обработка (04.5): вкл./выкл. для сравнения.
+            KeyCode::KeyK => {
+                self.grade = !self.grade;
+                self.update_title(true);
+            }
             // Погода (04.3): следующий пресет, переход плавный.
             KeyCode::KeyP => {
                 let next = self.weather.preset.next();

@@ -5,7 +5,7 @@ using namespace metal;
 
 struct FrameUniforms {
     float4x4 view_proj;
-    float4 camera_pos;
+    float4 camera_pos;     // w — кинематографичная обработка в тонмаппинге (04.5): 1 — вкл.
     float4 light_dir;      // от источника к сцене
     float time;
     float exposure;

@@ -61,9 +61,12 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
     // Хроматическая аберрация линзы (кинематографичная обработка): красный и
     // синий чуть расходятся к краям кадра (до ~4 пикселей в углу).
     float2 uvc = in.uv - 0.5;
-    float2 ca = uvc * dot(uvc, uvc) * 0.006;
-    scene.r = hdr.sample(bs, in.uv + ca).r;
-    scene.b = hdr.sample(bs, in.uv - ca).b;
+    bool grade = frame.camera_pos.w > 0.5;
+    if (grade) {
+        float2 ca = uvc * dot(uvc, uvc) * 0.006;
+        scene.r = hdr.sample(bs, in.uv + ca).r;
+        scene.b = hdr.sample(bs, in.uv - ca).b;
+    }
     float3 glow = bloom.sample(bs, in.uv).rgb;
     float3 c = mix(scene, glow * (bloom.get_width() == hdr.get_width() ? 1.0 : 1.0 / 6.0), 0.04) * e;
     // Сумеречное зрение (эффект Пуркинье): при низкой яркости сцены работают
@@ -82,13 +85,15 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
     // Кинематографичная обработка в духе Hellblade: приглушённая палитра
     // (насыщенность 0,78), тени холоднее, света теплее, S-кривая контраста
     // в гамме вывода (средний серый на месте), виньетка, зерно плёнки.
-    mapped = max(ml + 0.78 * (mapped - ml), 0.0);
-    float3 tint = mix(float3(0.93, 1.0, 1.07), float3(1.04, 1.0, 0.95), smoothstep(0.03, 0.5, ml));
-    mapped *= tint;
-    float3 g = pow(saturate(mapped), 1.0 / 2.2);
-    g = mix(g, g * g * (3.0 - 2.0 * g), 0.4);
-    mapped = pow(g, 2.2);
-    mapped *= 1.0 - 0.3 * smoothstep(0.08, 0.5, dot(uvc, uvc));
+    mapped = max(ml + (grade ? 0.78 : 0.9) * (mapped - ml), 0.0);
+    if (grade) {
+        float3 tint = mix(float3(0.93, 1.0, 1.07), float3(1.04, 1.0, 0.95), smoothstep(0.03, 0.5, ml));
+        mapped *= tint;
+        float3 g = pow(saturate(mapped), 1.0 / 2.2);
+        g = mix(g, g * g * (3.0 - 2.0 * g), 0.4);
+        mapped = pow(g, 2.2);
+        mapped *= 1.0 - 0.3 * smoothstep(0.08, 0.5, dot(uvc, uvc));
+    }
     // Дизеринг ±½ шага 8-битного вывода (02.10): плавный градиент неба без полос.
     uint2 px = uint2(in.position.xy);
     uint h = (px.x * 0x8da6b343u) ^ (px.y * 0xd8163841u) ^ uint(frame.time * 60.0) * 0x9e3779b9u;
@@ -97,7 +102,7 @@ fragment float4 tonemap_fs(FullscreenVaryings in [[stage_in]],
     float noise = (float(h >> 8) / 16777216.0 - 0.5) / 255.0;
     // Зерно плёнки: ±3 % яркости, сильнее в тенях, своё в каждом кадре.
     uint h2 = h * 0x846ca68bu ^ (h >> 16);
-    float grain = (float(h2 >> 8) / 16777216.0 - 0.5) * 0.06 * (1.0 - 0.7 * saturate(ml * 2.0));
+    float grain = grade ? (float(h2 >> 8) / 16777216.0 - 0.5) * 0.06 * (1.0 - 0.7 * saturate(ml * 2.0)) : 0.0;
     mapped = max(mapped * (1.0 + grain), 0.0);
     // Дизеринг в гамме вывода: шаг 8 бит равномерен там, а не в линейном.
     float3 srgb = pow(saturate(mapped), 1.0 / 2.2) + noise;

@@ -21,6 +21,7 @@ struct RiverOut {
     float across;     // −1…1 поперёк
     float slope;      // уклон отрезка
     float depth;      // глубина, м
+    float channel;    // 1 — русло (ложбина), 0 — склон: вода стекла бы вбок
 };
 
 static RiverOut river_vertex(uint vid, uint iid, constant FrameUniforms& frame,
@@ -117,6 +118,19 @@ static RiverOut river_vertex(uint vid, uint iid, constant FrameUniforms& frame,
     }
     o.slope = sl;
     o.depth = depth;
+    // Русло или склон: поперёк ленты (±0,6 полуширины, не ближе 3 м) рельеф с одной из
+    // сторон много ниже воды — это склон (линия ручья легла мимо ложбины),
+    // а не русло; вода здесь не держится — лента растворяется.
+    {
+        float2 c = end_p;
+        // Не ближе 3 м: у узкого ручья ±0,6 полуширины — меньше метра, и
+        // склон не отличался от русла.
+        float side = max(hw * 0.6, 3.0);
+        float hl = ground_height(c + end_n * side, heights, zone_heights, zone, frame);
+        float hr = ground_height(c - end_n * side, heights, zone_heights, zone, frame);
+        float drop = y - min(hl, hr);
+        o.channel = 1.0 - smoothstep(depth + 1.0, depth + 2.5, drop);
+    }
     return o;
 }
 
@@ -283,6 +297,10 @@ fragment float4 river_fs(RiverOut in [[stage_in]],
     // Край: вода растворяется к береговой линии (глубина под пикселем → 0)
     // и в крайней трети ленты — на склоне вбок прямой срез не виден.
     float soft = smoothstep(0.0, 0.35, dz) * (1.0 - smoothstep(0.55, 1.0, abs(in.across)));
+    // Под пикселем много глубже расчётной глубины — лента висит над откосом
+    // (сечение плоское, а склон уходит вниз; линия ручья на склоне): такой
+    // воды нет — растворяется.
+    soft *= (1.0 - smoothstep(in.depth + 0.8, in.depth + 2.0, dz)) * in.channel;
     // Устье: где дно ниже моря, лента растворяется в морской поверхности
     // (море рисуется своим проходом, с волнами и прибоем).
     soft *= smoothstep(-1.5, 0.0, bed);

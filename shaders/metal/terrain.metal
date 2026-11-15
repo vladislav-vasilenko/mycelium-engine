@@ -731,6 +731,38 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     albedo = pow(albedo, float3(1.0 + 0.35 * wet)) * mix(1.0, 0.45, wet);
     rough = mix(rough, 0.08, 0.9 * max(wet, 0.8 * rain_wet));
 
+    // Лужи (04.3, сессия 5): на ровном и в ложбинах, гуще на тропах, после
+    // сильного дождя; край — по шуму. Вода: тёмная, зеркальная, ровная (без
+    // рельефа почвы), в дождь — круги от капель.
+    // Уклон по вершинам интерполирован по треугольникам — только мягкий
+    // множитель; форма лужи — шум двух масштабов (без треугольных краёв).
+    float flat_k = 1.0 - smoothstep(3.0, 14.0, slope_deg);
+    float pn = 0.6 * detail.sample(s, pattern_uv(frame, lxz, 7.0)).r
+             + 0.4 * detail.sample(s, pattern_uv(frame, lxz, 2.3)).g;
+    float pv = pn + 0.25 * saturate(-curv * 6.0) + 0.12 * trail - 0.25 * (1.0 - flat_k);
+    float puddle = smoothstep(0.69, 0.75, pv) * smoothstep(0.5, 0.9, rain_wet);
+    if (puddle > 0.0) {
+        albedo *= mix(1.0, 0.3, puddle);
+        rough = mix(rough, 0.03, puddle);
+        nxy *= 1.0 - puddle;
+        if (frame.weather.y > 0.02) {
+            // Круги: в клетке 0,35 м — одна капля со своей фазой, кольцо
+            // расходится ~0,4 с; два слоя клеток со сдвигом.
+            for (int l = 0; l < 2; ++l) {
+                float2 g = lxz / 0.35 + float(l) * 0.5;
+                float2 cell = floor(g);
+                float hsh = fract(sin(dot(cell, float2(127.1, 311.7)) + float(l) * 17.0) * 43758.5453);
+                float2 ctr = cell + 0.25 + 0.5 * float2(hsh, fract(hsh * 7.31));
+                float2 dv = (g - ctr) * 0.35;
+                float r = length(dv);
+                float ph = fract(frame.time * 1.6 + hsh);
+                float ring = sin((r - ph * 0.18) * 150.0) * exp(-abs(r - ph * 0.18) * 70.0) * (1.0 - ph);
+                nxy += (r > 1e-4 ? dv / r : float2(0.0)) * ring * 0.1 * frame.weather.y * puddle
+                       * step(hsh, frame.weather.y);
+            }
+        }
+    }
+
 
     // Нормаль из карты: касательная +X, бикасательная −Z (v растёт с z, а «вверх» на картинке — к меньшим v).
     float3 t = normalize(float3(1, 0, 0) - n * n.x);

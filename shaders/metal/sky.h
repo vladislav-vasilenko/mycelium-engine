@@ -255,12 +255,58 @@ inline float shadow_factor(constant ShadowUniforms& sh, depth2d_array<float> map
         return 1.0;
     }
     constexpr sampler cmp(filter::linear, address::clamp_to_edge, compare_func::less_equal);
+    constexpr sampler pt(filter::nearest, address::clamp_to_edge);
     float size = float(map.get_width());
-    float sum = 0.0;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            sum += map.sample_compare(cmp, uv + float2(x, y) / size, c, ndc.z);
+    // Мягкие тени по расстоянию до заслона (PCSS, 02.10): ищем заслоняющие
+    // тексели вокруг точки, по их средней удалённости — ширина полутени. Диск
+    // солнца 0,53° даёт ~1 см на метр; листва многослойна и рассеивает свет,
+    // поэтому полутень взята в 3 раза шире: тени высоких крон — мягкие пятна,
+    // у основания ствола и камня — чёткие.
+    const float2 disk[16] = {
+        float2(-0.613, 0.617), float2(0.170, -0.040), float2(-0.299, 0.791), float2(0.645, 0.493),
+        float2(-0.651, 0.718), float2(0.421, 0.027), float2(-0.817, -0.271), float2(-0.705, -0.668),
+        float2(0.977, -0.108), float2(0.063, -0.993), float2(0.120, -0.393), float2(-0.405, -0.320),
+        float2(0.359, 0.876), float2(0.749, -0.570), float2(-0.170, 0.326), float2(0.444, -0.836)};
+    // Метры глубины света на единицу NDC — из матрицы каскада (ортографической).
+    float3 zrow = float3(sh.vp_rel[c][0][2], sh.vp_rel[c][1][2], sh.vp_rel[c][2][2]);
+    float m_per_ndc = 1.0 / max(abs(dot(zrow, to_light)), 1e-6);
+    // Диск без случайного поворота: без TAA (04.5) шум поворота виден мозаикой.
+    const float2x2 rot = float2x2(float2(1.0, 0.0), float2(0.0, 1.0));
+    // Куда растёт глубина к свету: смещение `p` сдвинуто к свету — сравним
+    // с несмещённой точкой (раскладка глубины карты не зашита в формулы).
+    float4 clip0 = sh.vp_rel[c] * float4(rel, 1.0);
+    float dirz = (ndc.z - clip0.z / clip0.w) < 0.0 ? -1.0 : 1.0;
+    // Заслон — то, что выше точки к свету больше чем на 30 см: соседние
+    // тексели склона под самой точкой заслоном не считаются.
+    float tol = 0.3 / m_per_ndc;
+    float search = clamp(0.8 / texel, 2.0, 16.0);
+    float blockers = 0.0, nb = 0.0;
+    for (int i = 0; i < 16; ++i) {
+        float dz = (map.sample(pt, uv + rot * disk[i] * search / size, c) - ndc.z) * dirz;
+        if (dz > tol) {
+            blockers += dz;
+            nb += 1.0;
         }
     }
-    return sum / 9.0;
+    if (nb == 0.0) {
+        // Заслонов дальше 30 см нет: обычный узкий PCF (контактные тени).
+        float sum = 0.0;
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                sum += map.sample_compare(cmp, uv + float2(x, y) / size, c, ndc.z);
+            }
+        }
+        return sum / 9.0;
+    }
+    float dist_m = blockers / nb * m_per_ndc;
+    float radius = clamp(dist_m * 0.028 / texel, 1.0, 14.0);
+    // Плоскость приёмника на смещении поднимается к свету на tan(угла) × сдвиг:
+    // сравнение отодвигаем к свету на столько же — без самотени склона.
+    float tan_l = sqrt(max(1.0 - nl * nl, 0.0)) / max(nl, 0.2);
+    float ref = ndc.z + dirz * (tan_l * radius * texel + texel) / m_per_ndc;
+    float sum = 0.0;
+    for (int i = 0; i < 16; ++i) {
+        sum += map.sample_compare(cmp, uv + rot * disk[i] * radius / size, c, ref);
+    }
+    return sum / 16.0;
 }

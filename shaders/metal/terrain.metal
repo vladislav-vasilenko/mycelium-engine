@@ -223,17 +223,18 @@ constant int MAT_LITTER = 6;
 constant int MAT_LEAVES = 7;
 constant int MAT_GRAVEL = 8;
 constant int MAT_MOSSROCK = 9;
-constant int MAT_COUNT = 10;
+constant int MAT_ASPHALT = 10;
+constant int MAT_COUNT = 11;
 // Размер повтора слоя на земле, м.
-constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0, 2.0, 2.5, 2.5, 2.5, 3.0};
+constant float MAT_TILE_M[MAT_COUNT] = {4.0, 3.0, 2.5, 2.0, 3.0, 2.0, 2.5, 2.5, 2.5, 3.0, 3.0};
 // Насколько слой темнеет и блестит от влаги (песок впитывает и блестит сильнее камня).
-constant float MAT_POROSITY[MAT_COUNT] = {0.25, 1.0, 0.7, 0.4, 0.5, 0.4, 0.5, 0.5, 0.6, 0.3};
+constant float MAT_POROSITY[MAT_COUNT] = {0.25, 1.0, 0.7, 0.4, 0.5, 0.4, 0.5, 0.5, 0.6, 0.3, 0.35};
 // Цвета слоёв в отладочном виде «слои материалов».
 constant float3 MAT_DEBUG[MAT_COUNT] = {
     float3(0.45, 0.45, 0.48), float3(0.95, 0.85, 0.45), float3(0.45, 0.28, 0.12),
     float3(0.15, 0.65, 0.15), float3(0.45, 0.55, 0.15), float3(0.6, 0.9, 0.3),
     float3(0.25, 0.18, 0.10), float3(0.75, 0.45, 0.15), float3(0.8, 0.8, 0.7),
-    float3(0.3, 0.5, 0.35)};
+    float3(0.3, 0.5, 0.35), float3(0.2, 0.2, 0.22)};
 
 // Виды: src/terrain_materials.rs, TerrainView.
 constant uint VIEW_LIT = 0;
@@ -260,7 +261,7 @@ struct MatSample {
 
 // Глубина рельефа слоя для параллакса, м (02.2, детализация вблизи).
 // Тропа (слой 8, каменистая тропа Poly Haven, 02.11): крупные камни — глубокий параллакс.
-constant float MAT_DEPTH_M[MAT_COUNT] = {0.06, 0.015, 0.03, 0.04, 0.035, 0.05, 0.03, 0.03, 0.09, 0.06};
+constant float MAT_DEPTH_M[MAT_COUNT] = {0.06, 0.015, 0.03, 0.04, 0.035, 0.05, 0.03, 0.03, 0.09, 0.06, 0.02};
 
 // Вторая выборка против повторов: повёрнутые и растянутые координаты.
 inline float2 rot_uv(float2 uv) {
@@ -409,6 +410,9 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
 
     // Доли слоёв до смешивания по высоте.
     float wl[MAT_COUNT];
+    for (int i = 0; i < MAT_COUNT; ++i) {
+        wl[i] = 0.0;
+    }
     float forest_w = in.weights.x;
     float4 cv = in.cover;
     // Пояса из сетки 15 м интерполируются линейно — граница выходит прямой.
@@ -471,10 +475,12 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float steep_n = (detail.sample(s, pattern_uv(frame, lxz, 17.0)).g - 0.5) * 0.16;
     float steep = smoothstep(0.18 + steep_n, 0.50 + steep_n, slope);
     float under = smoothstep(0.0, -0.6, in.world.y);
-    float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    float over[MAT_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     // Полотно тропы — утоптанная почва с щебнем, бровка — опад с почвой.
     // Полотно лесной тропы Якусимы — крупные камни и корни (02.11), почва между.
-    over[MAT_SOIL] += (belts ? 0.25 : 0.6) * trail + 0.4 * road_px + 0.3 * trail_edge * (1.0 - trail);
+    over[MAT_SOIL] += (belts ? 0.25 : 0.6) * trail + 0.3 * trail_edge * (1.0 - trail);
+    // Дорога — скан асфальта с картой высот: параллакс, как у тропы (04.3).
+    over[MAT_ASPHALT] += road_px;
     over[MAT_GRAVEL] += (belts ? 0.8 : 0.0) * trail;
     over[MAT_SOIL] += (belts ? 0.0 : 0.4) * trail;
     over[MAT_LITTER] += (belts ? 0.3 : 0.0) * trail_edge * (1.0 - trail);
@@ -482,7 +488,7 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     // В лесных поясах крутые склоны и выходы камня замшелые (Якусима — один из
     // самых влажных лесов Японии): часть «крутого камня» отдаётся мху.
     float mossy = belts ? 0.65 * (cv.x * 0.5 + cv.y) * forest_w : 0.0;
-    over[MAT_ROCK] += 0.7 * river + steep * (1.0 - mossy) + under * rocky + 0.6 * road_px;
+    over[MAT_ROCK] += 0.7 * river + steep * (1.0 - mossy) + under * rocky;
     over[MAT_GRAVEL] += (belts ? 0.6 : 0.0) * road_edge;
     over[MAT_LITTER] += (belts ? 0.4 : 0.0) * road_edge;
     // В лесу крутой склон — мшистый камень, а не голый мох.
@@ -510,7 +516,10 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
     float wall = smoothstep(35.0, 55.0, slope_deg);
     float3 local = in.rel + frame.cam_lo.xyz;
     // Производные в равномерном потоке: выборки ниже идут в ветвях.
-    float3 dlx = dfdx(local), dly = dfdy(local);
+    // Апскейл (04.6): производные — в масштабе выходного кадра (`cam_hi.w` —
+    // масштаб рендера), иначе мипы текстур и карт высот на ступень грубее, а
+    // камни тропы с параллаксом — плоские.
+    float3 dlx = dfdx(local) * frame.cam_hi.w, dly = dfdy(local) * frame.cam_hi.w;
     float dist = length(in.rel);
     float3 V0 = normalize(-in.rel);
     float3 L0 = -frame.light_dir.xyz;
@@ -678,14 +687,10 @@ fragment float4 terrain_fs(TerrainVaryings in [[stage_in]],
         nxy *= 1.0 - k_tree;
     }
 
-    // Асфальт дорог (мир с поясами — дороги OSM): тёмно-серый, без рисунка камня.
+    // Асфальт дорог — слой `MAT_ASPHALT` (скан с рельефом, 04.3); здесь —
+    // только шероховатость: в тени асфальт иначе отражал небо синим (02.10).
     if (belts && road_px > 0.0) {
-        // Тёплый серый и шероховатый: в тени тёмный асфальт иначе отражал
-        // небо синим (02.10).
-        float3 asphalt = float3(0.13, 0.125, 0.115) * (0.85 + 0.3 * macro);
-        albedo = mix(albedo, asphalt, road_px * 0.85);
-        rough = mix(rough, 0.92, road_px);
-        nxy *= 1.0 - 0.7 * road_px;
+        rough = mix(rough, max(rough, 0.85), road_px);
     }
 
     // Мокрый песок: темнее, глаже, с бликом.

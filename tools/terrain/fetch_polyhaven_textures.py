@@ -28,6 +28,7 @@ TEXTURES = {
     "forest_leaves_02": (2048, "подстилка"),
     "rocky_trail": (2048, "тропа из камней"),
     "mossy_rock": (2048, "мшистый камень"),
+    "worn_asphalt": (2048, "асфальт дорог"),
     "japanese_cedar_bark": (1024, "кора криптомерии"),
 }
 

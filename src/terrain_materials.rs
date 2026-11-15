@@ -28,7 +28,7 @@ pub struct MaterialLayer {
 /// каждого слоя на земле — `MAT_TILE_M` в `terrain.metal`.
 /// С 02.11 (сессия 4а) семь слоёв — сканы Poly Haven (`PH_*`, CC0,
 /// `tools/terrain/fetch_polyhaven_textures.py`); слой щебня — каменистая тропа.
-pub const LAYERS: [MaterialLayer; 10] = [
+pub const LAYERS: [MaterialLayer; 11] = [
     MaterialLayer {
         id: "PH_rock_face_03",
         role: "камень",
@@ -69,6 +69,11 @@ pub const LAYERS: [MaterialLayer; 10] = [
     MaterialLayer {
         id: "PH_mossy_rock",
         role: "мшистый камень",
+    },
+    // Асфальт дорог OSM с рельефом зерна и трещин (04.3: параллакс у дорог).
+    MaterialLayer {
+        id: "PH_worn_asphalt",
+        role: "асфальт",
     },
 ];
 

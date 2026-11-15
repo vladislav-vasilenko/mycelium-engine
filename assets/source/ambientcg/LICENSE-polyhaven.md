@@ -9,4 +9,5 @@
 | PH_forest_leaves_02 | https://polyhaven.com/a/forest_leaves_02 | подстилка |
 | PH_rocky_trail | https://polyhaven.com/a/rocky_trail | тропа из камней |
 | PH_mossy_rock | https://polyhaven.com/a/mossy_rock | мшистый камень |
+| PH_worn_asphalt | https://polyhaven.com/a/worn_asphalt | асфальт дорог |
 | PH_japanese_cedar_bark | https://polyhaven.com/a/japanese_cedar_bark | кора криптомерии |

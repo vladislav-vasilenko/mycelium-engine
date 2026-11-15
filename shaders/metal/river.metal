@@ -32,35 +32,56 @@ vertex RiverOut river_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
         o.position = float4(0.0, 0.0, -2.0, 1.0);
         return o;
     }
-    float ha = ground_height(s.a, heights, zone_heights, zone, frame);
-    float hb = ground_height(s.b, heights, zone_heights, zone, frame);
-    // Течение — от высокого конца к низкому.
+    // Геометрия — в порядке отрезков (соседи по буферу — та же линия):
+    // общий угол на стыках (без щелей), нахлёст на концах без соседа.
     float2 a = s.a, b = s.b;
-    if (hb > ha) {
-        float2 t = a; a = b; b = t;
-        float th = ha; ha = hb; hb = th;
-    }
     float2 dir = normalize(b - a + 1e-6);
     float2 nrm = float2(-dir.y, dir.x);
     float len = length(b - a);
-    float depth = max(s._pad.y, 0.04);
     float hw = s.half_width + s._pad.x;
+    bool has_prev = iid > 0 && segs[iid - 1].kind == 1u && all(abs(segs[iid - 1].b - a) < 0.01);
+    bool has_next = segs[iid + 1].kind == 1u && all(abs(segs[iid + 1].a - b) < 0.01);
     uint corner = vid % 6u;
     float u = (corner == 1u || corner == 2u || corner == 4u) ? 1.0 : -1.0;
     float v = (corner == 2u || corner == 4u || corner == 5u) ? 1.0 : 0.0;
-    float2 xz = mix(a, b, v) + nrm * u * hw;
-    // Поверхность — над дном оси с глубиной; к краю — к берегу (рельеф выше
-    // её скроет по глубине).
-    float y = mix(ha, hb, v) + depth + 0.03;
+    float2 end_n = nrm;
+    float2 end_p = mix(a, b, v);
+    if (v < 0.5) {
+        if (has_prev) {
+            float2 pd = normalize(a - segs[iid - 1].a + 1e-6);
+            float2 m = normalize(float2(-pd.y, pd.x) + nrm);
+            end_n = m / max(dot(m, nrm), 0.5);
+        } else {
+            end_p -= dir * hw * 0.5;
+        }
+    } else {
+        if (has_next) {
+            float2 nd = normalize(segs[iid + 1].b - b + 1e-6);
+            float2 m = normalize(float2(-nd.y, nd.x) + nrm);
+            end_n = m / max(dot(m, nrm), 0.5);
+        } else {
+            end_p += dir * hw * 0.5;
+        }
+    }
+    float2 xz = end_p + end_n * u * hw;
+    float ha = ground_height(a, heights, zone_heights, zone, frame);
+    float hb = ground_height(b, heights, zone_heights, zone, frame);
+    // Течение — от высокого конца к низкому.
+    float2 flow = hb > ha ? -dir : dir;
+    float depth = max(s._pad.y, 0.1);
+    // Поверхность — над дном оси: запас 12 см, рельеф на GPU (сглаживание,
+    // шум участка детализации, упрощение вдали) выше поля высот на сантиметры.
+    float y = mix(ha, hb, v) + depth + 0.12;
     o.world = float3(xz.x, y, xz.y);
     o.position = frame.view_proj_rel * float4(camera_relative(frame, o.world), 1.0);
-    o.flow = dir;
+    o.flow = flow;
     o.along = v * len;
     o.across = u;
     // Уклон — по 10 м до и после отрезка: высоты по 4-метровым отрезкам
     // шумные, и почти везде выходил «скат» с пеной.
-    float hu = ground_height(a - dir * 10.0, heights, zone_heights, zone, frame);
-    float hd = ground_height(b + dir * 10.0, heights, zone_heights, zone, frame);
+    float2 up_p = hb > ha ? b : a, dn_p = hb > ha ? a : b;
+    float hu = ground_height(up_p - flow * 10.0, heights, zone_heights, zone, frame);
+    float hd = ground_height(dn_p + flow * 10.0, heights, zone_heights, zone, frame);
     o.slope = max(hu - hd, 0.0) / (len + 20.0);
     o.depth = depth;
     return o;

@@ -211,6 +211,10 @@ impl App {
         let pre_exposure = r.last_exposure();
         // Время мира от тиков симуляции: волны и накат детерминированы.
         let time = ((self.sim.tick as f64 + alpha as f64) * sim::TICK_DT) as f32;
+        // Шаг времени мира между кадрами (04.6): ветер прошлого кадра для
+        // векторов движения растений — в `cam_lo.w`.
+        let world_dt = (time - self.prev_world_time).clamp(0.0, 0.1);
+        self.prev_world_time = time;
         // Лес (02.4): кластерный рельеф, выбор на GPU, не в самопроверке.
         let forest = self.forest_loaded
             && self.use_clusters
@@ -265,7 +269,7 @@ impl App {
             // крупная часть (кратна 256 м) + остаток.
             view_proj_rel: view_proj_rel.to_cols_array_2d(),
             cam_hi: cam_hi.extend(0.0).to_array(),
-            cam_lo: (camera.position - cam_hi).extend(0.0).to_array(),
+            cam_lo: (camera.position - cam_hi).extend(world_dt).to_array(),
         };
         // Срез кластерного рельефа по экранной ошибке 1 пиксель (02.3): на GPU
         // (02.5) или на CPU (`--cpu-cull`). Самопроверка считает и CPU-срез —

@@ -129,6 +129,7 @@ kernel void upscale_prep(texture2d<float, access::read_write> scene [[texture(0)
                          depth2d<float> depth [[texture(1)]],
                          texture2d<float, access::write> motion [[texture(3)]],
                          texture2d<float> vol [[texture(4)]],
+                         texture2d<float> wind [[texture(5)]],
                          constant TaaUniforms& t [[buffer(0)]],
                          uint2 gid [[thread_position_in_grid]]) {
     uint2 size = uint2(scene.get_width(), scene.get_height());
@@ -149,5 +150,7 @@ kernel void upscale_prep(texture2d<float, access::read_write> scene [[texture(0)
         float2 puv = float2(pndc.x * 0.5 + 0.5, 0.5 - pndc.y * 0.5);
         mv = puv - (uv - float2(t.jitter.x, -t.jitter.y) * 0.5);
     }
-    motion.write(float4(mv, 0.0, 0.0), gid);
+    // Ветер (04.6, сессия 2): сдвиг вершины растения к прошлому кадру на
+    // экране — из второго вложения прохода `scene`.
+    motion.write(float4(mv + wind.read(gid).xy, 0.0, 0.0), gid);
 }

@@ -274,6 +274,7 @@ fn render_pipeline(
     (vs, fs): (&str, &str),
     color_format: MTLPixelFormat,
     blend: Blend,
+    motion: Motion,
 ) -> Result<Obj<dyn MTLRenderPipelineState>, ShaderError> {
     require_function(lib, file, vs)?;
     require_function(lib, file, fs)?;
@@ -283,6 +284,7 @@ fn render_pipeline(
     desc.setFragmentFunctionDescriptor(Some(&function(lib, fs)));
     let color = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
     color.setPixelFormat(color_format);
+    set_motion_attachment(&desc, motion);
     if blend == Blend::Additive {
         // Звёзды: свет добавляется к небу.
         color.setBlendingState(MTL4BlendState::Enabled);
@@ -321,6 +323,30 @@ fn render_pipeline(
         })
 }
 
+/// Второе цветовое вложение прохода `scene` (04.6, сессия 2): сдвиг на
+/// экране от ветра (`Targets.wind`, RG16Float). Конвейеры прохода объявляют
+/// его все; пишут только растения.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Motion {
+    /// Конвейер не в проходе `scene`.
+    None,
+    /// В проходе `scene`, не пишет.
+    Masked,
+    /// Пишет сдвиг от ветра (растения).
+    Write,
+}
+
+fn set_motion_attachment(desc: &MTL4RenderPipelineDescriptor, motion: Motion) {
+    if motion == Motion::None {
+        return;
+    }
+    let a = unsafe { desc.colorAttachments().objectAtIndexedSubscript(1) };
+    a.setPixelFormat(MTLPixelFormat::RG16Float);
+    if motion == Motion::Masked {
+        a.setWriteMask(MTLColorWriteMask::None);
+    }
+}
+
 /// Только глубина в проходе с цветом: формат цвета как у сцены, запись цвета
 /// выключена; фрагментный шейдер — отсечение по альфе.
 fn color_masked_pipeline(
@@ -339,6 +365,7 @@ fn color_masked_pipeline(
     let color = unsafe { desc.colorAttachments().objectAtIndexedSubscript(0) };
     color.setPixelFormat(HDR_FORMAT);
     color.setWriteMask(MTLColorWriteMask::None);
+    set_motion_attachment(&desc, Motion::Masked);
     compiler
         .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(&desc, None)
         .map_err(|e| ShaderError {
@@ -382,6 +409,7 @@ pub fn build_pipelines(
             ("scene_vs", "scene_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Masked,
         )?,
         tonemap: render_pipeline(
             compiler,
@@ -391,6 +419,7 @@ pub fn build_pipelines(
             ("tonemap_vs", "tonemap_fs"),
             DRAWABLE_FORMAT,
             Blend::Opaque,
+            Motion::None,
         )?,
         terrain: render_pipeline(
             compiler,
@@ -400,6 +429,7 @@ pub fn build_pipelines(
             ("terrain_vs", "terrain_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Masked,
         )?,
         terrain_clusters: render_pipeline(
             compiler,
@@ -409,6 +439,7 @@ pub fn build_pipelines(
             ("terrain_cluster_vs", "terrain_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Masked,
         )?,
         terrain_patch: render_pipeline(
             compiler,
@@ -418,6 +449,7 @@ pub fn build_pipelines(
             ("terrain_patch_vs", "terrain_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Masked,
         )?,
         water: render_pipeline(
             compiler,
@@ -427,6 +459,7 @@ pub fn build_pipelines(
             ("water_vs", "water_fs"),
             HDR_FORMAT,
             Blend::Transmit,
+            Motion::None,
         )?,
         wet_sand: compute_pipeline(compiler, &water_lib, "water.metal", "wet_sand_update")?,
         water_probe: compute_pipeline(compiler, &water_lib, "water.metal", "water_probe")?,
@@ -438,6 +471,7 @@ pub fn build_pipelines(
             ("hands_vs", "hands_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::None,
         )?,
         skin_probe: compute_pipeline(compiler, &hands_lib, "hands.metal", "skin_probe")?,
         sky_transmittance: compute_pipeline(
@@ -497,6 +531,7 @@ pub fn build_pipelines(
             ("plant_vs", "plant_fs_prepassed"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Write,
         )?,
         plant_shadow: depth_only_pipeline(
             compiler,
@@ -514,6 +549,7 @@ pub fn build_pipelines(
             ("ui_vs", "ui_fs"),
             DRAWABLE_FORMAT,
             Blend::Alpha,
+            Motion::None,
         )?,
         forest_place: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_place")?,
         forest_finish: compute_pipeline(compiler, &forest_lib, "forest.metal", "forest_finish")?,
@@ -525,6 +561,7 @@ pub fn build_pipelines(
             ("stars_vs", "stars_fs"),
             HDR_FORMAT,
             Blend::Additive,
+            Motion::Masked,
         )?,
         sky: render_pipeline(
             compiler,
@@ -534,6 +571,7 @@ pub fn build_pipelines(
             ("sky_vs", "sky_fs"),
             HDR_FORMAT,
             Blend::Opaque,
+            Motion::Masked,
         )?,
         generation,
     })

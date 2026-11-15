@@ -543,6 +543,8 @@ struct PlantOut {
     float tint;
     float kind;       // вид гриба (05.1)
     float moss;       // мох на коре и почве (атрибут A)
+    float4 prev_clip; // вершина при ветре прошлого кадра (04.6)
+    float4 cur_clip;  // та же вершина сейчас (дрожание камеры в разности сокращается)
 };
 
 // Мир точки сетки растения: поворот, масштаб, ветер (по силе из атрибута).
@@ -563,7 +565,7 @@ static float plant_ground_h(PlantGround g, float2 p, constant FrameUniforms& fra
 }
 
 static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUniforms& frame,
-                          PlantGround g, thread float3& n) {
+                          PlantGround g, thread float3& n, float t) {
     float c = cos(inst.yaw), s = sin(inst.yaw);
     float3 p = float3(v.position);
     // Своя форма у каждого экземпляра (02.4, итерация 4): вытянутость,
@@ -579,7 +581,6 @@ static float3 plant_world(PlantVertex v, PlantInstance inst, constant FrameUnifo
     float3 nn = float3(v.normal);
     n = float3(c * nn.x - s * nn.z, nn.y, s * nn.x + c * nn.z);
     float w = float(v.attr.y) / 255.0;
-    float t = frame.time;
     // Точка покоя (до ветра): по ней — драпировка по рельефу, иначе на
     // склоне качающееся растение ходит вверх-вниз.
     float3 q_rest = q;
@@ -655,9 +656,18 @@ vertex PlantOut plant_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
     PlantInstance inst = insts[iid];
     PlantOut o;
     float3 n;
-    o.world = plant_world(v, inst, frame, PlantGround{heights, zone_heights, zone}, n);
+    PlantGround g{heights, zone_heights, zone};
+    o.world = plant_world(v, inst, frame, g, n, frame.time);
+    // Ветер прошлого кадра (04.6, сессия 2): та же вершина в момент
+    // `time − cam_lo.w`, текущей матрицей — сдвиг на экране только от ветра
+    // (движение камеры MetalFX получает по глубине).
+    float3 np;
+    float3 prev_world = plant_world(v, inst, frame, g, np, frame.time - frame.cam_lo.w);
+    float4 pc = frame.view_proj_rel * float4(camera_relative(frame, prev_world), 1.0);
     o.rel = camera_relative(frame, o.world);
     o.position = frame.view_proj_rel * float4(o.rel, 1.0);
+    o.prev_clip = pc;
+    o.cur_clip = o.position;
     if (v.attr.x == 9) {
         // Травинки (02.13): нормаль пучка — полусфера от его центра, почти
         // вверх; пучок освещается мягкой массой, а не бликующими полосками.
@@ -898,9 +908,18 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
     texture2d_array<float> scan_normal [[texture(7)]], device const float4* probes [[buffer(9)]]
 
 // После предпрохода глубины: без `discard`, глубина — на равенство.
-fragment float4 plant_fs_prepassed(PLANT_FS_ARGS) {
-    return plant_shade(in, front, false, frame, skyf, shadows, albedo_tex, shadow_map, aerial, mat_albedo,
-                       bark_normal, rt_ao_tex, scan_albedo, scan_normal, probes);
+struct PlantColorOut {
+    float4 color [[color(0)]];
+    float2 wind [[color(1)]];  // сдвиг к прошлому кадру от ветра, uv (04.6)
+};
+
+fragment PlantColorOut plant_fs_prepassed(PLANT_FS_ARGS) {
+    PlantColorOut o;
+    o.color = plant_shade(in, front, false, frame, skyf, shadows, albedo_tex, shadow_map, aerial, mat_albedo,
+                          bark_normal, rt_ao_tex, scan_albedo, scan_normal, probes);
+    float2 d = in.prev_clip.xy / max(in.prev_clip.w, 1e-6) - in.cur_clip.xy / max(in.cur_clip.w, 1e-6);
+    o.wind = d * float2(0.5, -0.5);
+    return o;
 }
 
 // Предпроход глубины растений (02.13): та же альфа, что в `plant_shade`
@@ -945,7 +964,7 @@ vertex PlantShadowOut plant_shadow_vs(uint vid [[vertex_id]], uint iid [[instanc
                                       constant TerrainZone& zone [[buffer(8)]]) {
     PlantVertex v = verts[vid];
     float3 n;
-    float3 world = plant_world(v, insts[iid], frame, PlantGround{heights, zone_heights, zone}, n);
+    float3 world = plant_world(v, insts[iid], frame, PlantGround{heights, zone_heights, zone}, n, frame.time);
     PlantShadowOut o;
     o.position = cascade_vp * float4(camera_relative(frame, world), 1.0);
     o.uv = float2(v.uv);

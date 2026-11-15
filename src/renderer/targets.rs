@@ -27,6 +27,9 @@ pub(super) struct Targets {
     pub scene_depth: Obj<dyn MTLTexture>,
     /// Векторы движения к прошлому кадру, uv (RG16Float, разрешение рендера).
     pub motion: Obj<dyn MTLTexture>,
+    /// Сдвиг на экране от ветра, uv (04.6, сессия 2): второе вложение
+    /// прохода `scene`, пишут растения; `upscale_prep` прибавляет к движению камеры.
+    pub wind: Obj<dyn MTLTexture>,
     /// История временного сглаживания (04.5): кадр пишет одну, читает другую.
     pub history: [Obj<dyn MTLTexture>; 2],
     /// Bloom (04.5): цепочка вниз от половины кадра (`BLOOM_LEVELS` уровней)
@@ -117,6 +120,14 @@ impl Targets {
             MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
             "motion vectors",
         );
+        let wind = private_texture(
+            device,
+            MTLPixelFormat::RG16Float,
+            rw,
+            rh,
+            MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead,
+            "wind motion",
+        );
         let history = [0, 1].map(|k| {
             private_texture(
                 device,
@@ -165,6 +176,7 @@ impl Targets {
             scene,
             scene_depth,
             motion,
+            wind,
             history,
             bloom_down,
             bloom_up,
@@ -180,7 +192,12 @@ impl Targets {
 
     /// Все текстуры целей (для резидентности и освобождения).
     pub fn textures(&self) -> Vec<Obj<dyn MTLTexture>> {
-        let mut v = vec![self.hdr.clone(), self.depth.clone(), self.motion.clone()];
+        let mut v = vec![
+            self.hdr.clone(),
+            self.depth.clone(),
+            self.motion.clone(),
+            self.wind.clone(),
+        ];
         if self.scaled() {
             v.push(self.scene.clone());
             v.push(self.scene_depth.clone());

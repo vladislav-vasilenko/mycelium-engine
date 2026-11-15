@@ -61,6 +61,8 @@ pub struct App {
     cluster_job: Option<ClusterJob>,
     /// TAA (04.5): (проекция × поворот вида без сдвига, камера, размер) прошлого кадра.
     taa_prev: Option<(glam::Mat4, glam::Vec3, (u32, u32))>,
+    /// Время мира прошлого кадра (04.6): шаг ветра для векторов движения.
+    prev_world_time: f32,
     taa_frame: u32,
     scene: SceneMode,
     window: Option<Arc<Window>>,
@@ -167,6 +169,7 @@ impl App {
             world: std::sync::Arc::new(world),
             cluster_job: None,
             taa_prev: None,
+            prev_world_time: 0.0,
             taa_frame: 0,
             scene,
             window: None,

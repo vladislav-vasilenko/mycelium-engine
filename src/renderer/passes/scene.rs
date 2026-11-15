@@ -45,6 +45,20 @@ impl FramePass for ScenePass {
         }
         draw_cubes(ctx, &enc);
         draw_sky(ctx, &enc);
+        enc.endEncoding();
+        // Вода — своим кодировщиком без вложения ветра (04.6, сессия 2):
+        // смешивание с двумя источниками несовместимо с несколькими целями.
+        let enc = begin_water(ctx);
+        enc.setFrontFacingWinding(MTLWinding::CounterClockwise);
+        enc.setCullMode(MTLCullMode::Back);
+        enc.setViewport(MTLViewport {
+            originX: 0.0,
+            originY: 0.0,
+            width: ctx.targets.rw as f64,
+            height: ctx.targets.rh as f64,
+            znear: 0.0,
+            zfar: 1.0,
+        });
         draw_water(ctx, &enc);
         enc.endEncoding();
     }
@@ -65,11 +79,43 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
         blue: c[2] as f64,
         alpha: 1.0,
     });
+    // Сдвиг от ветра (04.6, сессия 2): растения пишут, остальное — ноль.
+    let wind = unsafe { rp.colorAttachments().objectAtIndexedSubscript(1) };
+    wind.setTexture(Some(&ctx.targets.wind));
+    wind.setLoadAction(MTLLoadAction::Clear);
+    wind.setStoreAction(MTLStoreAction::Store);
+    wind.setClearColor(MTLClearColor {
+        red: 0.0,
+        green: 0.0,
+        blue: 0.0,
+        alpha: 0.0,
+    });
     let depth = rp.depthAttachment();
     depth.setTexture(Some(&ctx.targets.scene_depth));
     depth.setLoadAction(MTLLoadAction::Clear);
     depth.setClearDepth(0.0);
-    // Глубину читают readback и TAA (04.5).
+    // Глубину читают кодировщик воды, readback и TAA.
+    depth.setStoreAction(MTLStoreAction::Store);
+    let enc = ctx
+        .slot
+        .cmd
+        .renderCommandEncoderWithDescriptor(&rp)
+        .expect("render encoder");
+    enc.setLabel(Some(&label("scene raster")));
+    enc
+}
+
+/// Кодировщик воды: цвет и глубина сцены загружаются; ждёт фрагменты
+/// предыдущего кодировщика прохода.
+fn begin_water(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
+    let rp = MTL4RenderPassDescriptor::new();
+    let color = unsafe { rp.colorAttachments().objectAtIndexedSubscript(0) };
+    color.setTexture(Some(&ctx.targets.scene));
+    color.setLoadAction(MTLLoadAction::Load);
+    color.setStoreAction(MTLStoreAction::Store);
+    let depth = rp.depthAttachment();
+    depth.setTexture(Some(&ctx.targets.scene_depth));
+    depth.setLoadAction(MTLLoadAction::Load);
     depth.setStoreAction(if ctx.readback || ctx.input.taa.is_some() {
         MTLStoreAction::Store
     } else {
@@ -80,7 +126,12 @@ fn begin(ctx: &PassCtx) -> objc2::rc::Retained<RenderEncoder> {
         .cmd
         .renderCommandEncoderWithDescriptor(&rp)
         .expect("render encoder");
-    enc.setLabel(Some(&label("scene raster")));
+    enc.setLabel(Some(&label("scene water")));
+    enc.barrierAfterQueueStages_beforeStages_visibilityOptions(
+        MTLStages::Fragment,
+        MTLStages::Fragment,
+        MTL4VisibilityOptions::Device,
+    );
     enc
 }
 

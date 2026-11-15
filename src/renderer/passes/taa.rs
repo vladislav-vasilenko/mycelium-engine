@@ -83,6 +83,7 @@ fn encode_upscale(
         table.setTexture_atIndex(t.scene_depth.gpuResourceID(), 1);
         table.setTexture_atIndex(t.motion.gpuResourceID(), 3);
         table.setTexture_atIndex(t.vol.gpuResourceID(), 4);
+        table.setTexture_atIndex(t.wind.gpuResourceID(), 5);
     }
     enc.setComputePipelineState(&ctx.r.pipelines.upscale_prep);
     enc.setArgumentTable(Some(table));

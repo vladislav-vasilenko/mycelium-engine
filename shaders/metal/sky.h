@@ -232,7 +232,35 @@ inline float4 aerial_at(texture3d<float> lut, constant FrameUniforms& frame, flo
 inline float3 apply_aerial(texture3d<float> lut, constant FrameUniforms& frame, float3 rel,
                            float3 color) {
     float4 a = aerial_at(lut, frame, rel);
-    return color * a.a + a.rgb;
+    float3 col = color * a.a + a.rgb;
+    // Влажная дымка Якусимы (04.3): туман по высоте поверх атмосферы — гуще у
+    // моря и в долинах, реже к вершинам; плотнее в облачность и дождь; пояс
+    // тумана у основания облаков (~1500 м). Цвет — рассеяние атмосферы на
+    // этом луче (к пасмурности — серый).
+    float dist = length(rel);
+    if (dist < 1.0) {
+        return col;
+    }
+    float cloud = frame.weather.x, rain = frame.weather.y;
+    float y0 = frame.camera_pos.y;
+    float dy = rel.y / dist;
+    const float H = 650.0;
+    float k = (1.0 + 1.5 * cloud + 2.5 * rain) / 16000.0;
+    float e0 = exp(-max(y0, 0.0) / H);
+    float e1 = exp(-max(y0 + rel.y, 0.0) / H);
+    float tau = abs(dy) > 1e-3 ? k * H * (e0 - e1) / dy : k * dist * e0;
+    // Пояс у основания облаков — 4 точки по лучу.
+    float band = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        float y = y0 + rel.y * (float(i) + 0.5) / 4.0;
+        float g = (y - 1450.0) / 280.0;
+        band += exp(-g * g);
+    }
+    tau += band / 4.0 * dist * cloud * cloud / 2500.0;
+    float fog = 1.0 - exp(-tau);
+    float3 haze = a.rgb / max(1.0 - a.a, 0.02);
+    haze = mix(haze, float3(dot(haze, float3(0.2126, 0.7152, 0.0722))) * float3(0.95, 0.97, 1.0), cloud);
+    return mix(col, haze, fog);
 }
 
 // Каскадные тени (04.2): выбор каскада по расстоянию, смещение по нормали на

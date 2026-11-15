@@ -602,8 +602,15 @@ kernel void clouds_march(texture2d<float, access::write> out [[texture(0)]],
     float T = 1.0;
     // Дальность до сцены (глубина 0 — небо): облако закрывает вершины в слое
     // и склоны за ним; луч идёт сквозь слой только до поверхности.
+    // Ближайшая глубина блока (тексель облаков — 4 × 4 пикселя рендера): на
+    // силуэтах гор луч не уходит за гору — без светлой каймы по хребту.
     constexpr sampler ds_(filter::nearest, address::clamp_to_edge);
-    float z = depth.sample(ds_, uv);
+    float2 px = 1.0 / float2(depth.get_width(), depth.get_height());
+    float z = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        float2 o = float2(k % 2 == 0 ? -1.5 : 1.5, k < 2 ? -1.5 : 1.5) * px;
+        z = max(z, depth.sample(ds_, uv + o));
+    }
     float t_scene = 1e9;
     if (z > 0.0) {
         float4 sp = taa.inv_view_proj_rel * float4(ndc, z, 1.0);

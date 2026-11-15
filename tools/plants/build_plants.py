@@ -86,7 +86,7 @@ def sasa(lod, seed=0x5A5A):
         right = np.array([math.cos(th), 0, math.sin(th)]) * w
         up = np.array([0, h * 0.5, 0])
         nrm = np.array([0, 0.7, 0]) + np.array([-math.sin(th), 0, math.cos(th)]) * 0.5
-        card(m, c + np.array([0, h * 0.5 - 0.05, 0]), right, up, nrm, atlas_rect(3, rng.integers(4)), SASA, 0.7, 0.8)
+        card(m, c + np.array([0, h * 0.5 - 0.05, 0]), right, up, nrm, atlas_rect(3, rng.integers(3)), SASA, 0.7, 0.8)
     return m
 
 
@@ -268,6 +268,30 @@ def draw_sasa(rng, size):
     return img
 
 
+def draw_lichen(rng, size):
+    """Борода лишайника (уснея): пучок тонких серо-зелёных нитей сверху вниз,
+    ветвящихся и редеющих к концу."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    for _ in range(70):
+        x = size * (0.5 + rng.normal(0, 0.1))
+        y = size * rng.uniform(0.0, 0.06)
+        L = size * rng.uniform(0.45, 0.95)
+        g = rng.uniform(0.8, 1.15)
+        col = (int(128 * g), int(140 * g), int(100 * g), 255)
+        steps = 30
+        a = math.pi / 2 + rng.normal(0, 0.12)
+        for s in range(steps):
+            nx, ny = x + math.cos(a) * L / steps, y + math.sin(a) * L / steps
+            d.line([(x, y), (nx, ny)], fill=col, width=max(1, int(size / 170 * (1 - 0.6 * s / steps))))
+            if rng.uniform() < 0.12:
+                bx = x + rng.choice([-1, 1]) * size * rng.uniform(0.02, 0.05)
+                d.line([(x, y), (bx, y + size * rng.uniform(0.04, 0.1))], fill=col, width=1)
+            a += rng.normal(0, 0.08)
+            x, y = nx, ny
+    return img
+
+
 def bleed(img):
     """Цвет прозрачных пикселей — размытый цвет соседей: без тёмной каймы на мипах."""
     a = np.asarray(img).astype(np.float32)
@@ -289,7 +313,9 @@ def build_atlas():
     ss = 2  # суперсэмплинг
     for side, fn in enumerate((draw_needles, draw_leaves, draw_frond, draw_sasa)):
         for v in range(4):
-            tile = fn(rng, 256 * ss).resize((256, 256), Image.LANCZOS)
+            # Вариант 3 четверти сасы — борода лишайника (02.13, `epiphytes.py`).
+            f = draw_lichen if (side, v) == (3, 3) else fn
+            tile = f(rng, 256 * ss).resize((256, 256), Image.LANCZOS)
             # Вариант занимает 256 × 256 в своей четверти 512².
             x = (side % 2) * 512 + (v % 2) * 256
             y = (side // 2) * 512 + (v // 2) * 256

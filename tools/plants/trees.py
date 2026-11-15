@@ -22,6 +22,7 @@ import math
 
 import numpy as np
 
+from epiphytes import dress
 from mesh import (BARK_BROAD, BARK_SUGI, FERN, LEAVES, NEEDLES, SOIL, Mesh, atlas_rect, bezier, card,
                   frame, tube)
 
@@ -267,7 +268,9 @@ def sugi(lod, seed, H=27.0, R0=0.85):
         y = t * H
         return 1.0 + (0.09 * math.sin(7 * th + phase + 0.3 * y) + 0.05 * math.sin(13 * th - 0.5 * y)) * max(0.0, 1.2 - y / 6)
 
-    m = mesh_tree(sk, lod, np.random.default_rng(seed + lod), BARK_SUGI, NEEDLES, 0, H, 0.55, flute)
+    m = mesh_tree(sk, lod, np.random.default_rng(seed + lod), BARK_SUGI, NEEDLES, 0, H, 0.8, flute)
+    # Обрастание (02.13): лиана, бороды лишайника, папоротник в развилке.
+    dress(m, sk, np.random.default_rng(seed ^ 0xE91), lod, 1, 14, 2, reach=(0.2, 0.45), bulge=1.15)
     r = Mesh()
     rmoss = lambda q, n: 0.7 * (0.4 + 0.6 * max(n[1], 0))  # noqa: E731
     if lod < 2:
@@ -324,6 +327,8 @@ def sugi_old(lod, seed=0x01D5):
                              + 0.05 * math.sin(19 * th + 0.9 * y))
 
     m = mesh_tree(sk, lod, np.random.default_rng(seed + lod), BARK_SUGI, NEEDLES, 0, H, 1.0, flute)
+    # Древняя якусуги обросла сильнее всех (02.13).
+    dress(m, sk, np.random.default_rng(seed ^ 0xE91), lod, 3, 30, 6, reach=(0.35, 0.8), bulge=1.4)
     r = Mesh()
     rmoss = lambda q, n: 0.5 + 0.5 * max(n[1], 0)  # noqa: E731
     roots(r, rng, R0, [10, 7, 5][lod], lod, BARK_SUGI, rmoss, reach=(2.0, 3.2))
@@ -363,7 +368,8 @@ def broad(lod, seed, trunk=5.0, R0=0.36, leaders=3, lead_angle=34, spread=1.0, s
         d = unit(np.array([math.sin(th) * tilt + rng.normal(0, 0.05), 1.0, math.cos(th) * tilt]))
         grow(sk, rng, P, np.array([0.15 * s, 0, -0.1 * s]), d, trunk * rng.uniform(0.9, 1.1), R0 / math.sqrt(stems), 0)
     H = trunk + 7.0 * spread + 3
-    m = mesh_tree(sk, lod, np.random.default_rng(seed + lod), BARK_BROAD, LEAVES, 1, H, 0.45, None, cards=4)
+    m = mesh_tree(sk, lod, np.random.default_rng(seed + lod), BARK_BROAD, LEAVES, 1, H, 0.65, None, cards=4)
+    dress(m, sk, np.random.default_rng(seed ^ 0xE91), lod, 2, 10, 3, reach=(0.4, 0.9), bulge=1.1)
     r = Mesh()
     rmoss = lambda q, n: 0.4 * max(n[1], 0)  # noqa: E731
     if lod < 2:

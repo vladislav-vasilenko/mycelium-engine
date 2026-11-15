@@ -121,8 +121,9 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
         return;
     }
     int2 cell = int2(floor(frame.camera_pos.xz / FOREST_CELL_M)) - FOREST_GRID / 2 + int2(gid);
-    // Три кандидата в клетке: дерево, валун, валежник (ствол или пень).
-    for (uint kind = 0; kind < 3; ++kind) {
+    // Кандидаты в клетке: дерево, валун, валежник (ствол или пень) и второй
+    // валун (02.14: поля валунов — кучи камней в лесу и у ручьёв).
+    for (uint kind = 0; kind < 4; ++kind) {
         uint h = hash3(cell.x, cell.y, 0xF0E5u + kind);
         float2 p = (float2(cell) + 0.12 + 0.76 * float2(rnd(h, 1), rnd(h, 2))) * FOREST_CELL_M;
         if (any(p < 0.0) || any(p > frame.map_size_m)) {
@@ -187,17 +188,34 @@ kernel void forest_place(device const float* heights [[buffer(0)]],
             species = r4 < 0.3 + 0.3 * cedar ? SPECIES_STUMP : (r4 < 0.75 ? SPECIES_LOG : SPECIES_WINDFALL);
             scale = 0.7 + 0.5 * rnd(h, 5);
         } else {
-            // Валуны: редко в лесу, чаще на голом и в руслах.
-            if (rnd(h, 3) > boulders || slope > 1.2) {
+            // Валуны (02.14, сессия 1): редко в лесу, чаще на голом и в
+            // руслах; поля валунов — пятна ~70 м в лесу, где камни лежат
+            // кучами (второй кандидат клетки — мелкие камни у крупных), и
+            // полоса 15 м вдоль ручьёв.
+            FeatureDist fr = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
+            float field = smoothstep(0.38, 0.62, myc_noise(p * 0.014 + 3.7)) * forest;
+            float stream = (1.0 - smoothstep(4.0, 15.0, fr.river)) * 0.45;
+            float pb = kind == 1 ? boulders + 0.12 * forest + 0.55 * field + stream
+                                 : 0.8 * field + 0.6 * stream;
+            if (rnd(h, 3) > pb || slope > 1.2) {
                 continue;
             }
             species = SPECIES_BOULDER;
-            scale = 0.3 + 0.8 * rnd(h, 5) * rnd(h, 6);  // сканы камней 2–3 м
+            // Сканы камней 2–3 м: крупные — 1,2–3 м (над травой), мелкие у
+            // них — от 0,6 м.
+            scale = kind == 1 ? 0.5 + 0.7 * rnd(h, 5) * rnd(h, 6) + 0.35 * field
+                              : 0.25 + 0.3 * rnd(h, 5);
+            // Глыбы у воды (пользователь: «огромные валуны по 3–5–7 м у
+            // воды»): у ручьёв треть крупных — ×1,4…2,8 (3–7 м).
+            if (kind == 1 && stream > 0.1 && rnd(h, 13) < 0.35) {
+                scale = 1.4 + 1.4 * rnd(h, 14);
+            }
         }
         // Не на тропах, дорогах и в руслах.
         FeatureDist fd = feature_distances(p, frame.map_size_m, feat_segs, feat_cells, feat_list);
-        float clear = kind == 0 ? 2.5 * scale : (kind == 2 ? (species == SPECIES_WINDFALL ? 15.0 : 4.0) * scale : 1.0);
-        if (fd.trail < clear || fd.road < clear + 1.5 || (kind != 1 && fd.river < 2.0)) {
+        float clear = kind == 0 ? 2.5 * scale
+                    : (kind == 2 ? (species == SPECIES_WINDFALL ? 15.0 : 4.0) * scale : 1.0 + 1.3 * scale);
+        if (fd.trail < clear || fd.road < clear + 1.5 || (kind != 1 && kind != 3 && fd.river < 2.0)) {
             continue;
         }
         float H = SPECIES_H[species] * scale;
@@ -802,8 +820,13 @@ static float4 plant_shade(PlantOut in, bool front, bool alpha_test, constant Fra
             return mat_albedo.sample(s, lp.zy / 3.0, layer).rgb * w.x + mat_albedo.sample(s, lp.xz / 3.0, layer).rgb * w.y
                  + mat_albedo.sample(s, lp.xy / 3.0, layer).rgb * w.z;
         };
-        float moss = smoothstep(0.2, 0.7, n.y);
-        albedo = mix(tri(0), tri(9), moss);
+        // Подушка мха (02.14): толстая, сползает по бокам до середины, край
+        // рваный по шуму; во влажном лесу — ярко-жёлто-зелёная, у основания —
+        // темнее (влажная). Камень виден в разрывах и снизу.
+        float brk = myc_noise(lp.xz * 1.7) * 0.6 + myc_noise(lp.xz * 6.0) * 0.4;
+        float moss = smoothstep(0.05, 0.35, n.y * 0.8 + (brk - 0.5) * 0.7 + 0.15);
+        float3 mossc = tri(9) * float3(0.85, 1.2, 0.5) + float3(0.025, 0.06, 0.0) * (0.5 + brk);
+        albedo = mix(tri(0) * 0.85, mossc, moss);
     } else {
         float4 a = plant_albedo(albedo_tex, mat, in.uv);
         if (a.a < 0.5) {

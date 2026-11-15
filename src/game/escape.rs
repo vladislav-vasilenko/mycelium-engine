@@ -8,9 +8,9 @@
 //! - Обнаружение: игрок в конусе луча и не скрыт. Кроны над игроком прячут
 //!   большую часть следа, вода (нырок) — весь. Тревога растёт в луче и спадает
 //!   вне его; на 1 — пойман: обратно к последнему достигнутому грибу-маяку.
-//! - Тропа — ось реки от начала тропы вниз по течению (`Raft`), грибы — по
-//!   берегу через 7 м; волна свечения бежит от игрока к водопаду: лес
-//!   «показывает дорогу». Водопад — первый крутой перепад уровня реки.
+//! - Маршрут — по тропам от леса мха (Кокэмуси-но-мори) к водопаду Хирю-отоси
+//!   (`trail_route`, Дейкстра по графу троп), грибы — у края тропы через 7 м;
+//!   волна свечения бежит от игрока к водопаду: лес «показывает дорогу».
 
 use glam::{Vec2, Vec3};
 
@@ -37,9 +37,6 @@ fn smoothstep01(x: f32) -> f32 {
 
 /// Шаг грибов-маяков вдоль реки, м; отступ от оси к берегу, м.
 const GUIDE_STEP_M: f32 = 7.0;
-/// Водопад: перепад уровня на 20 м пути, м; поиск — не дальше, м.
-const FALL_DROP_M: f32 = 2.5;
-const FALL_SEARCH_M: f32 = 900.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Phase {
@@ -80,65 +77,42 @@ pub struct NightEscape {
 }
 
 impl NightEscape {
-    /// Уровень по оси реки `path` (точки вниз по течению, уровень воды в них).
-    pub fn new(world: &World, path: &[(Vec2, f32)]) -> Option<NightEscape> {
-        if path.len() < 4 {
+    /// Уровень по маршруту `route` (тропы от старта к цели): маяки — у края
+    /// тропы через `GUIDE_STEP_M`, цель — конец маршрута.
+    pub fn on_route(world: &World, route: &[Vec2]) -> Option<NightEscape> {
+        if route.len() < 2 {
             return None;
         }
-        // Водопад: первый участок с перепадом уровня > FALL_DROP_M на 20 м,
-        // не ближе 120 м от старта; иначе — конец поиска.
-        let mut acc = vec![0.0f32; path.len()];
-        for i in 1..path.len() {
-            acc[i] = acc[i - 1] + path[i].0.distance(path[i - 1].0);
-        }
-        let mut goal_i = path.len() - 1;
-        'find: for i in 0..path.len() {
-            if acc[i] > FALL_SEARCH_M {
-                goal_i = i;
-                break;
-            }
-            if acc[i] < 120.0 {
-                continue;
-            }
-            for j in i + 1..path.len() {
-                if acc[j] - acc[i] > 20.0 {
-                    if path[i].1 - path[j].1 > FALL_DROP_M {
-                        goal_i = i;
-                        break 'find;
-                    }
-                    break;
-                }
-            }
-        }
         let ground = |p: Vec2| world.sample_ground(p.x, p.y).map_or(0.0, |g| g.height);
-        // Маяки по берегу: отступ поперёк течения, сторона чередуется редко.
         let mut guide = Vec::new();
-        let mut next = 0.0;
-        for i in 1..=goal_i {
-            if acc[i] < next {
-                continue;
+        let mut acc = 0.0;
+        let mut next = 4.0;
+        for w in route.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let len = a.distance(b);
+            let dir = (b - a).normalize_or(Vec2::X);
+            while next <= acc + len {
+                let p = a + dir * (next - acc);
+                // У края тропы, сторона меняется каждые ~60 м.
+                let side = if (next as usize / 60) % 2 == 0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let q = p + Vec2::new(-dir.y, dir.x) * side * 1.6;
+                guide.push(Vec3::new(q.x, ground(q), q.y));
+                next += GUIDE_STEP_M;
             }
-            next = acc[i] + GUIDE_STEP_M;
-            let dir = (path[i].0 - path[i - 1].0).normalize_or(Vec2::X);
-            let side = if (i / 9) % 2 == 0 { 1.0 } else { -1.0 };
-            // Сухой берег: отступ от оси, пока земля не выше воды на 0,3 м
-            // (разлив демо затопил бы маяки), сначала с выбранной стороны.
-            let n = Vec2::new(-dir.y, dir.x);
-            let level = path[i].1;
-            let dry = [side, -side].iter().find_map(|&sd| {
-                (4..30)
-                    .map(|k| path[i].0 + n * sd * k as f32)
-                    .find(|q| ground(*q) > level + 0.3)
-            });
-            let Some(p) = dry else {
-                continue;
-            };
-            guide.push(Vec3::new(p.x, ground(p), p.y));
+            acc += len;
         }
-        let g = path[goal_i].0;
+        let g = *route.last().unwrap();
         let goal = Vec3::new(g.x, ground(g), g.y);
-        let start = path[0].0;
-        Some(NightEscape {
+        Some(Self::assemble(world, route[0], guide, goal))
+    }
+
+    fn assemble(world: &World, start: Vec2, guide: Vec<Vec3>, goal: Vec3) -> NightEscape {
+        let ground = |p: Vec2| world.sample_ground(p.x, p.y).map_or(0.0, |g| g.height);
+        NightEscape {
             drone: Drone {
                 pos: Vec3::new(start.x + 60.0, ground(start) + DRONE_ALT_M, start.y + 40.0),
                 beam: Vec3::NEG_Y,
@@ -160,7 +134,7 @@ impl NightEscape {
             connected: 0.0,
             contact: None,
             trip: 0.0,
-        })
+        }
     }
 
     /// Точка возврата после поимки: у последнего пройденного маяка.
@@ -438,4 +412,88 @@ impl NightEscape {
             }
         }
     }
+}
+
+/// Кратчайший путь по тропам и дорогам (`FeatureSet`) от `from` к `to`:
+/// граф из концов отрезков (сшиты с точностью 1 м), Дейкстра. Концы — к
+/// ближайшим узлам; первая и последняя точки маршрута — сами `from` и `to`.
+pub fn trail_route(
+    set: &crate::world::features::FeatureSet,
+    from: Vec2,
+    to: Vec2,
+) -> Option<Vec<Vec2>> {
+    use crate::world::features::{KIND_ROAD, KIND_TRAIL};
+    use std::collections::{BinaryHeap, HashMap};
+    let key = |p: [f32; 2]| ((p[0]).round() as i64, (p[1]).round() as i64);
+    let mut ids: HashMap<(i64, i64), usize> = HashMap::new();
+    let mut pos: Vec<Vec2> = Vec::new();
+    let mut adj: Vec<Vec<(usize, f32)>> = Vec::new();
+    let node = |p: [f32; 2],
+                ids: &mut HashMap<(i64, i64), usize>,
+                pos: &mut Vec<Vec2>,
+                adj: &mut Vec<Vec<(usize, f32)>>| {
+        *ids.entry(key(p)).or_insert_with(|| {
+            pos.push(Vec2::from(p));
+            adj.push(Vec::new());
+            pos.len() - 1
+        })
+    };
+    for s in &set.segments {
+        if s.kind != KIND_TRAIL && s.kind != KIND_ROAD {
+            continue;
+        }
+        let a = node(s.a, &mut ids, &mut pos, &mut adj);
+        let b = node(s.b, &mut ids, &mut pos, &mut adj);
+        let w = pos[a].distance(pos[b]) * if s.kind == KIND_ROAD { 1.5 } else { 1.0 };
+        adj[a].push((b, w));
+        adj[b].push((a, w));
+    }
+    let nearest =
+        |p: Vec2| (0..pos.len()).min_by(|&i, &j| pos[i].distance(p).total_cmp(&pos[j].distance(p)));
+    let (s0, t0) = (nearest(from)?, nearest(to)?);
+    #[derive(PartialEq)]
+    struct Item(f32, usize);
+    impl Eq for Item {}
+    impl PartialOrd for Item {
+        fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(o))
+        }
+    }
+    impl Ord for Item {
+        fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+            o.0.total_cmp(&self.0)
+        }
+    }
+    let mut dist = vec![f32::INFINITY; pos.len()];
+    let mut prev = vec![usize::MAX; pos.len()];
+    let mut heap = BinaryHeap::new();
+    dist[s0] = 0.0;
+    heap.push(Item(0.0, s0));
+    while let Some(Item(d, u)) = heap.pop() {
+        if u == t0 {
+            break;
+        }
+        if d > dist[u] {
+            continue;
+        }
+        for &(v, w) in &adj[u] {
+            if d + w < dist[v] {
+                dist[v] = d + w;
+                prev[v] = u;
+                heap.push(Item(d + w, v));
+            }
+        }
+    }
+    if !dist[t0].is_finite() {
+        return None;
+    }
+    let mut route = vec![to];
+    let mut u = t0;
+    while u != usize::MAX {
+        route.push(pos[u]);
+        u = prev[u];
+    }
+    route.push(from);
+    route.reverse();
+    Some(route)
 }

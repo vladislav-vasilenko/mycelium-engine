@@ -255,23 +255,22 @@ impl App {
         // Ночной побег (05.6): тропа маяков вдоль реки от начала тропы вниз
         // по течению к водопаду; игрок — у начала тропы.
         let escape = if args.escape {
-            let levels = world.features.as_ref().map_or_else(Vec::new, |f| {
-                hydrology.levels(f.segments.len(), raft::LEVEL_SCALE)
-            });
-            let e = raft::Raft::new(&world, &hydrology, sim.curr.position).and_then(|r| {
-                crate::game::escape::NightEscape::new(&world, &r.sampled(&levels, 1200.0))
-            });
-            match &e {
-                Some(e) => eprintln!(
-                    "побег: {} маяков, водопад в {:.0} м",
-                    e.guide.len(),
-                    glam::Vec2::new(
-                        e.goal.x - sim.curr.position.x,
-                        e.goal.z - sim.curr.position.z
-                    )
-                    .length()
-                ),
-                None => eprintln!("побег: нет реки рядом"),
+            // Лес мха (Кокэмуси-но-мори, выше хижины Сиратани-сансо; в OSM
+            // нет — по описанию маршрута, ±200 м) → водопад Хирю-отоси (OSM
+            // `Hiryuu Falls`, 30.37805° N, 130.57371° E) по тропам.
+            const MOSS_FOREST: glam::Vec2 = glam::Vec2::new(19857.0, 11844.0);
+            const HIRYU_OTOSHI: glam::Vec2 = glam::Vec2::new(20040.0, 10599.0);
+            let e = world
+                .features
+                .as_ref()
+                .and_then(|f| crate::game::escape::trail_route(f, MOSS_FOREST, HIRYU_OTOSHI))
+                .and_then(|r| {
+                    let len: f32 = r.windows(2).map(|w| w[0].distance(w[1])).sum();
+                    eprintln!("побег: лес мха → Хирю-отоси, {:.0} м по тропам", len);
+                    crate::game::escape::NightEscape::on_route(&world, &r)
+                });
+            if e.is_none() {
+                eprintln!("побег: маршрут по тропам не найден");
             }
             let mut e = e;
             if let (Some(e), Some(t)) = (
